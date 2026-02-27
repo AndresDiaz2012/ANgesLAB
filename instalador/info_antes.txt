@@ -1,0 +1,128 @@
+================================================================================
+            ANgesLAB v2.1 - INFORMACION DE INSTALACION
+            Sistema de Gestion de Laboratorio Clinico
+================================================================================
+
+Gracias por adquirir ANgesLAB. A continuacion encontrara informacion
+importante sobre la instalacion y configuracion del sistema.
+
+================================================================================
+  NOVEDADES v2.1 - IA CLINICA E HISTORIAL AVANZADO
+================================================================================
+
+  Esta version incluye nuevas funcionalidades de inteligencia artificial
+  para la interpretacion clinica de resultados de laboratorio:
+
+  - GRAFICAS DE EVOLUCION: Visualice la evolucion temporal de los
+    parametros del paciente con graficas profesionales (matplotlib).
+
+  - INTERPRETACION IA: Motor de interpretacion clinica con triple nivel:
+    * Reglas clinicas locales (siempre disponible, sin internet)
+    * Ollama - LLM local (opcional, sin costo, sin internet)
+    * Claude IA online (opcional, requiere API key de Anthropic)
+
+  - REPORTES PDF CON IA: Exporte reportes clinicos con interpretacion
+    automatica, graficas de evolucion y orientacion diagnostica.
+
+  IMPORTANTE: Las funcionalidades de IA son ORIENTATIVAS para el
+  personal de laboratorio. No sustituyen el criterio del medico tratante.
+
+================================================================================
+  REQUISITOS DEL SISTEMA
+================================================================================
+
+  Sistema Operativo:    Windows 10 / Windows 11 (64-bit)
+  Procesador:           Intel Core i3 o superior (recomendado i5)
+  Memoria RAM:          4 GB minimo (recomendado 8 GB)
+  Espacio en Disco:     100 MB para la aplicacion
+                        (espacio adicional segun volumen de datos)
+  Pantalla:             Resolucion minima 1366 x 768
+
+================================================================================
+  PROGRAMAS NECESARIOS (PREREQUISITOS)
+================================================================================
+
+  1. Python 3.8 o superior
+     Descarga: https://www.python.org/downloads/
+     IMPORTANTE: Durante la instalacion de Python, marque la casilla
+     "Add Python to PATH" (Agregar Python al PATH del sistema).
+
+  2. Microsoft Access Database Engine
+     Descarga: https://www.microsoft.com/en-us/download/details.aspx?id=54920
+     Necesario para la base de datos del sistema.
+     Instale la version de 64-bit si su Windows es de 64-bit.
+
+  3. Librerias Python (se instalan automaticamente):
+     - reportlab (generacion de reportes PDF)
+     - Pillow (procesamiento de imagenes)
+     - pypiwin32 (integracion con Windows/COM)
+
+  4. Librerias IA (instalacion opcional durante el setup):
+     - matplotlib (graficas de evolucion clinica)
+     - requests (comunicacion con Ollama LLM local)
+     - anthropic (integracion con Claude IA online)
+
+  5. Opcional para LLM local (sin internet):
+     - Ollama: https://ollama.com (instalar + ejecutar: ollama pull llama3.2)
+
+================================================================================
+  CREDENCIALES POR DEFECTO
+================================================================================
+
+  La primera vez que inicie ANgesLAB, utilice las siguientes credenciales
+  para configurar el sistema:
+
+  +-----------------+------------------------+
+  |   Usuario       |   Contrasena           |
+  +-----------------+------------------------+
+  |   admin         |   admin123             |
+  +-----------------+------------------------+
+
+  IMPORTANTE: Cambie la contrasena del administrador inmediatamente despues
+  del primer inicio de sesion desde el menu de Configuracion > Mi Contrasena.
+
+================================================================================
+  PASOS POST-INSTALACION
+================================================================================
+
+  1. Inicie ANgesLAB desde el acceso directo en el Escritorio.
+  2. Ingrese con las credenciales por defecto (admin / admin123).
+  3. Vaya a Configuracion > Datos del Laboratorio para personalizar:
+     - Nombre del laboratorio
+     - RIF
+     - Direccion
+     - Telefono
+     - Logo del laboratorio
+  4. Configure la numeracion de documentos en Configuracion > Numeracion.
+  5. Registre los precios de las pruebas en Configuracion > Precios.
+  6. Cree los usuarios del sistema segun los roles necesarios:
+     - Administrador: Acceso total operativo
+     - Facturador: Solicitudes + facturacion
+     - Recepcion: Solicitudes + recibos
+     - Bioanalista: Solo resultados
+     - Consulta: Solo lectura
+  7. Cambie la contrasena del administrador.
+
+================================================================================
+  COPIAS DE SEGURIDAD
+================================================================================
+
+  Se recomienda encarecidamente realizar copias de seguridad periodicas
+  del archivo de base de datos:
+
+     Ubicacion: [Carpeta de instalacion]\ANgesLAB.accdb
+
+  Copie este archivo a una ubicacion segura (USB, nube, disco externo)
+  al menos una vez por semana.
+
+================================================================================
+  SOPORTE TECNICO
+================================================================================
+
+  Para soporte tecnico, contacte a ANgesLAB Solutions:
+  - Email: soporte@angeslab.com
+  - Horario: Lunes a Viernes, 8:00 AM - 5:00 PM
+
+================================================================================
+            Copyright 2024-2026 ANgesLAB Solutions
+================================================================================

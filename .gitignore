@@ -1,0 +1,52 @@
+# ANgesLAB .gitignore
+# Proteger datos sensibles y archivos generados
+
+# Base de datos de produccion (contiene datos de pacientes)
+ANgesLAB.accdb
+ANgesLAB_Demo.accdb
+
+# Configuracion con credenciales
+config_ia.json
+
+# Backups
+backups/
+
+# Logs
+logs/
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Archivos temporales
+*.tmp
+*.bak
+nul
+
+# Scripts de mantenimiento one-time (mover a tools/)
+limpiar_pruebas.py
+limpiar_areas.py
+limpiar_perfiles.py
+temp_explorar.py
+query_perfiles.py
+diagnostico_historial.py
+perfiles_query_output.txt
+
+# Archivos de firma (datos personales)
+firmas/
+
+# Claude settings
+.claude/

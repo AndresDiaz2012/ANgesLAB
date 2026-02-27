@@ -1,0 +1,108 @@
+================================================================================
+                    ACUERDO DE LICENCIA DE USO
+                    ANgesLAB v2.0
+                    Sistema de Gestion de Laboratorio Clinico
+================================================================================
+
+IMPORTANTE: LEA CUIDADOSAMENTE ESTE ACUERDO ANTES DE INSTALAR EL SOFTWARE.
+
+Al instalar, copiar o utilizar este software, usted acepta los terminos y
+condiciones de este acuerdo de licencia. Si no esta de acuerdo con estos
+terminos, no instale ni utilice el software.
+
+--------------------------------------------------------------------------------
+1. OTORGAMIENTO DE LICENCIA
+--------------------------------------------------------------------------------
+ANgesLAB Solutions (en adelante "el Licenciante") le otorga una licencia no
+exclusiva, no transferible e intransferible para instalar y utilizar el software
+ANgesLAB (en adelante "el Software") en UN (1) equipo informatico, para uso
+exclusivo en el laboratorio clinico registrado al momento de la compra.
+
+--------------------------------------------------------------------------------
+2. RESTRICCIONES
+--------------------------------------------------------------------------------
+Usted NO podra:
+  a) Copiar, distribuir o redistribuir el Software a terceros.
+  b) Modificar, descompilar, desensamblar o realizar ingenieria inversa del
+     Software.
+  c) Sublicenciar, alquilar, arrendar o prestar el Software.
+  d) Instalar el Software en mas de un equipo sin licencia adicional.
+  e) Utilizar el Software para fines distintos a la gestion de laboratorio
+     clinico.
+  f) Remover o alterar avisos de derechos de autor o propiedad intelectual.
+
+--------------------------------------------------------------------------------
+3. PROPIEDAD INTELECTUAL
+--------------------------------------------------------------------------------
+El Software, incluyendo pero no limitado a su codigo fuente, diseno, estructura,
+organizacion, bases de datos, graficos, interfaces y documentacion, es propiedad
+exclusiva de ANgesLAB Solutions y esta protegido por las leyes de derechos de
+autor y propiedad intelectual de la Republica Bolivariana de Venezuela y tratados
+internacionales aplicables.
+
+--------------------------------------------------------------------------------
+4. BASE DE DATOS
+--------------------------------------------------------------------------------
+Los datos almacenados en la base de datos del Software son propiedad exclusiva
+del laboratorio clinico licenciado. ANgesLAB Solutions no tendra acceso ni
+derecho alguno sobre los datos de pacientes, resultados clinicos u otra
+informacion ingresada por el usuario.
+
+--------------------------------------------------------------------------------
+5. SOPORTE TECNICO
+--------------------------------------------------------------------------------
+La licencia incluye soporte tecnico por un periodo de DOCE (12) meses a partir
+de la fecha de compra. El soporte incluye:
+  a) Asistencia en la instalacion y configuracion inicial.
+  b) Correccion de errores del Software.
+  c) Actualizaciones menores dentro de la version adquirida.
+  d) Asistencia via correo electronico o telefono en horario laboral.
+
+Las actualizaciones mayores (cambio de version principal) podran requerir la
+adquisicion de una nueva licencia.
+
+--------------------------------------------------------------------------------
+6. LIMITACION DE RESPONSABILIDAD
+--------------------------------------------------------------------------------
+El Software se proporciona "TAL CUAL", sin garantias de ningun tipo, expresas o
+implicitas. ANgesLAB Solutions no sera responsable por:
+  a) Perdida de datos derivada del uso indebido del Software.
+  b) Danos directos, indirectos, incidentales o consecuentes.
+  c) Interrupciones del servicio causadas por factores externos (hardware,
+     red, energia electrica, etc.).
+
+Se recomienda encarecidamente mantener copias de seguridad periodicas de la
+base de datos.
+
+--------------------------------------------------------------------------------
+7. TERMINACION
+--------------------------------------------------------------------------------
+Esta licencia se mantendra vigente hasta su terminacion. Se terminara
+automaticamente si usted incumple cualquiera de los terminos de este acuerdo.
+Al terminar la licencia, debera destruir todas las copias del Software en su
+posesion.
+
+--------------------------------------------------------------------------------
+8. CONFIDENCIALIDAD
+--------------------------------------------------------------------------------
+Usted se compromete a mantener la confidencialidad de las credenciales de
+acceso, claves de licencia y cualquier informacion tecnica proporcionada por
+ANgesLAB Solutions.
+
+--------------------------------------------------------------------------------
+9. LEY APLICABLE
+--------------------------------------------------------------------------------
+Este acuerdo se regira e interpretara de conformidad con las leyes de la
+Republica Bolivariana de Venezuela. Cualquier controversia sera sometida a los
+tribunales competentes de la jurisdiccion correspondiente.
+
+--------------------------------------------------------------------------------
+10. ACUERDO COMPLETO
+--------------------------------------------------------------------------------
+Este acuerdo constituye el acuerdo completo entre las partes con respecto al
+Software y reemplaza todos los acuerdos anteriores, escritos u orales.
+
+================================================================================
+                    Copyright 2024-2026 ANgesLAB Solutions
+                    Todos los derechos reservados.
+================================================================================
