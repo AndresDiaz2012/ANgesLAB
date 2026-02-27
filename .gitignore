@@ -43,6 +43,7 @@ limpiar_perfiles.py
 temp_explorar.py
 query_perfiles.py
 diagnostico_historial.py
+crear_gtt.py
 perfiles_query_output.txt
 
 # Archivos de firma (datos personales)
