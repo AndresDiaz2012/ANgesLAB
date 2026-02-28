@@ -42,6 +42,9 @@ Desktop.ini
 *.bak
 nul
 
+# Estado de ejecución (runtime)
+demo_state.json
+
 # Scripts de mantenimiento one-time (mover a tools/)
 limpiar_pruebas.py
 limpiar_areas.py
