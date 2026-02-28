@@ -157,8 +157,9 @@ class GestorCotizaciones:
         if filtro:
             where_parts.append(
                 f"(c.NumeroCotizacion LIKE '%{filtro}%' "
-                f"OR p.NombreCompleto LIKE '%{filtro}%' "
-                f"OR p.Cedula LIKE '%{filtro}%')"
+                f"OR p.Nombres LIKE '%{filtro}%' "
+                f"OR p.Apellidos LIKE '%{filtro}%' "
+                f"OR p.NumeroDocumento LIKE '%{filtro}%')"
             )
         if estado and estado != 'Todos':
             where_parts.append(f"c.Estado = '{estado}'")
@@ -167,7 +168,8 @@ class GestorCotizaciones:
         sql = f"""
             SELECT c.CotizacionID, c.NumeroCotizacion, c.FechaCotizacion,
                    c.FechaVencimiento, c.Total, c.Estado,
-                   p.NombreCompleto AS Paciente, p.Cedula,
+                   p.Nombres & ' ' & p.Apellidos AS Paciente,
+                   p.NumeroDocumento,
                    c.SolicitudID
               FROM Cotizaciones c
               LEFT JOIN Pacientes p ON c.PacienteID = p.PacienteID
@@ -179,7 +181,9 @@ class GestorCotizaciones:
     def obtener_detalle(self, cotizacion_id):
         """Retorna la cotización y sus ítems."""
         cot = self.db.query_one(
-            f"""SELECT c.*, p.NombreCompleto, p.Cedula, p.Telefono,
+            f"""SELECT c.*,
+                       p.Nombres & ' ' & p.Apellidos AS NombrePaciente,
+                       p.NumeroDocumento, p.Telefono1,
                        m.Nombres & ' ' & m.Apellidos AS NombreMedico
                   FROM Cotizaciones c
                   LEFT JOIN Pacientes p ON c.PacienteID = p.PacienteID
@@ -222,16 +226,18 @@ class GestorCotizaciones:
                 n = 1
             num_sol = f"{anio}-{n:06d}"
 
-            self.db.insert('Solicitudes', {
+            sol_data = {
                 'NumeroSolicitud':    num_sol,
                 'PacienteID':         cot['PacienteID'],
-                'MedicoID':           cot.get('MedicoID'),
                 'FechaSolicitud':     datetime.now(),
                 'EstadoSolicitud':    'Pendiente',
-                'MontoTotal':         cot['Total'],
+                'MontoTotal':         float(cot.get('Total') or 0),
                 'UsuarioRegistro':    self.user.get('UsuarioID', 1),
                 'FechaRegistro':      datetime.now(),
-            })
+            }
+            if cot.get('MedicoID'):
+                sol_data['MedicoID'] = cot['MedicoID']
+            self.db.insert('Solicitudes', sol_data)
             sol = self.db.query_one(
                 f"SELECT SolicitudID FROM Solicitudes WHERE NumeroSolicitud='{num_sol}'"
             )
@@ -328,8 +334,8 @@ class GestorCotizaciones:
             [PB('Cotización N°:'), P(cot.get('NumeroCotizacion', ''))],
             [PB('Fecha:'),         P(fecha_cot_str)],
             [PB('Válida hasta:'),  P(fecha_venc_str)],
-            [PB('Paciente:'),      P(cot.get('NombreCompleto', ''))],
-            [PB('Cédula:'),        P(cot.get('Cedula', '') or '')],
+            [PB('Paciente:'),      P(cot.get('NombrePaciente', ''))],
+            [PB('C.I. / Doc.:'),   P(cot.get('NumeroDocumento', '') or '')],
         ]
         if cot.get('NombreMedico'):
             datos_meta.append([PB('Médico ref.:'), P(cot['NombreMedico'])])

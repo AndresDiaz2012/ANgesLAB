@@ -3022,7 +3022,7 @@ class MainApplication:
         self.clear_content()
         self.set_title("📋 Cotizaciones")
 
-        scrollable, _ = self._crear_frame_scrollable(self.content_frame)
+        scrollable = self.setup_scrollable_content()
 
         # Toolbar
         toolbar = tk.Frame(scrollable, bg=COLORS['bg'])
@@ -3100,7 +3100,7 @@ class MainApplication:
             tag = {'Convertida': 'verde', 'Anulada': 'rojo', 'Pendiente': ''}.get(estado_r, '')
             self._tree_cot.insert('', 'end', tags=(tag,), values=(
                 r.get('CotizacionID'), r.get('NumeroCotizacion', ''),
-                r.get('Paciente', ''), r.get('Cedula', '') or '',
+                r.get('Paciente', ''), r.get('NumeroDocumento', '') or '',
                 fecha_s, vence_s, f"{simbolo} {total:,.2f}", estado_r
             ))
         self._tree_cot.tag_configure('verde', foreground='#2e7d32')
@@ -3163,16 +3163,18 @@ class MainApplication:
         win.configure(bg='white')
         hacer_ventana_responsiva(win, 720, 700, min_ancho=640, min_alto=580)
 
-        tk.Frame(win, bg='#1565c0', height=50).pack(fill='x')
-        tk.Label(win, text="📋 Nueva Cotización / Presupuesto",
-                 font=('Segoe UI', 13, 'bold'), bg='#1565c0', fg='white').place(x=0, y=10, relwidth=1)
+        header = tk.Frame(win, bg='#1565c0', height=50)
+        header.pack(fill='x')
+        header.pack_propagate(False)
+        tk.Label(header, text="📋 Nueva Cotización / Presupuesto",
+                 font=('Segoe UI', 13, 'bold'), bg='#1565c0', fg='white').pack(pady=12)
 
         # ── Botones al fondo ──────────────────────────────────────────────────
         btn_frame = tk.Frame(win, bg='white')
         btn_frame.pack(fill='x', side='bottom', padx=20, pady=12)
 
         main_f = tk.Frame(win, bg='white')
-        main_f.pack(fill='both', expand=True, padx=20, pady=(60, 0))
+        main_f.pack(fill='both', expand=True, padx=20, pady=10)
 
         # ── Paciente ──────────────────────────────────────────────────────────
         pac_lf = tk.LabelFrame(main_f, text=" Paciente ", bg='white',
@@ -3199,32 +3201,39 @@ class MainApplication:
             if not q:
                 return
             rows = db.query(
-                f"SELECT PacienteID, NombreCompleto, Cedula FROM Pacientes "
-                f"WHERE NombreCompleto LIKE '%{q}%' OR Cedula LIKE '%{q}%' "
-                f"ORDER BY NombreCompleto"
+                f"SELECT PacienteID, Nombres, Apellidos, NumeroDocumento FROM Pacientes "
+                f"WHERE Nombres LIKE '%{q}%' OR Apellidos LIKE '%{q}%' "
+                f"   OR NumeroDocumento LIKE '%{q}%' "
+                f"ORDER BY Apellidos"
             ) or []
             if not rows:
                 messagebox.showinfo("Sin resultados", "No se encontraron pacientes.", parent=win)
                 return
-            if len(rows) == 1:
-                r = rows[0]
+
+            def _seleccionar(r):
+                nombre = f"{r.get('Nombres','')} {r.get('Apellidos','')}".strip()
                 pac_id_var.set(r['PacienteID'])
-                lbl_pac_sel.config(text=f"✅ {r['NombreCompleto']} | C.I. {r.get('Cedula','')}", fg='#2e7d32')
+                lbl_pac_sel.config(
+                    text=f"✅ {nombre} | C.I. {r.get('NumeroDocumento','')}",
+                    fg='#2e7d32'
+                )
+
+            if len(rows) == 1:
+                _seleccionar(rows[0])
                 return
             # múltiples → mini-listado
             sel_win = tk.Toplevel(win)
             sel_win.title("Seleccionar paciente")
             sel_win.grab_set()
-            lst = tk.Listbox(sel_win, font=('Segoe UI', 10), width=50, height=min(len(rows), 10))
+            lst = tk.Listbox(sel_win, font=('Segoe UI', 10), width=55, height=min(len(rows), 12))
             lst.pack(padx=10, pady=10)
             for r in rows:
-                lst.insert('end', f"{r['NombreCompleto']} | {r.get('Cedula','')}")
+                nombre = f"{r.get('Nombres','')} {r.get('Apellidos','')}".strip()
+                lst.insert('end', f"{nombre} | {r.get('NumeroDocumento','')}")
             def elegir(event=None):
                 idx = lst.curselection()
                 if idx:
-                    r = rows[idx[0]]
-                    pac_id_var.set(r['PacienteID'])
-                    lbl_pac_sel.config(text=f"✅ {r['NombreCompleto']} | C.I. {r.get('Cedula','')}", fg='#2e7d32')
+                    _seleccionar(rows[idx[0]])
                 sel_win.destroy()
             lst.bind('<Double-1>', elegir)
             tk.Button(sel_win, text="Seleccionar", command=elegir).pack(pady=(0, 8))
@@ -3402,7 +3411,7 @@ class MainApplication:
         self.clear_content()
         self.set_title("💰 Comisiones por Médico")
 
-        scrollable, _ = self._crear_frame_scrollable(self.content_frame)
+        scrollable = self.setup_scrollable_content()
 
         # ── Filtro de fechas ──────────────────────────────────────────────────
         filtro_f = tk.Frame(scrollable, bg=COLORS['bg'])
