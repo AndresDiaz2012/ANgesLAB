@@ -3072,6 +3072,9 @@ class MainApplication:
         tk.Button(acc_f, text="📄 Ver / PDF", font=('Segoe UI', 9),
                   bg='#1565c0', fg='white', relief='flat', padx=12,
                   command=self._ver_cotizacion_pdf).pack(side='left', padx=(0, 8))
+        tk.Button(acc_f, text="🖨️ Imprimir", font=('Segoe UI', 9),
+                  bg='#37474f', fg='white', relief='flat', padx=12,
+                  command=self._imprimir_cotizacion).pack(side='left', padx=(0, 8))
         tk.Button(acc_f, text="✅ Convertir a Solicitud", font=('Segoe UI', 9),
                   bg=COLORS['success'], fg='white', relief='flat', padx=12,
                   command=self._convertir_cotizacion).pack(side='left', padx=(0, 8))
@@ -3123,6 +3126,23 @@ class MainApplication:
                 os.startfile(ruta)
             else:
                 messagebox.showerror("Error", "No se pudo generar el PDF (ReportLab no disponible).")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def _imprimir_cotizacion(self):
+        """Genera el PDF de la cotización seleccionada y abre el diálogo de impresión."""
+        cid = self._cot_seleccionada()
+        if not cid:
+            return
+        try:
+            ruta = self.gestor_cotizaciones.generar_pdf(cid, self.config_lab)
+            if ruta:
+                self.imprimir_pdf_en_impresora(ruta, tipo='cotizacion',
+                                               titulo='Imprimir Cotización')
+            else:
+                messagebox.showerror("Error",
+                    "No se pudo generar el PDF.\n"
+                    "Verifique que ReportLab esté instalado (pip install reportlab).")
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
@@ -7973,7 +7993,7 @@ Forma de Pago: {self.combo_forma_pago.get()}
             pass
         return None
 
-    def imprimir_pdf_en_impresora(self, pdf_path, tipo='resultados'):
+    def imprimir_pdf_en_impresora(self, pdf_path, tipo='resultados', titulo='Imprimir Documento'):
         """
         Muestra un diálogo para seleccionar impresora y envía el PDF a imprimir.
         """
@@ -8020,7 +8040,7 @@ Forma de Pago: {self.combo_forma_pago.get()}
 
         # Crear diálogo de impresión
         win = tk.Toplevel(self.root)
-        win.title("Imprimir Resultados")
+        win.title(titulo)
         win.configure(bg='white')
         win.grab_set()
         win.focus_set()
