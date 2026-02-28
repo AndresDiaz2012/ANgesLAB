@@ -7,6 +7,12 @@ ANgesLAB_Demo.accdb
 
 # Configuracion con credenciales
 config_ia.json
+db_config.json
+backup_config.json
+
+# Lock files de Access
+*.laccdb
+*.ldb
 
 # Backups
 backups/

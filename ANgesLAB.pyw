@@ -21,7 +21,7 @@ from pathlib import Path
 # Importar reportlab para generar PDFs
 try:
     from reportlab.lib import colors
-    from reportlab.lib.pagesizes import letter, legal, landscape
+    from reportlab.lib.pagesizes import letter, legal, landscape, A4
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import inch, cm
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
@@ -30,6 +30,13 @@ try:
     REPORTLAB_AVAILABLE = True
 except ImportError:
     REPORTLAB_AVAILABLE = False
+
+# Importar motor de layout proporcional y QR
+try:
+    from modulos.formato_pdf import LayoutCalculator, QRGenerator, dibujar_qr_en_header, MEDIA_CARTA
+    FORMATO_PDF_DISPONIBLE = True
+except ImportError:
+    FORMATO_PDF_DISPONIBLE = False
 
 # Importar PIL para manejar imágenes
 try:
@@ -93,6 +100,14 @@ try:
 except ImportError as e:
     print(f"Advertencia: No se pudo importar historial clínico: {e}")
     HISTORIAL_CLINICO_DISPONIBLE = False
+
+# Importar módulo de cotizaciones
+try:
+    from modulos.cotizaciones import GestorCotizaciones
+    COTIZACIONES_DISPONIBLE = True
+except ImportError as e:
+    print(f"Advertencia: No se pudo importar módulo de cotizaciones: {e}")
+    COTIZACIONES_DISPONIBLE = False
 
 # Importar módulo de interpretación IA clínica
 try:
@@ -158,8 +173,28 @@ except ImportError:
 
 class Database:
     def __init__(self):
-        self.db_path = str(Path(__file__).parent / "ANgesLAB.accdb")
+        # ── Soporte Red LAN: leer ruta desde db_config.json si existe ─────────
+        import json as _json
+        _cfg_path = Path(__file__).parent / "db_config.json"
+        _default  = str(Path(__file__).parent / "ANgesLAB.accdb")
+        if _cfg_path.exists():
+            try:
+                with open(_cfg_path, 'r', encoding='utf-8') as _f:
+                    _cfg = _json.load(_f)
+                self.db_path = _cfg.get('db_path', _default) or _default
+            except Exception:
+                self.db_path = _default
+        else:
+            self.db_path = _default
         self.conn = None
+
+    @staticmethod
+    def guardar_ruta_db(nueva_ruta: str):
+        """Guarda la ruta de la base de datos en db_config.json (soporte LAN)."""
+        import json as _json
+        cfg_path = Path(__file__).parent / "db_config.json"
+        with open(cfg_path, 'w', encoding='utf-8') as f:
+            _json.dump({'db_path': nueva_ruta}, f, ensure_ascii=False, indent=2)
 
     def connect(self):
         import win32com.client
@@ -670,6 +705,15 @@ class MainApplication:
             print(f"Advertencia: No se pudo inicializar ventana administrativa: {e}")
             self.ventana_admin = None
 
+        # Inicializar gestor de cotizaciones
+        self.gestor_cotizaciones = None
+        try:
+            if COTIZACIONES_DISPONIBLE:
+                self.gestor_cotizaciones = GestorCotizaciones(db, self.user)
+        except Exception as e:
+            print(f"Advertencia: No se pudo inicializar cotizaciones: {e}")
+            self.gestor_cotizaciones = None
+
         # Variables para el modo de solicitud (nueva o agregar a existente)
         self.modo_solicitud = 'nueva'  # 'nueva' o 'agregar'
         self.solicitud_existente_id = None
@@ -683,6 +727,134 @@ class MainApplication:
         self.setup_styles()
         self.setup_ui()
         self.show_dashboard()
+
+        # Iniciar backup automático 5 segundos después del arranque
+        self._backup_timer = None
+        self.root.after(5000, self._verificar_backup_automatico)
+
+    # ── Backup automático ────────────────────────────────────────────────────
+
+    def _leer_config_backup(self):
+        import json as _j
+        ruta = Path(__file__).parent / "backup_config.json"
+        default = {'activo': True, 'frecuencia': 'diario', 'retener_dias': 30, 'ultima_backup': ''}
+        if ruta.exists():
+            try:
+                with open(ruta, 'r', encoding='utf-8') as f:
+                    return {**default, **_j.load(f)}
+            except Exception:
+                pass
+        return default
+
+    def _guardar_config_backup(self, cfg):
+        import json as _j
+        ruta = Path(__file__).parent / "backup_config.json"
+        with open(ruta, 'w', encoding='utf-8') as f:
+            _j.dump(cfg, f, ensure_ascii=False, indent=2)
+
+    def _verificar_backup_automatico(self):
+        """Verifica si corresponde hacer un backup y lo ejecuta en segundo plano."""
+        import threading
+        def _hacer_backup():
+            try:
+                cfg = self._leer_config_backup()
+                if not cfg.get('activo', True):
+                    return
+                frecuencia  = cfg.get('frecuencia', 'diario')
+                ultima_str  = cfg.get('ultima_backup', '')
+                hacer_ahora = not ultima_str
+                if not hacer_ahora and ultima_str:
+                    from datetime import datetime as _dt
+                    delta = datetime.now() - _dt.fromisoformat(ultima_str)
+                    hacer_ahora = (frecuencia == 'diario' and delta.days >= 1) or \
+                                  (frecuencia == 'semanal' and delta.days >= 7)
+                if hacer_ahora:
+                    from modulos.utilidades_db import UtilidadesDB
+                    util = UtilidadesDB(db, db.db_path)
+                    util.crear_backup()
+                    util.limpiar_backups_antiguos(cfg.get('retener_dias', 30))
+                    cfg['ultima_backup'] = datetime.now().isoformat()
+                    self._guardar_config_backup(cfg)
+                    print(f"[Backup automático] realizado a las {datetime.now():%H:%M:%S}")
+            except Exception as e:
+                print(f"[Backup automático] error: {e}")
+            # Reprogramar en la UI thread cada hora
+            self.root.after(3600 * 1000, self._verificar_backup_automatico)
+        threading.Thread(target=_hacer_backup, daemon=True).start()
+
+    def show_config_backup(self):
+        """Ventana de configuración de backup automático."""
+        import json as _j
+        win = tk.Toplevel(self.root)
+        win.title("🗄️ Backup Automático")
+        win.grab_set()
+        win.configure(bg='white')
+        hacer_ventana_responsiva(win, 440, 310, min_ancho=400, min_alto=280)
+
+        tk.Frame(win, bg='#2e7d32', height=50).pack(fill='x')
+        tk.Label(win, text="🗄️ Configuración de Backup Automático",
+                 font=('Segoe UI', 12, 'bold'), bg='#2e7d32', fg='white').place(x=0, y=10, relwidth=1)
+
+        cfg = self._leer_config_backup()
+        frame = tk.Frame(win, bg='white')
+        frame.pack(fill='both', expand=True, padx=25, pady=20)
+
+        activo_var = tk.BooleanVar(value=cfg.get('activo', True))
+        tk.Checkbutton(frame, text="Backup automático activo", variable=activo_var,
+                       font=('Segoe UI', 10), bg='white').pack(anchor='w')
+
+        tk.Label(frame, text="Frecuencia:", font=('Segoe UI', 10, 'bold'), bg='white').pack(anchor='w', pady=(12, 2))
+        frec_var = tk.StringVar(value=cfg.get('frecuencia', 'diario'))
+        frec_frame = tk.Frame(frame, bg='white')
+        frec_frame.pack(anchor='w')
+        for val, lbl in [('diario', 'Diario'), ('semanal', 'Semanal')]:
+            tk.Radiobutton(frec_frame, text=lbl, variable=frec_var, value=val,
+                           font=('Segoe UI', 10), bg='white').pack(side='left', padx=8)
+
+        tk.Label(frame, text="Retener backups (días):", font=('Segoe UI', 10, 'bold'), bg='white').pack(anchor='w', pady=(12, 2))
+        retener_var = tk.IntVar(value=cfg.get('retener_dias', 30))
+        tk.Spinbox(frame, from_=7, to=365, textvariable=retener_var,
+                   font=('Segoe UI', 10), width=8).pack(anchor='w')
+
+        ultima = cfg.get('ultima_backup', '')
+        if ultima:
+            try:
+                ultima_fmt = datetime.fromisoformat(ultima).strftime('%d/%m/%Y %H:%M')
+            except Exception:
+                ultima_fmt = ultima
+            tk.Label(frame, text=f"Último backup: {ultima_fmt}",
+                     font=('Segoe UI', 8), bg='white', fg='#555').pack(anchor='w', pady=(10, 0))
+
+        def guardar():
+            nuevo = {'activo': activo_var.get(), 'frecuencia': frec_var.get(),
+                     'retener_dias': retener_var.get(), 'ultima_backup': cfg.get('ultima_backup', '')}
+            self._guardar_config_backup(nuevo)
+            messagebox.showinfo("Guardado", "Configuración de backup guardada.", parent=win)
+            win.destroy()
+
+        def hacer_ahora():
+            try:
+                from modulos.utilidades_db import UtilidadesDB
+                util = UtilidadesDB(db, db.db_path)
+                ruta = util.crear_backup()
+                cfg['ultima_backup'] = datetime.now().isoformat()
+                self._guardar_config_backup(cfg)
+                messagebox.showinfo("Backup", f"Backup creado:\n{ruta}", parent=win)
+                win.destroy()
+            except Exception as e:
+                messagebox.showerror("Error", str(e), parent=win)
+
+        btn_f = tk.Frame(win, bg='white')
+        btn_f.pack(fill='x', padx=25, pady=(0, 15))
+        tk.Button(btn_f, text="🔄 Hacer ahora", font=('Segoe UI', 9),
+                  bg='#1976d2', fg='white', relief='flat', padx=10,
+                  command=hacer_ahora).pack(side='left')
+        tk.Button(btn_f, text="❌ Cancelar", font=('Segoe UI', 10),
+                  bg='#95a5a6', fg='white', relief='flat', padx=15,
+                  command=win.destroy).pack(side='right', padx=5)
+        tk.Button(btn_f, text="💾 Guardar", font=('Segoe UI', 10, 'bold'),
+                  bg='#2e7d32', fg='white', relief='flat', padx=15,
+                  command=guardar).pack(side='right')
 
     def setup_styles(self):
         style = ttk.Style()
@@ -868,6 +1040,7 @@ class MainApplication:
         # Sección Operación (expandida) - filtrada por nivel
         items_operacion = [
             ("📋", "Solicitudes", self.show_solicitudes),
+            ("🧾", "Cotizaciones", self.show_cotizaciones),
         ]
         if self.es_admin():
             items_operacion.append(("🧪", "Pruebas", self.show_pruebas))
@@ -897,14 +1070,19 @@ class MainApplication:
                     ("💳", "Cuentas por Cobrar", self.show_cuentas_cobrar),
                     ("📋", "Cuentas por Pagar", self.show_cuentas_pagar),
                     ("💸", "Gastos", self.show_gastos),
+                    ("🩺", "Comisiones Médicos", self.show_comisiones_medico),
                 ]
             self._create_menu_section("Administrativo", items_admin, expanded=False)
 
         # Separador
         tk.Frame(self.sidebar, bg=COLORS['sidebar_hover'], height=1).pack(fill='x', padx=15, pady=5)
 
-        # Configuración (botón directo)
-        self._create_menu_button(self.sidebar, "⚙️", "Configuración", self.show_config)
+        # Configuración
+        self._create_menu_section("Config", [
+            ("⚙️", "Configuración", self.show_config),
+            ("🌐", "Red LAN / DB", self.show_config_red_lan),
+            ("🗄️", "Backup Auto", self.show_config_backup),
+        ], expanded=False)
 
         # Separador VET
         tk.Frame(self.sidebar, bg=COLORS['sidebar_hover'], height=1).pack(fill='x', padx=15, pady=5)
@@ -2692,6 +2870,21 @@ class MainApplication:
                         highlightthickness=1, highlightbackground=COLORS['border'])
         entries['email'].pack(fill='x', ipady=6)
 
+        # Campo de comisión
+        tk.Label(frame, text="Comisión (%):", font=('Segoe UI', 10), bg='white', anchor='w').pack(fill='x', pady=(10, 2))
+        entries['comision'] = tk.Entry(frame, font=('Segoe UI', 11), relief='flat', bg='#f8f9fa',
+                        highlightthickness=1, highlightbackground=COLORS['border'])
+        entries['comision'].pack(fill='x', ipady=6)
+        entries['comision'].insert(0, '0')
+        tk.Label(frame, text="Porcentaje sobre el total de cada solicitud referida por este médico.",
+                 font=('Segoe UI', 8), bg='white', fg='#666').pack(anchor='w')
+
+        # Asegurar columna ComisionPorcentaje en Medicos
+        try:
+            db.execute("ALTER TABLE Medicos ADD COLUMN ComisionPorcentaje DOUBLE DEFAULT 0")
+        except Exception:
+            pass
+
         if medico_id:
             try:
                 med = db.query_one(f"SELECT * FROM Medicos WHERE MedicoID={medico_id}")
@@ -2702,7 +2895,9 @@ class MainApplication:
                     entries['especialidad'].insert(0, med.get('Especialidad') or '')
                     entries['telefono'].insert(0, med.get('Telefono1') or '')
                     entries['email'].insert(0, med.get('Email') or '')
-            except:
+                    entries['comision'].delete(0, 'end')
+                    entries['comision'].insert(0, str(med.get('ComisionPorcentaje') or 0))
+            except Exception:
                 pass
 
         def guardar():
@@ -2723,6 +2918,10 @@ class MainApplication:
                 codigo_pais = entries['codigo_pais'].get().split()[0]  # Obtiene solo el código (+58)
                 telefono_completo = codigo_pais + tiene_whatsapp
 
+            try:
+                _comision = float(entries['comision'].get().strip().replace(',', '.'))
+            except Exception:
+                _comision = 0.0
             data = {
                 'CodigoMedico': entries['codigo'].get().strip(),
                 'Nombres': entries['nombres'].get().strip(),
@@ -2731,6 +2930,7 @@ class MainApplication:
                 'Telefono1': telefono_completo,
                 'Email': tiene_email,
                 'Activo': True,
+                'ComisionPorcentaje': _comision,
             }
 
             try:
@@ -2811,6 +3011,510 @@ class MainApplication:
 
         except Exception as e:
             messagebox.showerror("Error", f"Error al eliminar médico:\n{str(e)}")
+
+    # ── Cotizaciones ─────────────────────────────────────────────────────────
+
+    def show_cotizaciones(self):
+        """Vista de listado y gestión de cotizaciones."""
+        if not self.gestor_cotizaciones:
+            messagebox.showerror("Error", "Módulo de cotizaciones no disponible.")
+            return
+        self.clear_content()
+        self.set_title("📋 Cotizaciones")
+
+        scrollable = self.setup_scrollable_content()
+
+        # Toolbar
+        toolbar = tk.Frame(scrollable, bg=COLORS['bg'])
+        toolbar.pack(fill='x', padx=20, pady=(15, 5))
+
+        tk.Button(toolbar, text="➕ Nueva Cotización", font=('Segoe UI', 10, 'bold'),
+                  bg=COLORS['primary'], fg='white', relief='flat', padx=15, pady=8,
+                  cursor='hand2', command=self.form_cotizacion).pack(side='left', padx=(0, 10))
+
+        tk.Label(toolbar, text="🔍", font=('Segoe UI', 12), bg=COLORS['bg']).pack(side='left')
+        self._cot_search = tk.Entry(toolbar, font=('Segoe UI', 10), width=22,
+                                    relief='flat', bg='white',
+                                    highlightthickness=1, highlightbackground=COLORS['border'])
+        self._cot_search.pack(side='left', padx=5, ipady=6)
+
+        estado_var = tk.StringVar(value='Todos')
+        ttk.Combobox(toolbar, textvariable=estado_var, width=12,
+                     values=['Todos', 'Pendiente', 'Convertida', 'Anulada'],
+                     state='readonly', font=('Segoe UI', 10)).pack(side='left', padx=5)
+
+        tk.Button(toolbar, text="Buscar", font=('Segoe UI', 10),
+                  bg=COLORS['success'], fg='white', relief='flat', padx=12,
+                  command=lambda: self._cargar_cotizaciones(estado_var.get())).pack(side='left', padx=5)
+
+        # Treeview
+        cols = ('ID', 'N° Cotización', 'Paciente', 'Cédula', 'Fecha', 'Vence', 'Total', 'Estado')
+        tree_f = tk.Frame(scrollable, bg='white')
+        tree_f.pack(fill='both', expand=True, padx=20, pady=10)
+
+        self._tree_cot = ttk.Treeview(tree_f, columns=cols, show='headings', height=18)
+        widths = {'ID': 40, 'N° Cotización': 130, 'Paciente': 190, 'Cédula': 100,
+                  'Fecha': 90, 'Vence': 90, 'Total': 100, 'Estado': 90}
+        for c in cols:
+            self._tree_cot.heading(c, text=c)
+            self._tree_cot.column(c, width=widths.get(c, 100), anchor='center')
+        self._tree_cot.column('Paciente', anchor='w')
+
+        vsb = ttk.Scrollbar(tree_f, orient='vertical', command=self._tree_cot.yview)
+        self._tree_cot.configure(yscrollcommand=vsb.set)
+        self._tree_cot.pack(side='left', fill='both', expand=True)
+        vsb.pack(side='right', fill='y')
+
+        # Botones de acción
+        acc_f = tk.Frame(scrollable, bg=COLORS['bg'])
+        acc_f.pack(fill='x', padx=20, pady=(0, 15))
+
+        tk.Button(acc_f, text="📄 Ver / PDF", font=('Segoe UI', 9),
+                  bg='#1565c0', fg='white', relief='flat', padx=12,
+                  command=self._ver_cotizacion_pdf).pack(side='left', padx=(0, 8))
+        tk.Button(acc_f, text="✅ Convertir a Solicitud", font=('Segoe UI', 9),
+                  bg=COLORS['success'], fg='white', relief='flat', padx=12,
+                  command=self._convertir_cotizacion).pack(side='left', padx=(0, 8))
+        tk.Button(acc_f, text="🚫 Anular", font=('Segoe UI', 9),
+                  bg=COLORS['danger'], fg='white', relief='flat', padx=12,
+                  command=self._anular_cotizacion).pack(side='left')
+
+        self._cot_estado_var = estado_var
+        self._cargar_cotizaciones('Todos')
+
+    def _cargar_cotizaciones(self, estado='Todos'):
+        if not hasattr(self, '_tree_cot'):
+            return
+        for item in self._tree_cot.get_children():
+            self._tree_cot.delete(item)
+        filtro = self._cot_search.get().strip() if hasattr(self, '_cot_search') else ''
+        rows = self.gestor_cotizaciones.listar_cotizaciones(filtro, estado)
+        simbolo = (self.config_lab or {}).get('SimboloMoneda', '$')
+        for r in rows:
+            fecha = r.get('FechaCotizacion')
+            vence = r.get('FechaVencimiento')
+            fecha_s = fecha.strftime('%d/%m/%Y') if hasattr(fecha, 'strftime') else str(fecha or '')[:10]
+            vence_s = vence.strftime('%d/%m/%Y') if hasattr(vence, 'strftime') else str(vence or '')[:10]
+            total   = float(r.get('Total') or 0)
+            estado_r = r.get('Estado', '')
+            tag = {'Convertida': 'verde', 'Anulada': 'rojo', 'Pendiente': ''}.get(estado_r, '')
+            self._tree_cot.insert('', 'end', tags=(tag,), values=(
+                r.get('CotizacionID'), r.get('NumeroCotizacion', ''),
+                r.get('Paciente', ''), r.get('NumeroDocumento', '') or '',
+                fecha_s, vence_s, f"{simbolo} {total:,.2f}", estado_r
+            ))
+        self._tree_cot.tag_configure('verde', foreground='#2e7d32')
+        self._tree_cot.tag_configure('rojo',  foreground='#c62828')
+
+    def _cot_seleccionada(self):
+        sel = self._tree_cot.selection() if hasattr(self, '_tree_cot') else []
+        if not sel:
+            messagebox.showwarning("Aviso", "Seleccione una cotización")
+            return None
+        return self._tree_cot.item(sel[0])['values'][0]
+
+    def _ver_cotizacion_pdf(self):
+        cid = self._cot_seleccionada()
+        if not cid:
+            return
+        try:
+            ruta = self.gestor_cotizaciones.generar_pdf(cid, self.config_lab)
+            if ruta:
+                os.startfile(ruta)
+            else:
+                messagebox.showerror("Error", "No se pudo generar el PDF (ReportLab no disponible).")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def _convertir_cotizacion(self):
+        cid = self._cot_seleccionada()
+        if not cid:
+            return
+        if not messagebox.askyesno("Confirmar",
+                                   "¿Convertir esta cotización en una solicitud?\n"
+                                   "Se creará la solicitud con los mismos ítems."):
+            return
+        r = self.gestor_cotizaciones.convertir_a_solicitud(cid)
+        if r['exito']:
+            messagebox.showinfo("Éxito",
+                                f"Solicitud creada: {r['numero_solicitud']}\n"
+                                "La cotización quedó marcada como 'Convertida'.")
+            self._cargar_cotizaciones(getattr(self, '_cot_estado_var', tk.StringVar()).get())
+        else:
+            messagebox.showerror("Error", r['mensaje'])
+
+    def _anular_cotizacion(self):
+        cid = self._cot_seleccionada()
+        if not cid:
+            return
+        if messagebox.askyesno("Confirmar", "¿Anular esta cotización?"):
+            self.gestor_cotizaciones.anular_cotizacion(cid)
+            self._cargar_cotizaciones(getattr(self, '_cot_estado_var', tk.StringVar()).get())
+
+    def form_cotizacion(self):
+        """Formulario para crear una nueva cotización."""
+        if not self.gestor_cotizaciones:
+            messagebox.showerror("Error", "Módulo de cotizaciones no disponible.")
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title("Nueva Cotización")
+        win.grab_set()
+        win.configure(bg='white')
+        hacer_ventana_responsiva(win, 720, 700, min_ancho=640, min_alto=580)
+
+        header = tk.Frame(win, bg='#1565c0', height=50)
+        header.pack(fill='x')
+        header.pack_propagate(False)
+        tk.Label(header, text="📋 Nueva Cotización / Presupuesto",
+                 font=('Segoe UI', 13, 'bold'), bg='#1565c0', fg='white').pack(pady=12)
+
+        # ── Botones al fondo ──────────────────────────────────────────────────
+        btn_frame = tk.Frame(win, bg='white')
+        btn_frame.pack(fill='x', side='bottom', padx=20, pady=12)
+
+        main_f = tk.Frame(win, bg='white')
+        main_f.pack(fill='both', expand=True, padx=20, pady=10)
+
+        # ── Paciente ──────────────────────────────────────────────────────────
+        pac_lf = tk.LabelFrame(main_f, text=" Paciente ", bg='white',
+                               font=('Segoe UI', 9, 'bold'))
+        pac_lf.pack(fill='x', pady=(0, 8))
+
+        pac_row = tk.Frame(pac_lf, bg='white')
+        pac_row.pack(fill='x', padx=10, pady=6)
+
+        tk.Label(pac_row, text="Buscar:", font=('Segoe UI', 9), bg='white').pack(side='left')
+        pac_search = tk.Entry(pac_row, font=('Segoe UI', 10), width=28,
+                              relief='flat', bg='#f8f9fa',
+                              highlightthickness=1, highlightbackground='#bbb')
+        pac_search.pack(side='left', padx=5, ipady=4)
+
+        pac_var      = tk.StringVar(value='')  # almacena "ID|Nombre"
+        pac_id_var   = tk.IntVar(value=0)
+        lbl_pac_sel  = tk.Label(pac_lf, text="Ningún paciente seleccionado",
+                                font=('Segoe UI', 9, 'italic'), bg='white', fg='#666')
+        lbl_pac_sel.pack(anchor='w', padx=10, pady=(0, 6))
+
+        def buscar_pac(event=None):
+            q = pac_search.get().strip()
+            if not q:
+                return
+            rows = db.query(
+                f"SELECT PacienteID, Nombres, Apellidos, NumeroDocumento FROM Pacientes "
+                f"WHERE Nombres LIKE '%{q}%' OR Apellidos LIKE '%{q}%' "
+                f"   OR NumeroDocumento LIKE '%{q}%' "
+                f"ORDER BY Apellidos"
+            ) or []
+            if not rows:
+                messagebox.showinfo("Sin resultados", "No se encontraron pacientes.", parent=win)
+                return
+
+            def _seleccionar(r):
+                nombre = f"{r.get('Nombres','')} {r.get('Apellidos','')}".strip()
+                pac_id_var.set(r['PacienteID'])
+                lbl_pac_sel.config(
+                    text=f"✅ {nombre} | C.I. {r.get('NumeroDocumento','')}",
+                    fg='#2e7d32'
+                )
+
+            if len(rows) == 1:
+                _seleccionar(rows[0])
+                return
+            # múltiples → mini-listado
+            sel_win = tk.Toplevel(win)
+            sel_win.title("Seleccionar paciente")
+            sel_win.grab_set()
+            lst = tk.Listbox(sel_win, font=('Segoe UI', 10), width=55, height=min(len(rows), 12))
+            lst.pack(padx=10, pady=10)
+            for r in rows:
+                nombre = f"{r.get('Nombres','')} {r.get('Apellidos','')}".strip()
+                lst.insert('end', f"{nombre} | {r.get('NumeroDocumento','')}")
+            def elegir(event=None):
+                idx = lst.curselection()
+                if idx:
+                    _seleccionar(rows[idx[0]])
+                sel_win.destroy()
+            lst.bind('<Double-1>', elegir)
+            tk.Button(sel_win, text="Seleccionar", command=elegir).pack(pady=(0, 8))
+
+        pac_search.bind('<Return>', buscar_pac)
+        tk.Button(pac_row, text="🔍", font=('Segoe UI', 9),
+                  bg=COLORS['primary'], fg='white', relief='flat',
+                  command=buscar_pac).pack(side='left')
+
+        # ── Pruebas ───────────────────────────────────────────────────────────
+        pru_lf = tk.LabelFrame(main_f, text=" Pruebas / Servicios ", bg='white',
+                               font=('Segoe UI', 9, 'bold'))
+        pru_lf.pack(fill='both', expand=True, pady=(0, 8))
+
+        pru_row = tk.Frame(pru_lf, bg='white')
+        pru_row.pack(fill='x', padx=10, pady=6)
+
+        tk.Label(pru_row, text="Buscar prueba:", font=('Segoe UI', 9), bg='white').pack(side='left')
+        pru_search = tk.Entry(pru_row, font=('Segoe UI', 10), width=30,
+                              relief='flat', bg='#f8f9fa',
+                              highlightthickness=1, highlightbackground='#bbb')
+        pru_search.pack(side='left', padx=5, ipady=4)
+
+        pruebas_sel = []  # lista de dicts {id, nombre, precio}
+        simbolo     = (self.config_lab or {}).get('SimboloMoneda', '$')
+
+        cols_p = ('Prueba', 'Precio')
+        tree_p = ttk.Treeview(pru_lf, columns=cols_p, show='headings', height=8)
+        tree_p.heading('Prueba', text='Prueba')
+        tree_p.heading('Precio', text='Precio')
+        tree_p.column('Prueba', width=380)
+        tree_p.column('Precio', width=120, anchor='e')
+        tree_p.pack(fill='both', expand=True, padx=10, pady=(0, 4))
+
+        lbl_subtotal = tk.Label(pru_lf, text="Sub-Total: —",
+                                font=('Segoe UI', 10, 'bold'), bg='white', fg='#1565c0')
+        lbl_subtotal.pack(anchor='e', padx=10, pady=(0, 6))
+
+        def actualizar_subtotal():
+            st = sum(p['precio'] for p in pruebas_sel)
+            lbl_subtotal.config(text=f"Sub-Total: {simbolo} {st:,.2f}")
+
+        def agregar_prueba(event=None):
+            q = pru_search.get().strip()
+            if not q:
+                return
+            rows = db.query(
+                f"SELECT PruebaID, NombrePrueba, Precio FROM Pruebas "
+                f"WHERE (NombrePrueba LIKE '%{q}%' OR CodigoPrueba LIKE '%{q}%') "
+                f"AND Activo=True ORDER BY NombrePrueba"
+            ) or []
+            if not rows:
+                messagebox.showinfo("Sin resultados", "No se encontraron pruebas.", parent=win)
+                return
+            if len(rows) == 1:
+                r = rows[0]
+                precio = float(r.get('Precio') or 0)
+                pruebas_sel.append({'id': r['PruebaID'], 'nombre': r['NombrePrueba'], 'precio': precio})
+                tree_p.insert('', 'end', values=(r['NombrePrueba'], f"{simbolo} {precio:,.2f}"))
+                actualizar_subtotal()
+                pru_search.delete(0, 'end')
+                return
+            # múltiples
+            sel_win = tk.Toplevel(win)
+            sel_win.title("Seleccionar prueba")
+            sel_win.grab_set()
+            lst = tk.Listbox(sel_win, font=('Segoe UI', 10), width=55, height=min(len(rows), 12))
+            lst.pack(padx=10, pady=10)
+            for r in rows:
+                lst.insert('end', f"{r['NombrePrueba']} — {simbolo} {float(r.get('Precio') or 0):,.2f}")
+            def elegir(event=None):
+                idx = lst.curselection()
+                if idx:
+                    r = rows[idx[0]]
+                    precio = float(r.get('Precio') or 0)
+                    pruebas_sel.append({'id': r['PruebaID'], 'nombre': r['NombrePrueba'], 'precio': precio})
+                    tree_p.insert('', 'end', values=(r['NombrePrueba'], f"{simbolo} {precio:,.2f}"))
+                    actualizar_subtotal()
+                    pru_search.delete(0, 'end')
+                sel_win.destroy()
+            lst.bind('<Double-1>', elegir)
+            tk.Button(sel_win, text="Agregar", command=elegir).pack(pady=(0, 8))
+
+        pru_search.bind('<Return>', agregar_prueba)
+        tk.Button(pru_row, text="➕ Agregar", font=('Segoe UI', 9),
+                  bg=COLORS['primary'], fg='white', relief='flat',
+                  command=agregar_prueba).pack(side='left', padx=4)
+
+        def quitar_prueba():
+            sel = tree_p.selection()
+            if not sel:
+                return
+            idx = tree_p.index(sel[0])
+            if 0 <= idx < len(pruebas_sel):
+                pruebas_sel.pop(idx)
+            tree_p.delete(sel[0])
+            actualizar_subtotal()
+
+        tk.Button(pru_row, text="🗑️ Quitar", font=('Segoe UI', 9),
+                  bg=COLORS['danger'], fg='white', relief='flat',
+                  command=quitar_prueba).pack(side='left', padx=4)
+
+        # ── Extra ─────────────────────────────────────────────────────────────
+        extra_f = tk.Frame(main_f, bg='white')
+        extra_f.pack(fill='x', pady=(0, 8))
+
+        tk.Label(extra_f, text="Descuento:", font=('Segoe UI', 9, 'bold'), bg='white').grid(row=0, column=0, sticky='w')
+        desc_e = tk.Entry(extra_f, font=('Segoe UI', 10), width=14, relief='flat', bg='#f8f9fa',
+                          highlightthickness=1, highlightbackground='#bbb')
+        desc_e.insert(0, '0')
+        desc_e.grid(row=0, column=1, padx=(4, 20), ipady=4)
+
+        tk.Label(extra_f, text="Días vigencia:", font=('Segoe UI', 9, 'bold'), bg='white').grid(row=0, column=2, sticky='w')
+        dias_e = tk.Entry(extra_f, font=('Segoe UI', 10), width=8, relief='flat', bg='#f8f9fa',
+                          highlightthickness=1, highlightbackground='#bbb')
+        dias_e.insert(0, '15')
+        dias_e.grid(row=0, column=3, padx=4, ipady=4)
+
+        tk.Label(extra_f, text="Observaciones:", font=('Segoe UI', 9, 'bold'), bg='white').grid(row=1, column=0, sticky='w', pady=(8,0))
+        obs_e = tk.Entry(extra_f, font=('Segoe UI', 10), width=60, relief='flat', bg='#f8f9fa',
+                         highlightthickness=1, highlightbackground='#bbb')
+        obs_e.grid(row=1, column=1, columnspan=3, padx=4, ipady=4, pady=(8,0), sticky='ew')
+
+        # ── Guardar ───────────────────────────────────────────────────────────
+        def guardar():
+            if not pac_id_var.get():
+                messagebox.showerror("Error", "Seleccione un paciente.", parent=win)
+                return
+            if not pruebas_sel:
+                messagebox.showerror("Error", "Agregue al menos una prueba.", parent=win)
+                return
+            try:
+                desc = float(desc_e.get().strip().replace(',', '.') or '0')
+            except Exception:
+                desc = 0.0
+            try:
+                dias = int(dias_e.get().strip() or '15')
+            except Exception:
+                dias = 15
+            r = self.gestor_cotizaciones.crear_cotizacion(
+                paciente_id=pac_id_var.get(),
+                pruebas=pruebas_sel,
+                descuento=desc,
+                observaciones=obs_e.get().strip(),
+                dias_vigencia=dias,
+            )
+            if r['exito']:
+                if messagebox.askyesno("Éxito",
+                                       f"Cotización {r['numero']} creada.\n"
+                                       f"Total: {simbolo} {r['total']:,.2f}\n\n"
+                                       "¿Generar PDF ahora?", parent=win):
+                    try:
+                        ruta = self.gestor_cotizaciones.generar_pdf(r['cotizacion_id'], self.config_lab)
+                        if ruta:
+                            os.startfile(ruta)
+                    except Exception as ep:
+                        messagebox.showwarning("PDF", str(ep), parent=win)
+                win.destroy()
+                if hasattr(self, '_tree_cot'):
+                    self._cargar_cotizaciones('Todos')
+            else:
+                messagebox.showerror("Error", r['mensaje'], parent=win)
+
+        tk.Button(btn_frame, text="❌ Cancelar", font=('Segoe UI', 11),
+                  bg='#95a5a6', fg='white', relief='flat', padx=18, pady=8,
+                  command=win.destroy).pack(side='right', padx=5)
+        tk.Button(btn_frame, text="💾 Guardar Cotización", font=('Segoe UI', 11, 'bold'),
+                  bg='#1565c0', fg='white', relief='flat', padx=18, pady=8,
+                  command=guardar).pack(side='right')
+
+    # ── Reporte de Comisiones por Médico ─────────────────────────────────────
+
+    def show_comisiones_medico(self):
+        """Vista de reporte de comisiones por médico con filtro de período."""
+        self.clear_content()
+        self.set_title("💰 Comisiones por Médico")
+
+        scrollable = self.setup_scrollable_content()
+
+        # ── Filtro de fechas ──────────────────────────────────────────────────
+        filtro_f = tk.Frame(scrollable, bg=COLORS['bg'])
+        filtro_f.pack(fill='x', padx=20, pady=(15, 5))
+
+        tk.Label(filtro_f, text="Desde:", font=('Segoe UI', 10, 'bold'),
+                 bg=COLORS['bg'], fg='white').pack(side='left')
+        desde_e = tk.Entry(filtro_f, font=('Segoe UI', 10), width=12,
+                           relief='flat', bg='white', highlightthickness=1, highlightbackground='#bbb')
+        desde_e.pack(side='left', padx=(4, 12), ipady=4)
+        desde_e.insert(0, datetime.now().replace(day=1).strftime('%d/%m/%Y'))
+
+        tk.Label(filtro_f, text="Hasta:", font=('Segoe UI', 10, 'bold'),
+                 bg=COLORS['bg'], fg='white').pack(side='left')
+        hasta_e = tk.Entry(filtro_f, font=('Segoe UI', 10), width=12,
+                           relief='flat', bg='white', highlightthickness=1, highlightbackground='#bbb')
+        hasta_e.pack(side='left', padx=(4, 20), ipady=4)
+        hasta_e.insert(0, datetime.now().strftime('%d/%m/%Y'))
+
+        # ── Tabla de resultados ───────────────────────────────────────────────
+        table_f = tk.Frame(scrollable, bg='white')
+        table_f.pack(fill='both', expand=True, padx=20, pady=10)
+
+        cols = ('Médico', 'Especialidad', '% Comisión', 'N° Solicitudes', 'Total Facturado', 'Comisión Calculada')
+        tree = ttk.Treeview(table_f, columns=cols, show='headings', height=20)
+        for c in cols:
+            tree.heading(c, text=c)
+            tree.column(c, width=145, anchor='center')
+        tree.column('Médico', width=200, anchor='w')
+        vsb = ttk.Scrollbar(table_f, orient='vertical', command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+        tree.pack(side='left', fill='both', expand=True)
+        vsb.pack(side='right', fill='y')
+
+        # Totales al pie
+        tot_f = tk.Frame(scrollable, bg='#e8f5e9')
+        tot_f.pack(fill='x', padx=20, pady=(0, 15))
+        lbl_total_fact = tk.Label(tot_f, text="Total facturado: —",
+                                  font=('Segoe UI', 11, 'bold'), bg='#e8f5e9')
+        lbl_total_fact.pack(side='left', padx=15, pady=8)
+        lbl_total_com  = tk.Label(tot_f, text="Total comisiones: —",
+                                  font=('Segoe UI', 11, 'bold'), bg='#e8f5e9', fg='#2e7d32')
+        lbl_total_com.pack(side='left', padx=15)
+
+        simbolo = (self.config_lab or {}).get('SimboloMoneda', '$')
+
+        def cargar(event=None):
+            for item in tree.get_children():
+                tree.delete(item)
+            try:
+                d_str = desde_e.get().strip()
+                h_str = hasta_e.get().strip()
+                desde_dt = datetime.strptime(d_str, '%d/%m/%Y')
+                hasta_dt = datetime.strptime(h_str, '%d/%m/%Y')
+                desde_acc = desde_dt.strftime('#%m/%d/%Y#')
+                hasta_acc = hasta_dt.strftime('#%m/%d/%Y 23:59:59#')
+            except Exception:
+                messagebox.showerror("Error", "Formato de fecha inválido. Use DD/MM/AAAA")
+                return
+
+            sql = f"""
+                SELECT m.MedicoID,
+                       m.Nombres & ' ' & m.Apellidos AS NombreMedico,
+                       m.Especialidad,
+                       Nz(m.ComisionPorcentaje, 0) AS Comision,
+                       COUNT(s.SolicitudID) AS NumSolicitudes,
+                       Nz(SUM(s.MontoTotal), 0) AS TotalFacturado
+                  FROM Medicos m
+                  LEFT JOIN Solicitudes s ON s.MedicoID = m.MedicoID
+                   AND s.FechaSolicitud BETWEEN {desde_acc} AND {hasta_acc}
+                 WHERE m.Activo = True
+                 GROUP BY m.MedicoID, m.Nombres, m.Apellidos, m.Especialidad, m.ComisionPorcentaje
+                 ORDER BY TotalFacturado DESC
+            """
+            try:
+                rows = db.query(sql) or []
+                total_fact = 0.0
+                total_com  = 0.0
+                for r in rows:
+                    tf   = float(r.get('TotalFacturado') or 0)
+                    pct  = float(r.get('Comision') or 0)
+                    com  = tf * pct / 100
+                    nsol = int(r.get('NumSolicitudes') or 0)
+                    total_fact += tf
+                    total_com  += com
+                    tree.insert('', 'end', values=(
+                        r.get('NombreMedico', ''),
+                        r.get('Especialidad', '') or '',
+                        f"{pct:.1f} %",
+                        nsol,
+                        f"{simbolo} {tf:,.2f}",
+                        f"{simbolo} {com:,.2f}",
+                    ))
+                lbl_total_fact.config(text=f"Total facturado: {simbolo} {total_fact:,.2f}")
+                lbl_total_com.config(text=f"Total comisiones: {simbolo} {total_com:,.2f}")
+            except Exception as e:
+                messagebox.showerror("Error", str(e))
+
+        tk.Button(filtro_f, text="🔍 Consultar", font=('Segoe UI', 10, 'bold'),
+                  bg=COLORS['success'], fg='white', relief='flat', padx=15, pady=5,
+                  command=cargar).pack(side='left')
+
+        cargar()
 
     # ============================================================
     # PRUEBAS
@@ -4121,6 +4825,7 @@ class MainApplication:
             )
             if doc_result['exito']:
                 doc_mensaje = f"\nRecibo generado: {doc_result['numero_recibo']}"
+                self._generar_pdf_recibo(doc_result['numero_recibo'], self.solicitud_existente_id, doc_result.get('total', 0))
             else:
                 doc_mensaje = f"\nAdvertencia: {doc_result['mensaje']}"
 
@@ -4220,6 +4925,7 @@ class MainApplication:
             )
             if doc_result['exito']:
                 doc_mensaje = f"\nRecibo generado: {doc_result['numero_recibo']}"
+                self._generar_pdf_recibo(doc_result['numero_recibo'], sol_id, doc_result.get('total', 0))
             else:
                 doc_mensaje = f"\nAdvertencia recibo: {doc_result['mensaje']}"
 
@@ -4343,6 +5049,7 @@ class MainApplication:
                 num_recibo = self._generar_recibo_legacy(sol_id, total)
                 if num_recibo:
                     doc_mensaje = f"\n📄 Recibo generado: {num_recibo}"
+                    self._generar_pdf_recibo(num_recibo, sol_id, total, pruebas)
             elif tipo_doc == 'factura':
                 num_factura = self._generar_factura_legacy(sol_id, total, pruebas)
                 if num_factura:
@@ -4481,6 +5188,234 @@ class MainApplication:
         except Exception as e:
             print(f"Error generando recibo: {e}")
             return None
+
+    def _generar_pdf_recibo(self, numero_recibo, solicitud_id, total, pruebas_lista=None):
+        """
+        Genera un PDF con formato de ticket/recibo térmico.
+        Incluye QR de verificación al final.
+        """
+        if not REPORTLAB_AVAILABLE:
+            return
+
+        try:
+            from reportlab.lib.pagesizes import portrait
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+            from reportlab.lib.styles import ParagraphStyle
+            from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+            from reportlab.lib import colors
+            from reportlab.lib.units import cm, inch
+            import tempfile, os
+
+            # ── Tamaño ticket: ancho 80mm (226pt), alto variable ──────────────
+            TICKET_W = 226  # 80 mm en puntos
+            TICKET_H = 700  # alto generoso; se recorta automáticamente
+
+            # ── Estilos ───────────────────────────────────────────────────────
+            def estilo(name, **kw):
+                base = dict(fontName='Helvetica', fontSize=7, leading=9,
+                            spaceAfter=1, spaceBefore=1)
+                base.update(kw)
+                return ParagraphStyle(name, **base)
+
+            s_lab    = estilo('lab',    fontSize=9,  fontName='Helvetica-Bold', alignment=TA_CENTER, spaceAfter=2)
+            s_dir    = estilo('dir',    fontSize=6.5, alignment=TA_CENTER)
+            s_titulo = estilo('titulo', fontSize=13, fontName='Helvetica-Bold', alignment=TA_CENTER, spaceAfter=4, spaceBefore=4)
+            s_label  = estilo('label',  fontSize=7,  fontName='Helvetica-Bold')
+            s_valor  = estilo('valor',  fontSize=7)
+            s_item_l = estilo('iteml',  fontSize=7)
+            s_item_r = estilo('itemr',  fontSize=7,  alignment=TA_RIGHT)
+            s_total  = estilo('total',  fontSize=8,  fontName='Helvetica-Bold', alignment=TA_RIGHT)
+            s_qr_txt = estilo('qrtxt', fontSize=7,  fontName='Helvetica-Bold', alignment=TA_CENTER, spaceBefore=6)
+
+            # ── Datos del laboratorio ─────────────────────────────────────────
+            cfg = self.config_lab or {}
+            nombre_lab  = cfg.get('NombreLaboratorio', 'LABORATORIO')
+            direccion   = cfg.get('Direccion', '')
+            telefono    = cfg.get('Telefono1', '')
+            whatsapp    = cfg.get('WhatsApp', '')
+            simbolo     = cfg.get('SimboloMoneda', '$')
+
+            # ── Datos de la solicitud / paciente ──────────────────────────────
+            sol = db.query_one(
+                f"""SELECT s.NumeroSolicitud, s.FechaSolicitud,
+                           p.NombreCompleto, p.Cedula, p.Telefono,
+                           s.DiagnosticoPresuntivo
+                    FROM Solicitudes s
+                    LEFT JOIN Pacientes p ON s.PacienteID = p.PacienteID
+                    WHERE s.SolicitudID = {solicitud_id}"""
+            ) or {}
+
+            num_muestra = sol.get('NumeroSolicitud', '')
+            fecha_sol   = sol.get('FechaSolicitud', datetime.now())
+            if hasattr(fecha_sol, 'strftime'):
+                fecha_str = fecha_sol.strftime('%d/%m/%Y')
+            else:
+                fecha_str = str(fecha_sol)[:10]
+            paciente    = sol.get('NombreCompleto', '')
+            cedula      = sol.get('Cedula', '')
+            telefono_p  = sol.get('Telefono', '')
+
+            # ── Pruebas del detalle ───────────────────────────────────────────
+            if pruebas_lista is None:
+                filas_det = db.query(
+                    f"""SELECT pr.NombrePrueba, ds.PrecioUnitario
+                          FROM DetalleSolicitudes ds
+                          LEFT JOIN Pruebas pr ON ds.PruebaID = pr.PruebaID
+                         WHERE ds.SolicitudID = {solicitud_id}"""
+                ) or []
+            else:
+                filas_det = [{'NombrePrueba': p.get('nombre', ''), 'PrecioUnitario': p.get('precio', 0)}
+                             for p in pruebas_lista]
+
+            # ── Armar story ───────────────────────────────────────────────────
+            margen = 8
+            story  = []
+
+            # Encabezado laboratorio
+            story.append(Paragraph(nombre_lab.upper(), s_lab))
+            if direccion:
+                story.append(Paragraph(direccion, s_dir))
+            contacto_parts = []
+            if telefono:
+                contacto_parts.append(f"Teléfono: {telefono}")
+            if whatsapp:
+                contacto_parts.append(f"WhatsApp: {whatsapp}")
+            if contacto_parts:
+                story.append(Paragraph(" | ".join(contacto_parts), s_dir))
+
+            story.append(HRFlowable(width='100%', thickness=0.5, color=colors.black, spaceAfter=3, spaceBefore=3))
+
+            # Título
+            story.append(Paragraph("RECIBO", s_titulo))
+
+            story.append(HRFlowable(width='100%', thickness=0.5, color=colors.black, spaceAfter=3, spaceBefore=0))
+
+            # Bloque de datos
+            ancho_util = TICKET_W - 2 * margen
+            col_etiq   = ancho_util * 0.38
+            col_val    = ancho_util * 0.62
+
+            def fila_dato(etiqueta, valor):
+                return [Paragraph(etiqueta, s_label), Paragraph(str(valor), s_valor)]
+
+            datos_tbl = [
+                fila_dato("RECIBO N°:", numero_recibo),
+                fila_dato("FECHA:",     fecha_str),
+                fila_dato("N° MUESTRA:", num_muestra),
+                fila_dato("C.I.:",      cedula),
+                fila_dato("TELÉFONO:", telefono_p),
+                fila_dato("PACIENTE:", paciente),
+            ]
+            tbl_datos = Table(datos_tbl, colWidths=[col_etiq, col_val])
+            tbl_datos.setStyle(TableStyle([
+                ('VALIGN',     (0, 0), (-1, -1), 'TOP'),
+                ('LEFTPADDING',(0, 0), (-1, -1), 0),
+                ('RIGHTPADDING',(0,0), (-1, -1), 0),
+                ('TOPPADDING', (0, 0), (-1, -1), 1),
+                ('BOTTOMPADDING',(0,0),(-1, -1), 1),
+            ]))
+            story.append(tbl_datos)
+
+            story.append(HRFlowable(width='100%', thickness=0.5, color=colors.black, spaceAfter=3, spaceBefore=3))
+
+            # Tabla de ítems
+            col_desc  = ancho_util * 0.72
+            col_precio= ancho_util * 0.28
+
+            items_data = [[Paragraph('Descripción', s_label), Paragraph('Total', s_label)]]
+            subtotal   = 0.0
+            for fila in filas_det:
+                nombre_item = fila.get('NombrePrueba') or fila.get('Descripcion', '')
+                precio_item = float(fila.get('PrecioUnitario') or 0)
+                subtotal   += precio_item
+                items_data.append([
+                    Paragraph(nombre_item, s_item_l),
+                    Paragraph(f"{simbolo} {precio_item:,.2f}", s_item_r)
+                ])
+
+            tbl_items = Table(items_data, colWidths=[col_desc, col_precio])
+            tbl_items.setStyle(TableStyle([
+                ('LINEBELOW',   (0, 0), (-1, 0), 0.5, colors.black),
+                ('VALIGN',      (0, 0), (-1, -1), 'TOP'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                ('RIGHTPADDING',(0, 0), (-1, -1), 0),
+                ('TOPPADDING',  (0, 0), (-1, -1), 2),
+                ('BOTTOMPADDING',(0,0), (-1, -1), 2),
+            ]))
+            story.append(tbl_items)
+
+            story.append(HRFlowable(width='100%', thickness=0.5, color=colors.black, spaceAfter=3, spaceBefore=3))
+
+            # Totales
+            totales_data = [
+                [Paragraph('Exento:', s_item_l),  Paragraph(f"{simbolo} {subtotal:,.2f}", s_total)],
+                [Paragraph('Sub-Total:', s_item_l),Paragraph(f"{simbolo} {subtotal:,.2f}", s_total)],
+                [Paragraph('Total:', s_label),     Paragraph(f"{simbolo} {total:,.2f}", s_total)],
+            ]
+            tbl_totales = Table(totales_data, colWidths=[col_desc, col_precio])
+            tbl_totales.setStyle(TableStyle([
+                ('VALIGN',      (0, 0), (-1, -1), 'MIDDLE'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                ('RIGHTPADDING',(0, 0), (-1, -1), 0),
+                ('TOPPADDING',  (0, 0), (-1, -1), 1),
+                ('BOTTOMPADDING',(0,0), (-1, -1), 1),
+                ('LINEABOVE',   (0, 2), (-1, 2), 0.8, colors.black),
+            ]))
+            story.append(tbl_totales)
+
+            story.append(HRFlowable(width='100%', thickness=0.5, color=colors.black, spaceAfter=4, spaceBefore=4))
+
+            # ── QR de verificación ────────────────────────────────────────────
+            story.append(Paragraph("POR FAVOR ESCANEAR ESTE CODIGO QR", s_qr_txt))
+            story.append(Spacer(1, 4))
+
+            qr_agregado = False
+            if FORMATO_PDF_DISPONIBLE and QRGenerator.disponible():
+                try:
+                    qr_rl = QRGenerator.generar_rl_image(
+                        numero_recibo, fecha_str, paciente,
+                        qr_size=1.4 * inch
+                    )
+                    if qr_rl:
+                        # Centrar el QR con una tabla de una celda
+                        tbl_qr = Table([[qr_rl]], colWidths=[ancho_util])
+                        tbl_qr.setStyle(TableStyle([
+                            ('ALIGN',  (0, 0), (-1, -1), 'CENTER'),
+                            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                            ('LEFTPADDING',  (0, 0), (-1, -1), 0),
+                            ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+                            ('TOPPADDING',   (0, 0), (-1, -1), 0),
+                            ('BOTTOMPADDING',(0, 0), (-1, -1), 0),
+                        ]))
+                        story.append(tbl_qr)
+                        qr_agregado = True
+                except Exception as eq:
+                    print(f"QR recibo error: {eq}")
+
+            if not qr_agregado:
+                story.append(Paragraph(f"[{numero_recibo}]", s_qr_txt))
+
+            story.append(Spacer(1, 6))
+
+            # ── Generar PDF en temp ───────────────────────────────────────────
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf', prefix='recibo_')
+            tmp.close()
+            ruta_pdf = tmp.name
+
+            doc = SimpleDocTemplate(
+                ruta_pdf,
+                pagesize=(TICKET_W, TICKET_H),
+                leftMargin=margen, rightMargin=margen,
+                topMargin=margen, bottomMargin=margen
+            )
+            doc.build(story)
+
+            # Abrir PDF
+            os.startfile(ruta_pdf)
+
+        except Exception as e:
+            print(f"Error generando PDF recibo: {e}")
+            import traceback; traceback.print_exc()
 
     def _generar_factura_legacy(self, solicitud_id, total, pruebas):
         """Genera una factura para la solicitud (método legacy)"""
@@ -7421,22 +8356,42 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                 filename = os.path.join(temp_dir, f"Resultados_{num_sol_safe}_{datetime.now().strftime('%Y%m%d%H%M%S')}.pdf")
 
             # Determinar tamaño de página según configuración
-            if config_lab and config_lab.get('TamanoPapel') == 'Oficio':
-                page_size = legal
-            else:
-                page_size = letter
+            tamano_papel = config_lab.get('TamanoPapel', 'Carta') if config_lab else 'Carta'
 
-            # Determinar orientación
-            if config_lab and config_lab.get('Orientacion') == 'Horizontal':
+            # Crear layout proporcional (calcula todas las dimensiones)
+            if FORMATO_PDF_DISPONIBLE:
+                layout = LayoutCalculator(tamano_papel, tiene_bioanalistas=bool(bioanalistas_por_area))
+                page_size = layout.page_size
+            else:
+                # Fallback sin formato_pdf
+                _tamanos = {'Oficio': legal, 'A4': A4, 'Media Carta': MEDIA_CARTA if FORMATO_PDF_DISPONIBLE else letter}
+                page_size = _tamanos.get(tamano_papel, letter)
+                layout = None
+
+            # Determinar orientación (no aplica a Media Carta)
+            if config_lab and config_lab.get('Orientacion') == 'Horizontal' and tamano_papel != 'Media Carta':
                 page_size = landscape(page_size)
+                if layout:
+                    # Recalcular layout con dimensiones rotadas
+                    layout = LayoutCalculator(tamano_papel, tiene_bioanalistas=bool(bioanalistas_por_area))
+                    layout.page_size = page_size
+                    layout.page_width = page_size[0]
+                    layout.page_height = page_size[1]
+                    layout._calcular_dimensiones()
 
             page_width, page_height = page_size
 
-            # Márgenes (bottom_margin más grande si hay bioanalistas para las firmas)
-            left_margin = 0.5 * inch
-            right_margin = 0.5 * inch
-            top_margin = 0.4 * inch
-            bottom_margin = 1.3 * inch if bioanalistas_por_area else 0.5 * inch
+            # Márgenes desde layout proporcional
+            if layout:
+                left_margin = layout.margin_left
+                right_margin = layout.margin_right
+                top_margin = layout.margin_top
+                bottom_margin = layout.margin_bottom
+            else:
+                left_margin = 0.5 * inch
+                right_margin = 0.5 * inch
+                top_margin = 0.4 * inch
+                bottom_margin = 1.3 * inch if bioanalistas_por_area else 0.5 * inch
 
             # Preparar datos del paciente para el encabezado
             nombre_paciente = f"{sol.get('Nombres') or ''} {sol.get('Apellidos') or ''}".strip().upper() or 'N/A'
@@ -7466,7 +8421,7 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
             telefono2_lab = config_lab.get('Telefono2', '') if config_lab else ''
 
             # Altura del encabezado (logo + info lab + datos paciente)
-            header_height = 2.0 * inch
+            header_height = layout.header_height if layout else 2.0 * inch
 
             # Función para dibujar el encabezado en cada página
             def draw_header(canvas, doc):
@@ -7475,9 +8430,9 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                 # ===== PARTE SUPERIOR: Logo + Info del Laboratorio =====
                 y_top = page_height - top_margin
 
-                # Logo (izquierda)
-                logo_width = 1.2 * inch
-                logo_height = 1.0 * inch
+                # Logo (izquierda) - dimensiones proporcionales
+                logo_width = layout.logo_width if layout else 1.2 * inch
+                logo_height = layout.logo_height if layout else 1.0 * inch
                 logo_x = left_margin
                 logo_y = y_top - logo_height - 0.1*inch
 
@@ -7488,19 +8443,23 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                         pass
 
                 # Información del laboratorio (derecha del logo)
-                info_x = left_margin + logo_width + 0.3*inch
+                _info_offset = layout.info_lab_x_offset if layout else (logo_width + 0.3*inch)
+                info_x = left_margin + _info_offset
                 info_y = y_top - 0.15*inch
 
-                canvas.setFont('Helvetica-Bold', 10)
+                # Limitar el ancho de texto si hay QR (reservar espacio derecho)
+                _qr_reserva = (layout.qr_size + 0.2*inch) if (layout and QRGenerator.disponible()) else 0
+
+                canvas.setFont('Helvetica-Bold', layout.font_lab_nombre if layout else 10)
                 canvas.drawString(info_x, info_y, nombre_lab.upper())
 
-                canvas.setFont('Helvetica', 8)
-                line_height = 11
+                canvas.setFont('Helvetica', layout.font_lab_detalle if layout else 8)
+                line_height = layout.info_line_height if layout else 11
                 current_y = info_y - line_height
 
                 if direccion_lab:
                     # Dividir dirección si es muy larga
-                    max_chars = 70
+                    max_chars = layout.max_chars_direccion if layout else 70
                     if len(direccion_lab) > max_chars:
                         canvas.drawString(info_x, current_y, direccion_lab[:max_chars])
                         current_y -= line_height
@@ -7522,12 +8481,17 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                     canvas.drawString(info_x, current_y, telefono_texto)
                     current_y -= line_height
 
-                canvas.setFont('Helvetica-Oblique', 7)
+                canvas.setFont('Helvetica-Oblique', layout.font_lab_pie if layout else 7)
                 canvas.drawString(info_x, current_y, "Impreso por ANgesLAB - Sistema de Gestión de Laboratorio")
 
+                # ===== QR DE VERIFICACIÓN (esquina superior derecha) =====
+                if layout and FORMATO_PDF_DISPONIBLE:
+                    dibujar_qr_en_header(canvas, layout, num_orden, fecha_sol, nombre_paciente)
+
                 # ===== CUADRO DE DATOS DEL PACIENTE =====
-                box_y = y_top - logo_height - 0.35*inch
-                box_height = 0.7 * inch
+                _box_y_off = layout.box_y_offset if layout else (logo_height + 0.35*inch)
+                box_y = y_top - _box_y_off
+                box_height = layout.box_height if layout else 0.7 * inch
                 box_width = page_width - left_margin - right_margin
 
                 # Dibujar el cuadro
@@ -7535,47 +8499,76 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                 canvas.setLineWidth(1)
                 canvas.rect(left_margin, box_y - box_height, box_width, box_height)
 
-                # Contenido del cuadro - 3 columnas
-                col1_x = left_margin + 0.1*inch
-                col2_x = left_margin + 2.5*inch
-                col3_x = left_margin + 5.0*inch
+                # Posiciones de columnas (proporcionales)
+                col1_x = left_margin + (layout.box_col1_x if layout else 0.1*inch)
+                col2_x = left_margin + (layout.box_col2_x if layout else 2.5*inch)
+                col3_x = left_margin + (layout.box_col3_x if layout else 5.0*inch)
+                _row_sp = layout.box_row_spacing if layout else 0.22*inch
+                val_offset = layout.box_val_offset if layout else 0.55*inch
+                _max_nom = layout.max_nombre_chars if layout else 35
+                _max_med = layout.max_medico_chars if layout else 25
+                _font_lbl = layout.font_pac_label if layout else 8
+                _font_val = layout.font_pac_valor if layout else 8
 
-                row1_y = box_y - 0.2*inch
-                row2_y = row1_y - 0.22*inch
-                row3_y = row2_y - 0.22*inch
+                row1_y = box_y - 0.18*inch
+                row2_y = row1_y - _row_sp
+                row3_y = row2_y - _row_sp
 
-                canvas.setFont('Helvetica-Bold', 8)
-                # Columna 1
-                canvas.drawString(col1_x, row1_y, "NOMBRE:")
-                canvas.drawString(col1_x, row2_y, "CÉDULA:")
-                canvas.drawString(col1_x, row3_y, "EDAD:")
+                # Verificar si usamos 2 o 3 columnas
+                _n_cols = layout.box_cols if layout else 3
 
-                # Columna 2
-                canvas.drawString(col2_x, row1_y, "GÉNERO:")
-                canvas.drawString(col2_x, row2_y, "MÉDICO:")
+                canvas.setFont('Helvetica-Bold', _font_lbl)
 
-                # Columna 3
-                canvas.drawString(col3_x, row1_y, "FECHA:")
-                canvas.drawString(col3_x, row2_y, "N° ORDEN:")
-                canvas.drawString(col3_x, row3_y, "TELÉFONO:")
+                if _n_cols == 3:
+                    # ── Layout 3 columnas (Carta, A4, Oficio) ──
+                    # Columna 1
+                    canvas.drawString(col1_x, row1_y, "NOMBRE:")
+                    canvas.drawString(col1_x, row2_y, "CÉDULA:")
+                    canvas.drawString(col1_x, row3_y, "EDAD:")
+                    # Columna 2
+                    canvas.drawString(col2_x, row1_y, "GÉNERO:")
+                    canvas.drawString(col2_x, row2_y, "MÉDICO:")
+                    # Columna 3
+                    canvas.drawString(col3_x, row1_y, "FECHA:")
+                    canvas.drawString(col3_x, row2_y, "N° ORDEN:")
+                    canvas.drawString(col3_x, row3_y, "TELÉFONO:")
 
-                # Valores
-                canvas.setFont('Helvetica', 8)
-                val_offset = 0.55*inch
+                    # Valores
+                    canvas.setFont('Helvetica', _font_val)
+                    canvas.drawString(col1_x + val_offset, row1_y, nombre_paciente[:_max_nom])
+                    canvas.drawString(col1_x + val_offset, row2_y, cedula)
+                    canvas.drawString(col1_x + val_offset, row3_y, edad_texto)
+                    canvas.drawString(col2_x + val_offset, row1_y, sexo)
+                    canvas.drawString(col2_x + val_offset, row2_y, medico[:_max_med] if medico else '')
+                    canvas.drawString(col3_x + val_offset, row1_y, fecha_sol)
+                    canvas.drawString(col3_x + val_offset, row2_y, str(num_orden)[:20])
+                    canvas.drawString(col3_x + val_offset, row3_y, telefono_pac[:15] if telefono_pac else '')
 
-                # Columna 1 valores
-                canvas.drawString(col1_x + val_offset, row1_y, nombre_paciente[:35])
-                canvas.drawString(col1_x + val_offset, row2_y, cedula)
-                canvas.drawString(col1_x + val_offset, row3_y, edad_texto)
+                else:
+                    # ── Layout 2 columnas (Media Carta) ──
+                    row4_y = row3_y - _row_sp
+                    row5_y = row4_y - _row_sp
+                    # Columna 1
+                    canvas.drawString(col1_x, row1_y, "NOMBRE:")
+                    canvas.drawString(col1_x, row2_y, "CÉDULA:")
+                    canvas.drawString(col1_x, row3_y, "EDAD:")
+                    canvas.drawString(col1_x, row4_y, "MÉDICO:")
+                    # Columna 2
+                    canvas.drawString(col2_x, row1_y, "FECHA:")
+                    canvas.drawString(col2_x, row2_y, "N° ORDEN:")
+                    canvas.drawString(col2_x, row3_y, "GÉNERO:")
+                    canvas.drawString(col2_x, row4_y, "TELÉFONO:")
 
-                # Columna 2 valores
-                canvas.drawString(col2_x + val_offset, row1_y, sexo)
-                canvas.drawString(col2_x + val_offset, row2_y, medico[:25] if medico else '')
-
-                # Columna 3 valores
-                canvas.drawString(col3_x + val_offset, row1_y, fecha_sol)
-                canvas.drawString(col3_x + val_offset, row2_y, str(num_orden)[:20])
-                canvas.drawString(col3_x + val_offset, row3_y, telefono_pac[:15] if telefono_pac else '')
+                    # Valores
+                    canvas.setFont('Helvetica', _font_val)
+                    canvas.drawString(col1_x + val_offset, row1_y, nombre_paciente[:_max_nom])
+                    canvas.drawString(col1_x + val_offset, row2_y, cedula)
+                    canvas.drawString(col1_x + val_offset, row3_y, edad_texto)
+                    canvas.drawString(col1_x + val_offset, row4_y, medico[:_max_med] if medico else '')
+                    canvas.drawString(col2_x + val_offset, row1_y, fecha_sol)
+                    canvas.drawString(col2_x + val_offset, row2_y, str(num_orden)[:20])
+                    canvas.drawString(col2_x + val_offset, row3_y, sexo)
+                    canvas.drawString(col2_x + val_offset, row4_y, telefono_pac[:15] if telefono_pac else '')
 
                 canvas.restoreState()
 
@@ -7590,12 +8583,20 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                 bios_unicos = list(bioanalistas_por_area.values())
 
                 if bios_unicos:
-                    # Dibujar firmas de bioanalistas (hasta 3 lado a lado)
-                    num_bios = min(len(bios_unicos), 3)
+                    # Dibujar firmas de bioanalistas (proporcional al formato)
+                    _max_firmas = layout.max_firmas if layout else 3
+                    num_bios = min(len(bios_unicos), _max_firmas)
                     ancho_disponible = page_width - left_margin - right_margin
                     ancho_bloque = ancho_disponible / num_bios
 
-                    for idx, bio in enumerate(bios_unicos[:3]):
+                    _firma_w = layout.firma_img_width if layout else 1.2*inch
+                    _firma_h = layout.firma_img_height if layout else 0.4*inch
+                    _linea_w = layout.firma_linea_width if layout else 1.5*inch
+                    _f_nombre = layout.font_bio_nombre if layout else 7
+                    _f_detalle = layout.font_bio_detalle if layout else 6.5
+                    _f_area = layout.font_bio_area if layout else 6
+
+                    for idx, bio in enumerate(bios_unicos[:_max_firmas]):
                         bloque_x = left_margin + (idx * ancho_bloque) + (ancho_bloque / 2)
 
                         y_pos = footer_y + 0.9*inch
@@ -7606,13 +8607,11 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                             ruta_abs_firma = os.path.join(base_dir, ruta_firma)
                             if os.path.exists(ruta_abs_firma):
                                 try:
-                                    firma_w = 1.2*inch
-                                    firma_h = 0.4*inch
                                     canvas.drawImage(
                                         ruta_abs_firma,
-                                        bloque_x - firma_w/2,
+                                        bloque_x - _firma_w/2,
                                         y_pos,
-                                        width=firma_w, height=firma_h,
+                                        width=_firma_w, height=_firma_h,
                                         preserveAspectRatio=True, mask='auto'
                                     )
                                     y_pos -= 0.05*inch
@@ -7622,17 +8621,16 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                         # Línea de firma
                         canvas.setStrokeColor(colors.grey)
                         canvas.setLineWidth(0.5)
-                        linea_w = 1.5*inch
-                        canvas.line(bloque_x - linea_w/2, y_pos, bloque_x + linea_w/2, y_pos)
+                        canvas.line(bloque_x - _linea_w/2, y_pos, bloque_x + _linea_w/2, y_pos)
 
                         # Nombre del bioanalista
                         y_pos -= 0.12*inch
-                        canvas.setFont('Helvetica-Bold', 7)
+                        canvas.setFont('Helvetica-Bold', _f_nombre)
                         canvas.drawCentredString(bloque_x, y_pos, bio.get('NombreCompleto', ''))
 
                         # Cédula
                         y_pos -= 0.11*inch
-                        canvas.setFont('Helvetica', 6.5)
+                        canvas.setFont('Helvetica', _f_detalle)
                         canvas.drawCentredString(bloque_x, y_pos, f"C.I.: {bio.get('Cedula', '')}")
 
                         # Número de registro
@@ -7641,7 +8639,7 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
 
                         # Área
                         y_pos -= 0.1*inch
-                        canvas.setFont('Helvetica-Oblique', 6)
+                        canvas.setFont('Helvetica-Oblique', _f_area)
                         area_nombre = bio.get('NombreArea', '')
                         if area_nombre:
                             canvas.drawCentredString(bloque_x, y_pos, f"Bioanalista - {area_nombre}")
@@ -7680,22 +8678,27 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
             styles = getSampleStyleSheet()
             elements = []
 
-            # Estilos personalizados para formato CMLab
+            # Estilos personalizados para formato CMLab (proporcionales)
+            _ft_titulo = layout.font_titulo_prueba if layout else 11
+            _ft_seccion = layout.font_seccion if layout else 9
+            _sp_before = layout.space_before_titulo if layout else 12
+            _sp_after = layout.space_after_titulo if layout else 8
+
             titulo_prueba_style = ParagraphStyle(
                 'TituloPrueba',
                 parent=styles['Heading2'],
-                fontSize=11,
+                fontSize=_ft_titulo,
                 fontName='Helvetica-Bold',
                 alignment=TA_CENTER,
-                spaceAfter=8,
-                spaceBefore=12,
+                spaceAfter=_sp_after,
+                spaceBefore=_sp_before,
                 textColor=colors.black
             )
 
             seccion_style = ParagraphStyle(
                 'Seccion',
                 parent=styles['Normal'],
-                fontSize=9,
+                fontSize=_ft_seccion,
                 fontName='Helvetica-Bold',
                 alignment=TA_LEFT,
                 spaceBefore=4,
@@ -7777,8 +8780,8 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                                                spaceAfter=6)
                             ))
 
-                        # Tabla resultados GTT
-                        gtt_col_w = [2.1*inch, 1.2*inch, 1.1*inch, 2.3*inch]
+                        # Tabla resultados GTT (proporcional)
+                        gtt_col_w = layout.gtt_col_widths if layout else [2.1*inch, 1.2*inch, 1.1*inch, 2.3*inch]
                         gtt_tabla = [['Tiempo', 'Resultado', 'Unidad', 'Valor de Referencia']]
                         gtt_estilos = []
                         gtt_row_idx = 1
@@ -7856,8 +8859,8 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                         # Grafica (siempre en el PDF general cuando hay datos)
                         img_gtt = _generar_imagen_grafica(vals_gtt, dosis_gtt)
                         if img_gtt:
-                            gtt_grafica_w = (page_width - left_margin - right_margin) - 0.3*inch
-                            gtt_grafica_h = 3.3 * inch
+                            gtt_grafica_w = layout.gtt_grafica_width if layout else ((page_width - left_margin - right_margin) - 0.3*inch)
+                            gtt_grafica_h = layout.gtt_grafica_height if layout else 3.3 * inch
                             elements.append(Paragraph(
                                 "Gráfica de la Curva de Glucemia",
                                 ParagraphStyle('GTitGraf', parent=styles['Normal'],
@@ -7994,7 +8997,7 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                         if es_antibiograma:
                             # ---- TABLA DE ANTIBIOGRAMA con colores S/I/R ----
                             atb_header = [['Antibiotico', 'Resultado', 'Interpretacion']]
-                            atb_col_widths = [3.0*inch, 1.5*inch, 2.0*inch]
+                            atb_col_widths = layout.atb_col_widths if layout else [3.0*inch, 1.5*inch, 2.0*inch]
 
                             atb_header_table = Table(atb_header, colWidths=atb_col_widths)
                             atb_header_table.setStyle(TableStyle([
@@ -8096,7 +9099,7 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                                 })
 
                             if micro_data:
-                                micro_col_widths = [2.5*inch, 2.0*inch, 0.8*inch, 1.2*inch]
+                                micro_col_widths = layout.micro_col_widths if layout else [2.5*inch, 2.0*inch, 0.8*inch, 1.2*inch]
                                 micro_table = Table(micro_data, colWidths=micro_col_widths)
                                 micro_style = [
                                     ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
@@ -8156,15 +9159,16 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                 # Encabezado de la tabla
                 header_data = [['Descripción del Examen', 'Resultado', 'Unidad', 'Valores Referenciales']]
 
-                # Anchos de columna
-                col_widths = [2.5*inch, 1.2*inch, 0.8*inch, 2.0*inch]
+                # Anchos de columna (proporcionales al formato)
+                col_widths = layout.col_widths if layout else [2.5*inch, 1.2*inch, 0.8*inch, 2.0*inch]
 
+                _ft_hdr = layout.font_header_tabla if layout else 9
                 header_table = Table(header_data, colWidths=col_widths)
                 header_table.setStyle(TableStyle([
                     ('BOX', (0, 0), (-1, -1), 1, colors.black),
                     ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.black),
                     ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                    ('FONTSIZE', (0, 0), (-1, 0), 9),
+                    ('FONTSIZE', (0, 0), (-1, 0), _ft_hdr),
                     ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
                     ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
                     ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
@@ -8244,10 +9248,11 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                 if param_data_filtrado and tiene_resultados:
                     param_table = Table(param_data_filtrado, colWidths=col_widths)
 
-                    # Estilo base para datos
+                    # Estilo base para datos (fuente proporcional)
+                    _ft_datos = layout.font_datos_tabla if layout else 8
                     table_style = [
                         ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-                        ('FONTSIZE', (0, 0), (-1, -1), 8),
+                        ('FONTSIZE', (0, 0), (-1, -1), _ft_datos),
                         ('ALIGN', (1, 0), (1, -1), 'CENTER'),  # Resultado centrado
                         ('ALIGN', (2, 0), (2, -1), 'CENTER'),  # Unidad centrada
                         ('ALIGN', (3, 0), (3, -1), 'LEFT'),    # Valores ref a la izquierda
@@ -8262,23 +9267,25 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                         if row[1] == '' and row[2] == '' and row[3] == '':
                             # Es una fila de sección
                             table_style.append(('FONTNAME', (0, i), (0, i), 'Helvetica-Bold'))
-                            table_style.append(('FONTSIZE', (0, i), (0, i), 8))
+                            table_style.append(('FONTSIZE', (0, i), (0, i), _ft_datos))
 
                     param_table.setStyle(TableStyle(table_style))
                     prueba_elements.append(param_table)
 
                     # Agregar espacio después de cada prueba
-                    prueba_elements.append(Spacer(1, 0.15*inch))
+                    _sp_prueba = layout.space_after_prueba if layout else 0.15*inch
+                    prueba_elements.append(Spacer(1, _sp_prueba))
 
                     # Intentar mantener la prueba junta
                     elements.append(KeepTogether(prueba_elements))
 
             # Pie de página con fecha de generación
             elements.append(Spacer(1, 0.3*inch))
+            _ft_gen = layout.font_generado if layout else 7
             footer_style = ParagraphStyle(
                 'Footer',
                 parent=styles['Normal'],
-                fontSize=7,
+                fontSize=_ft_gen,
                 alignment=TA_CENTER,
                 textColor=colors.grey
             )
@@ -13774,6 +14781,71 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
             messagebox.showerror("Error", f"Error al abrir configuración:\n{e}")
             import traceback
             traceback.print_exc()
+
+    # ── Red LAN ─────────────────────────────────────────────────────────────
+
+    def show_config_red_lan(self):
+        """Ventana de configuración de base de datos en red LAN."""
+        win = tk.Toplevel(self.root)
+        win.title("🌐 Configuración Red LAN")
+        win.grab_set()
+        win.configure(bg='white')
+        hacer_ventana_responsiva(win, 540, 320, min_ancho=480, min_alto=260)
+
+        tk.Frame(win, bg='#1565c0', height=50).pack(fill='x')
+        tk.Label(win, text="🌐 Configuración Base de Datos en Red",
+                 font=('Segoe UI', 13, 'bold'), bg='#1565c0', fg='white').place(x=0, y=10, relwidth=1)
+
+        frame = tk.Frame(win, bg='white')
+        frame.pack(fill='both', expand=True, padx=25, pady=20)
+
+        tk.Label(frame, text="Ruta de la base de datos (local o UNC):",
+                 font=('Segoe UI', 10, 'bold'), bg='white').pack(anchor='w')
+        tk.Label(frame, text="Ejemplo LAN: \\\\SERVIDOR\\compartido\\ANgesLAB.accdb",
+                 font=('Segoe UI', 8), bg='white', fg='#555').pack(anchor='w', pady=(0, 6))
+
+        entry_ruta = tk.Entry(frame, font=('Segoe UI', 10), relief='flat', bg='#f8f9fa',
+                              highlightthickness=1, highlightbackground='#bbb')
+        entry_ruta.pack(fill='x', ipady=6)
+        entry_ruta.insert(0, db.db_path)
+
+        def examinar():
+            from tkinter.filedialog import askopenfilename
+            ruta = askopenfilename(title="Seleccionar base de datos",
+                                   filetypes=[("Access DB", "*.accdb *.mdb")])
+            if ruta:
+                entry_ruta.delete(0, 'end')
+                entry_ruta.insert(0, ruta)
+
+        btn_row = tk.Frame(frame, bg='white')
+        btn_row.pack(fill='x', pady=(10, 0))
+        tk.Button(btn_row, text="📂 Examinar", font=('Segoe UI', 9),
+                  bg='#78909c', fg='white', relief='flat', padx=10,
+                  command=examinar).pack(side='left')
+
+        tk.Label(frame,
+                 text="⚠️  Reinicie la aplicación para que el cambio tenga efecto.",
+                 font=('Segoe UI', 8, 'italic'), bg='white', fg='#e65100').pack(anchor='w', pady=(14, 0))
+
+        def guardar():
+            nueva = entry_ruta.get().strip()
+            if not nueva:
+                messagebox.showerror("Error", "La ruta no puede estar vacía", parent=win)
+                return
+            Database.guardar_ruta_db(nueva)
+            messagebox.showinfo("Guardado",
+                                "Ruta guardada.\nReinicie ANgesLAB para conectar a la nueva base de datos.",
+                                parent=win)
+            win.destroy()
+
+        btn_f = tk.Frame(win, bg='white')
+        btn_f.pack(fill='x', padx=25, pady=(0, 15))
+        tk.Button(btn_f, text="❌ Cancelar", font=('Segoe UI', 10),
+                  bg='#95a5a6', fg='white', relief='flat', padx=15, pady=6,
+                  command=win.destroy).pack(side='right', padx=5)
+        tk.Button(btn_f, text="💾 Guardar", font=('Segoe UI', 10, 'bold'),
+                  bg='#1565c0', fg='white', relief='flat', padx=15, pady=6,
+                  command=guardar).pack(side='right')
 
     def show_config_old(self):
         """Versión antigua de configuración (respaldo)"""
