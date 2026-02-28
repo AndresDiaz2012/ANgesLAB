@@ -311,7 +311,7 @@ class LoginWindow:
         if not PIL_AVAILABLE:
             return None
         try:
-            logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'microscopio_logo.png')
+            logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'microscopio_logo.png')
             if os.path.exists(logo_path):
                 img = PILImage.open(logo_path)
                 img = img.resize((size, size), PILImage.Resampling.LANCZOS)
@@ -920,7 +920,7 @@ class MainApplication:
         if not PIL_AVAILABLE:
             return None
         try:
-            logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'microscopio_logo.png')
+            logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'microscopio_logo.png')
             if os.path.exists(logo_path):
                 img = PILImage.open(logo_path)
                 img = img.resize((size, size), PILImage.Resampling.LANCZOS)
@@ -1164,7 +1164,7 @@ class MainApplication:
         if not PIL_AVAILABLE:
             return
         try:
-            bg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'laboratorio-clinico-2.png')
+            bg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'laboratorio-clinico-2.png')
             if not os.path.exists(bg_path):
                 return
             self._bg_original = PILImage.open(bg_path)

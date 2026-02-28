@@ -30,8 +30,8 @@ DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 OutputDir=output
 OutputBaseFilename=ANgesLAB_Demo_Setup_v1.0
-SetupIconFile=..\angeslab_icon.ico
-UninstallDisplayIcon={app}\angeslab_icon.ico
+SetupIconFile=..\assets\angeslab_icon.ico
+UninstallDisplayIcon={app}\assets\angeslab_icon.ico
 UninstallDisplayName={#MyAppFullName}
 Compression=lzma2/ultra64
 SolidCompression=yes
@@ -97,13 +97,13 @@ Source: "..\ANgesLAB.pyw"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\ANgesLAB_Demo.accdb"; DestDir: "{app}"; Flags: ignoreversion
 
 ; --- Icono ---
-Source: "..\angeslab_icon.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\assets\angeslab_icon.ico"; DestDir: "{app}\assets"; Flags: ignoreversion
 
 ; --- Recursos Graficos ---
-Source: "..\fondo.png"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\laboratorio-clinico-2.png"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\microscopio_login.png"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\microscopio_logo.png"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\assets\fondo.png"; DestDir: "{app}\assets"; Flags: ignoreversion
+Source: "..\assets\laboratorio-clinico-2.png"; DestDir: "{app}\assets"; Flags: ignoreversion
+Source: "..\assets\microscopio_login.png"; DestDir: "{app}\assets"; Flags: ignoreversion
+Source: "..\assets\microscopio_logo.png"; DestDir: "{app}\assets"; Flags: ignoreversion
 
 ; --- Logos ---
 Source: "..\logos\logo_laboratorio.jpg"; DestDir: "{app}\logos"; Flags: ignoreversion
@@ -154,7 +154,7 @@ Name: "{autodesktop}\ANgesLAB DEMO"; \
   Filename: "{code:GetPythonwPath}"; \
   Parameters: """{app}\{#MyAppExeName}"""; \
   WorkingDir: "{app}"; \
-  IconFilename: "{app}\angeslab_icon.ico"; \
+  IconFilename: "{app}\assets\angeslab_icon.ico"; \
   Comment: "{#MyAppFullName}"; \
   Tasks: desktopicon
 
@@ -162,13 +162,13 @@ Name: "{group}\ANgesLAB DEMO"; \
   Filename: "{code:GetPythonwPath}"; \
   Parameters: """{app}\{#MyAppExeName}"""; \
   WorkingDir: "{app}"; \
-  IconFilename: "{app}\angeslab_icon.ico"; \
+  IconFilename: "{app}\assets\angeslab_icon.ico"; \
   Comment: "Iniciar {#MyAppFullName}"; \
   Tasks: startmenuicon
 
 Name: "{group}\Desinstalar ANgesLAB DEMO"; \
   Filename: "{uninstallexe}"; \
-  IconFilename: "{app}\angeslab_icon.ico"; \
+  IconFilename: "{app}\assets\angeslab_icon.ico"; \
   Tasks: startmenuicon
 
 ; ============================================================================

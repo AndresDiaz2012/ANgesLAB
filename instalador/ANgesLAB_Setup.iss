@@ -35,8 +35,8 @@ LicenseFile=licencia.txt
 InfoBeforeFile=info_antes.txt
 OutputDir=output
 OutputBaseFilename=ANgesLAB_Setup_v2.1
-SetupIconFile=..\angeslab_icon.ico
-UninstallDisplayIcon={app}\angeslab_icon.ico
+SetupIconFile=..\assets\angeslab_icon.ico
+UninstallDisplayIcon={app}\assets\angeslab_icon.ico
 UninstallDisplayName={#MyAppFullName}
 Compression=lzma2/ultra64
 SolidCompression=yes
@@ -138,18 +138,18 @@ Name: "{app}\firmas"; Permissions: users-modify
 ; --- Aplicacion Principal ---
 Source: "..\ANgesLAB.pyw"; DestDir: "{app}"; Components: main; Flags: ignoreversion; \
   AfterInstall: SetProgressMessage('Instalando aplicacion principal...')
-Source: "..\angeslab_icon.ico"; DestDir: "{app}"; Components: main; Flags: ignoreversion
+Source: "..\assets\angeslab_icon.ico"; DestDir: "{app}\assets"; Components: main; Flags: ignoreversion
 
 ; --- Base de Datos ---
 Source: "..\ANgesLAB.accdb"; DestDir: "{app}"; Components: database; Flags: onlyifdoesntexist uninsneveruninstall; \
   AfterInstall: SetProgressMessage('Configurando base de datos...')
 
 ; --- Recursos Graficos ---
-Source: "..\fondo.png"; DestDir: "{app}"; Components: resources; Flags: ignoreversion; \
+Source: "..\assets\fondo.png"; DestDir: "{app}\assets"; Components: resources; Flags: ignoreversion; \
   AfterInstall: SetProgressMessage('Instalando recursos graficos...')
-Source: "..\laboratorio-clinico-2.png"; DestDir: "{app}"; Components: resources; Flags: ignoreversion
-Source: "..\microscopio_login.png"; DestDir: "{app}"; Components: resources; Flags: ignoreversion
-Source: "..\microscopio_logo.png"; DestDir: "{app}"; Components: resources; Flags: ignoreversion
+Source: "..\assets\laboratorio-clinico-2.png"; DestDir: "{app}\assets"; Components: resources; Flags: ignoreversion
+Source: "..\assets\microscopio_login.png"; DestDir: "{app}\assets"; Components: resources; Flags: ignoreversion
+Source: "..\assets\microscopio_logo.png"; DestDir: "{app}\assets"; Components: resources; Flags: ignoreversion
 
 ; --- Logos ---
 Source: "..\logos\logo_laboratorio.jpg"; DestDir: "{app}\logos"; Components: resources; Flags: ignoreversion
@@ -206,7 +206,7 @@ Name: "{autodesktop}\ANgesLAB"; \
   Filename: "{code:GetPythonwPath}"; \
   Parameters: """{app}\{#MyAppExeName}"""; \
   WorkingDir: "{app}"; \
-  IconFilename: "{app}\angeslab_icon.ico"; \
+  IconFilename: "{app}\assets\angeslab_icon.ico"; \
   Comment: "{#MyAppFullName} v{#MyAppVersion}"; \
   Tasks: desktopicon
 
@@ -215,14 +215,14 @@ Name: "{group}\ANgesLAB"; \
   Filename: "{code:GetPythonwPath}"; \
   Parameters: """{app}\{#MyAppExeName}"""; \
   WorkingDir: "{app}"; \
-  IconFilename: "{app}\angeslab_icon.ico"; \
+  IconFilename: "{app}\assets\angeslab_icon.ico"; \
   Comment: "Iniciar {#MyAppFullName}"; \
   Tasks: startmenuicon
 
 ; Menu Inicio - Desinstalar
 Name: "{group}\Desinstalar ANgesLAB"; \
   Filename: "{uninstallexe}"; \
-  IconFilename: "{app}\angeslab_icon.ico"; \
+  IconFilename: "{app}\assets\angeslab_icon.ico"; \
   Comment: "Desinstalar {#MyAppName} de su equipo"; \
   Tasks: startmenuicon
 

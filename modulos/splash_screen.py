@@ -110,7 +110,7 @@ class SplashScreen:
 
         try:
             base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            img_path = os.path.join(base_path, 'fondo.png')
+            img_path = os.path.join(base_path, 'assets', 'fondo.png')
 
             if not os.path.exists(img_path):
                 self._crear_fondo_alternativo()
