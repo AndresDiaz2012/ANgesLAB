@@ -8930,7 +8930,7 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                     titulo_micro_style = ParagraphStyle(
                         'TituloMicro',
                         parent=styles['Heading2'],
-                        fontSize=11,
+                        fontSize=9,
                         fontName='Helvetica-Bold',
                         alignment=TA_CENTER,
                         spaceAfter=6,

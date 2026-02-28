@@ -104,7 +104,7 @@ class LayoutCalculator:
         self.font_pac_valor   = self._fs(8)   # Valores paciente
 
         # Fuentes del cuerpo
-        self.font_titulo_prueba = self._fs(11)  # Título de prueba
+        self.font_titulo_prueba = self._fs(9)   # Título de prueba
         self.font_header_tabla  = self._fs(9)   # Header de tabla resultados
         self.font_datos_tabla   = self._fs(8)   # Datos de tabla
         self.font_seccion       = self._fs(9)   # Nombre de sección
