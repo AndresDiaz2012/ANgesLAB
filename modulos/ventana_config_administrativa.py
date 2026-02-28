@@ -272,7 +272,7 @@ class VentanaConfigAdministrativa:
         row += 1
 
         self.combo_papel = ttk.Combobox(scrollable_frame, state='readonly', width=30)
-        self.combo_papel['values'] = ('Carta (8.5" x 11")', 'A4 (21cm x 29.7cm)', 'Oficio (8.5" x 13")')
+        self.combo_papel['values'] = ('Carta (8.5" x 11")', 'A4 (21cm x 29.7cm)', 'Oficio (8.5" x 14")', 'Media Carta (5.5" x 8.5")')
         self.combo_papel.grid(row=row, column=0, sticky='w', padx=20, pady=5)
         row += 1
 
@@ -645,12 +645,8 @@ class VentanaConfigAdministrativa:
             self.var_formato.set(config.get('FormatoImpresion', 'Completa'))
 
             papel = config.get('TamanoPapel', 'Carta')
-            if papel == 'Carta':
-                self.combo_papel.current(0)
-            elif papel == 'A4':
-                self.combo_papel.current(1)
-            else:
-                self.combo_papel.current(2)
+            _papel_idx = {'Carta': 0, 'A4': 1, 'Oficio': 2, 'Media Carta': 3}
+            self.combo_papel.current(_papel_idx.get(papel, 0))
 
             self.var_orientacion.set(config.get('Orientacion', 'Vertical'))
 
@@ -743,7 +739,7 @@ class VentanaConfigAdministrativa:
                 self.configurador.guardar_logo(self.logo_ruta_temporal)
 
             # Impresión
-            papel_map = {0: 'Carta', 1: 'A4', 2: 'Oficio'}
+            papel_map = {0: 'Carta', 1: 'A4', 2: 'Oficio', 3: 'Media Carta'}
             datos_imp = {
                 'FormatoImpresion': self.var_formato.get(),
                 'TamanoPapel': papel_map.get(self.combo_papel.current(), 'Carta'),
