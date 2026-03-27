@@ -4,7 +4,6 @@ Módulo Administrativo - Lógica de Negocio
 ANgesLAB - Sistema de Gestión de Laboratorio Clínico
 
 Clases:
-- ControlAcceso: RBAC (permisos por rol/usuario)
 - GestorCajaChica: Apertura/cierre de caja y movimientos
 - GestorCuentasPorCobrar: Cartera de clientes
 - GestorCuentasPorPagar: Deudas con proveedores
@@ -15,158 +14,6 @@ Copyright © 2024-2026 ANgesLAB Solutions
 """
 
 from datetime import datetime, date, timedelta
-
-
-class ControlAcceso:
-    """Control de acceso basado en roles (RBAC)."""
-
-    def __init__(self, db):
-        self.db = db
-        self._cache = {}
-        self._tablas_disponibles = None
-
-    def _tablas_existen(self):
-        """Verifica si las tablas RBAC están disponibles."""
-        if self._tablas_disponibles is not None:
-            return self._tablas_disponibles
-        try:
-            self.db.query("SELECT TOP 1 * FROM [Roles]")
-            self.db.query("SELECT TOP 1 * FROM [PermisosModulo]")
-            self.db.query("SELECT TOP 1 * FROM [UsuarioRol]")
-            self._tablas_disponibles = True
-        except Exception:
-            self._tablas_disponibles = False
-        return self._tablas_disponibles
-
-    def tiene_permiso(self, usuario_id, modulo, tipo='PuedeVer'):
-        """Verifica si el usuario tiene un permiso específico.
-
-        Args:
-            usuario_id: ID del usuario
-            modulo: Nombre del módulo (caja_chica, facturacion, etc.)
-            tipo: PuedeVer, PuedeCrear, PuedeEditar, PuedeEliminar, PuedeExportar
-
-        Returns:
-            True si tiene permiso, True si tablas no existen (compatibilidad)
-        """
-        if not self._tablas_existen():
-            return True
-
-        cache_key = f"{usuario_id}_{modulo}_{tipo}"
-        if cache_key in self._cache:
-            return self._cache[cache_key]
-
-        try:
-            sql = (
-                f"SELECT p.{tipo} FROM [PermisosModulo] p "
-                f"INNER JOIN [UsuarioRol] ur ON p.RolID = ur.RolID "
-                f"WHERE ur.UsuarioID = {usuario_id} AND ur.Activo = True "
-                f"AND p.NombreModulo = '{modulo}' "
-                f"ORDER BY p.{tipo} DESC"
-            )
-            resultado = self.db.query_one(sql)
-            tiene = bool(resultado and resultado.get(tipo))
-            self._cache[cache_key] = tiene
-            return tiene
-        except Exception:
-            return True
-
-    def obtener_permisos_modulo(self, usuario_id, modulo):
-        """Retorna dict completo de permisos para un módulo."""
-        if not self._tablas_existen():
-            return {
-                'PuedeVer': True, 'PuedeCrear': True, 'PuedeEditar': True,
-                'PuedeEliminar': True, 'PuedeExportar': True
-            }
-        try:
-            sql = (
-                f"SELECT p.PuedeVer, p.PuedeCrear, p.PuedeEditar, p.PuedeEliminar, p.PuedeExportar "
-                f"FROM [PermisosModulo] p "
-                f"INNER JOIN [UsuarioRol] ur ON p.RolID = ur.RolID "
-                f"WHERE ur.UsuarioID = {usuario_id} AND ur.Activo = True "
-                f"AND p.NombreModulo = '{modulo}'"
-            )
-            resultado = self.db.query_one(sql)
-            if resultado:
-                return {k: bool(v) for k, v in resultado.items()}
-            return {
-                'PuedeVer': False, 'PuedeCrear': False, 'PuedeEditar': False,
-                'PuedeEliminar': False, 'PuedeExportar': False
-            }
-        except Exception:
-            return {
-                'PuedeVer': True, 'PuedeCrear': True, 'PuedeEditar': True,
-                'PuedeEliminar': True, 'PuedeExportar': True
-            }
-
-    def asignar_rol(self, usuario_id, rol_id):
-        """Asigna un rol a un usuario."""
-        existente = self.db.query_one(
-            f"SELECT UsuarioRolID FROM [UsuarioRol] "
-            f"WHERE UsuarioID={usuario_id} AND RolID={rol_id}"
-        )
-        if existente:
-            self.db.update('UsuarioRol', {'Activo': True},
-                          f"UsuarioID={usuario_id} AND RolID={rol_id}")
-        else:
-            self.db.insert('UsuarioRol', {
-                'UsuarioID': usuario_id, 'RolID': rol_id, 'Activo': True
-            })
-        self._cache.clear()
-
-    def remover_rol(self, usuario_id, rol_id):
-        """Desactiva un rol de un usuario."""
-        self.db.update('UsuarioRol', {'Activo': False},
-                      f"UsuarioID={usuario_id} AND RolID={rol_id}")
-        self._cache.clear()
-
-    def crear_rol(self, nombre, descripcion, nivel_acceso):
-        """Crea un nuevo rol."""
-        self.db.insert('Roles', {
-            'NombreRol': nombre,
-            'Descripcion': descripcion,
-            'NivelAcceso': nivel_acceso,
-            'Activo': True
-        })
-
-    def actualizar_permisos(self, rol_id, modulo, permisos):
-        """Actualiza permisos de un rol para un módulo.
-
-        Args:
-            permisos: dict con PuedeVer, PuedeCrear, etc.
-        """
-        existente = self.db.query_one(
-            f"SELECT PermisoID FROM [PermisosModulo] "
-            f"WHERE RolID={rol_id} AND NombreModulo='{modulo}'"
-        )
-        if existente:
-            self.db.update('PermisosModulo', permisos,
-                          f"RolID={rol_id} AND NombreModulo='{modulo}'")
-        else:
-            permisos['RolID'] = rol_id
-            permisos['NombreModulo'] = modulo
-            self.db.insert('PermisosModulo', permisos)
-        self._cache.clear()
-
-    def listar_roles(self):
-        """Lista todos los roles activos."""
-        try:
-            return self.db.query("SELECT * FROM [Roles] WHERE Activo=True ORDER BY NivelAcceso DESC")
-        except Exception:
-            return []
-
-    def listar_usuarios_con_roles(self):
-        """Lista usuarios con sus roles asignados."""
-        try:
-            return self.db.query(
-                "SELECT u.UsuarioID, u.NombreCompleto, u.NombreUsuario, "
-                "r.NombreRol, r.NivelAcceso, ur.Activo "
-                "FROM ([Usuarios] u LEFT JOIN [UsuarioRol] ur ON u.UsuarioID = ur.UsuarioID) "
-                "LEFT JOIN [Roles] r ON ur.RolID = r.RolID "
-                "ORDER BY u.NombreCompleto"
-            )
-        except Exception:
-            return []
 
 
 class GestorCajaChica:
@@ -267,39 +114,6 @@ class GestorCajaChica:
         except Exception as e:
             return False, f"Error al registrar movimiento: {e}"
 
-    def anular_movimiento(self, movimiento_id, motivo):
-        """Anula un movimiento y revierte el efecto en la caja."""
-        try:
-            mov = self.db.query_one(
-                f"SELECT * FROM [MovimientosCaja] WHERE MovimientoID={movimiento_id}"
-            )
-            if not mov:
-                return False, "Movimiento no encontrado"
-            if mov.get('Anulado'):
-                return False, "El movimiento ya está anulado"
-
-            motivo_safe = str(motivo).replace("'", "''")
-            self.db.execute(
-                f"UPDATE [MovimientosCaja] SET Anulado=True, "
-                f"MotivoAnulacion='{motivo_safe}' WHERE MovimientoID={movimiento_id}"
-            )
-
-            monto = float(mov.get('Monto', 0) or 0)
-            caja_id = mov.get('CajaID')
-            if mov.get('Tipo') == 'Ingreso':
-                self.db.execute(
-                    f"UPDATE [CajaChica] SET TotalIngresos = TotalIngresos - {monto} "
-                    f"WHERE CajaID={caja_id}"
-                )
-            else:
-                self.db.execute(
-                    f"UPDATE [CajaChica] SET TotalEgresos = TotalEgresos - {monto} "
-                    f"WHERE CajaID={caja_id}"
-                )
-            return True, "Movimiento anulado"
-        except Exception as e:
-            return False, f"Error al anular movimiento: {e}"
-
     def obtener_movimientos_caja(self, caja_id):
         """Lista movimientos de una caja."""
         try:
@@ -332,35 +146,6 @@ class GestorCuentasPorCobrar:
 
     def __init__(self, db):
         self.db = db
-
-    def crear_cuenta_desde_factura(self, factura_id):
-        """Crea una cuenta por cobrar vinculada a una factura."""
-        try:
-            factura = self.db.query_one(
-                f"SELECT * FROM [Facturas] WHERE FacturaID={factura_id}"
-            )
-            if not factura:
-                return False, "Factura no encontrada"
-
-            monto = float(factura.get('MontoTotal', 0) or factura.get('Total', 0) or 0)
-            paciente_id = factura.get('PacienteID', 'Null')
-            nombre = str(factura.get('NombrePaciente', '')).replace("'", "''")
-
-            fecha_emision = datetime.now()
-            fecha_venc = fecha_emision + timedelta(days=30)
-            fe = fecha_emision.strftime('#%m/%d/%Y %H:%M:%S#')
-            fv = fecha_venc.strftime('#%m/%d/%Y#')
-
-            self.db.execute(
-                f"INSERT INTO [CuentasPorCobrar] (FacturaID, PacienteID, NombrePaciente, "
-                f"FechaEmision, FechaVencimiento, MontoOriginal, MontoCobrado, SaldoPendiente, "
-                f"DiasVencida, Estado) "
-                f"VALUES ({factura_id}, {paciente_id}, '{nombre}', {fe}, {fv}, "
-                f"{monto}, 0, {monto}, 0, 'Pendiente')"
-            )
-            return True, "Cuenta por cobrar creada"
-        except Exception as e:
-            return False, f"Error al crear cuenta: {e}"
 
     def registrar_cobro(self, cuenta_id, monto, forma_pago_id, referencia='', registrar_en_caja=True):
         """Registra un cobro parcial o total."""
@@ -809,12 +594,6 @@ class GestorGastos:
         except Exception:
             return []
 
-    def listar_categorias(self):
-        """Lista categorías de gastos activas."""
-        try:
-            return self.db.query("SELECT * FROM [CategoriaGastos] WHERE Activo=True ORDER BY Nombre")
-        except Exception:
-            return []
 
 
 class ResumenFinanciero:
@@ -883,34 +662,6 @@ class ResumenFinanciero:
         except Exception:
             return {'anio': anio, 'mes': mes, 'ingresos': 0, 'egresos': 0, 'saldo': 0}
 
-    def resumen_periodo(self, fecha_desde, fecha_hasta):
-        """Resumen financiero de un período arbitrario."""
-        try:
-            ingresos = self.db.query(
-                f"SELECT SUM(Monto) as Total FROM [MovimientosCaja] "
-                f"WHERE Tipo='Ingreso' AND Anulado=False "
-                f"AND Fecha >= #{fecha_desde}# AND Fecha <= #{fecha_hasta}#"
-            )
-            egresos = self.db.query(
-                f"SELECT SUM(Monto) as Total FROM [MovimientosCaja] "
-                f"WHERE Tipo='Egreso' AND Anulado=False "
-                f"AND Fecha >= #{fecha_desde}# AND Fecha <= #{fecha_hasta}#"
-            )
-            total_ingresos = float((ingresos[0].get('Total') if ingresos else None) or 0)
-            total_egresos = float((egresos[0].get('Total') if egresos else None) or 0)
-
-            return {
-                'desde': fecha_desde, 'hasta': fecha_hasta,
-                'ingresos': total_ingresos,
-                'egresos': total_egresos,
-                'saldo': total_ingresos - total_egresos
-            }
-        except Exception:
-            return {
-                'desde': fecha_desde, 'hasta': fecha_hasta,
-                'ingresos': 0, 'egresos': 0, 'saldo': 0
-            }
-
     def estado_cartera(self):
         """Estado de cartera (cuentas por cobrar y pagar)."""
         cxc = GestorCuentasPorCobrar(self.db)
@@ -969,9 +720,3 @@ class ResumenFinanciero:
         except Exception:
             return []
 
-    def listar_formas_pago(self):
-        """Lista formas de pago activas."""
-        try:
-            return self.db.query("SELECT * FROM [FormasPago] WHERE Activo=True ORDER BY Nombre")
-        except Exception:
-            return []

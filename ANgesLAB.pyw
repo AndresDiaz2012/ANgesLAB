@@ -4472,8 +4472,9 @@ class MainApplication:
         self.pac_fecha_nac = tk.Entry(row_extra, font=('Segoe UI', 10), width=12, relief='flat', bg='#f8f9fa',
                                       highlightthickness=1, highlightbackground=COLORS['border'])
         self.pac_fecha_nac.pack(side='left', ipady=4, padx=(0, 3))
-        self.lbl_edad_calc = tk.Label(row_extra, text="", font=('Segoe UI', 9, 'bold'),
-                                       bg='white', fg='#1565c0')
+        self.lbl_edad_calc = tk.Label(row_extra, text="", font=('Segoe UI', 11, 'bold'),
+                                       bg='#e3f2fd', fg='#0d47a1', padx=8, pady=1,
+                                       relief='groove', borderwidth=1)
         self.lbl_edad_calc.pack(side='left', padx=(0, 10))
 
         def _actualizar_edad_desde_fecha(*args):
@@ -4487,15 +4488,19 @@ class MainApplication:
                         dias = (hoy - fn).days
                         meses = dias // 30
                         if meses < 1:
-                            self.lbl_edad_calc.config(text=f"{dias}d")
+                            txt = f"Edad: {dias}d"
                         else:
-                            self.lbl_edad_calc.config(text=f"{meses}m")
+                            txt = f"Edad: {meses}m"
                     else:
-                        self.lbl_edad_calc.config(text=f"{anios} años")
+                        txt = f"Edad: {anios} años"
+                    self.lbl_edad_calc.config(text=txt, bg='#e3f2fd')
+                    self.lbl_edad_calc.pack(side='left', padx=(0, 10))
                 except ValueError:
                     self.lbl_edad_calc.config(text="")
+                    self.lbl_edad_calc.pack_forget()
             else:
                 self.lbl_edad_calc.config(text="")
+                self.lbl_edad_calc.pack_forget()
 
         self.pac_fecha_nac.bind('<KeyRelease>', _actualizar_edad_desde_fecha)
         self.pac_fecha_nac.bind('<FocusOut>', _actualizar_edad_desde_fecha)
@@ -5110,6 +5115,7 @@ class MainApplication:
         self.pac_apellidos.delete(0, 'end')
         self.pac_fecha_nac.delete(0, 'end')
         self.lbl_edad_calc.config(text="")
+        self.lbl_edad_calc.pack_forget()
         self.pac_sexo.set('')
         self.pac_telefono.delete(0, 'end')
 
@@ -7320,7 +7326,7 @@ Forma de Pago: {self.combo_forma_pago.get()}
                         tk.Label(param_header, text="Unidad", font=('Segoe UI', 8, 'bold'),
                                 bg='#e3f2fd', width=10).pack(side='left', padx=5, pady=3)
                         tk.Label(param_header, text="Valor de Referencia", font=('Segoe UI', 8, 'bold'),
-                                bg='#e3f2fd', width=28, fg='#1565c0').pack(side='left', padx=5, pady=3)
+                                bg='#e3f2fd', width=32, fg='#1565c0').pack(side='left', padx=5, pady=3)
 
                     self.parametro_entries[detalle_id] = []
                     seccion_actual = None
@@ -7784,9 +7790,9 @@ Forma de Pago: {self.combo_forma_pago.get()}
                             ref_display = f"● {ref_display}"
 
                         lbl_ref = tk.Label(param_row, text=ref_display,
-                                font=('Segoe UI', 9, 'bold'), bg=bg_row, width=28, anchor='w',
+                                font=('Segoe UI', 9, 'bold'), bg=bg_row, width=32, anchor='w',
                                 fg='#0d47a1' if _es_ref_especifico else '#1565c0',
-                                wraplength=220, justify='left')
+                                wraplength=280, justify='left')
                         lbl_ref.pack(side='left', padx=5, pady=2)
                         if _es_ref_especifico and _grupo_etario:
                             lbl_ref.bind('<Enter>', lambda e, l=lbl_ref:
@@ -8600,8 +8606,9 @@ Forma de Pago: {self.combo_forma_pago.get()}
             if not resultados:
                 return 0
 
-            # Obtener sexo del paciente para referencias sex-specific
+            # Obtener sexo y edad del paciente para referencias ajustadas
             sexo_paciente = valores.get('sexo')
+            edad_paciente = valores.get('edad')
 
             # Guardar los resultados calculados
             # IMPORTANTE: Un cálculo puede aplicarse a MÚLTIPLES parámetros
@@ -8612,8 +8619,8 @@ Forma de Pago: {self.combo_forma_pago.get()}
                 if valor_calculado is None:
                     continue
 
-                # Obtener valor de referencia sex-specific para este cálculo
-                ref_calculo = calculador.obtener_referencia_calculo(nombre_calculo, sexo_paciente)
+                # Obtener valor de referencia ajustado por sexo y edad
+                ref_calculo = calculador.obtener_referencia_calculo(nombre_calculo, sexo_paciente, edad_paciente)
 
                 # Buscar TODOS los parámetros destino que coincidan (puede haber múltiples)
                 params_destino = []
@@ -8809,8 +8816,9 @@ Forma de Pago: {self.combo_forma_pago.get()}
             if not resultados:
                 return 0
 
-            # Sexo del paciente para referencias sex-specific
+            # Sexo y edad del paciente para referencias ajustadas
             sexo_paciente = valores_global.get('sexo')
+            edad_paciente = valores_global.get('edad')
 
             # 3. Guardar resultados en los parámetros destino
             calculos_guardados = 0
@@ -8818,7 +8826,7 @@ Forma de Pago: {self.combo_forma_pago.get()}
                 if valor_calculado is None:
                     continue
 
-                ref_calculo = calculador.obtener_referencia_calculo(nombre_calculo, sexo_paciente)
+                ref_calculo = calculador.obtener_referencia_calculo(nombre_calculo, sexo_paciente, edad_paciente)
 
                 # Buscar destinos que coincidan con este cálculo
                 params_destino = destinos.get(nombre_calculo, [])

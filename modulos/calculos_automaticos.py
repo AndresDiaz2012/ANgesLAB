@@ -2345,7 +2345,7 @@ class CalculadorLaboratorio:
             None: 'H: 1.7-2.0 | M: 1.5-1.8 m²',
         },
         'fena': {
-            None: '< 1% Prerrenal\n1 - 2% Mixto\n> 2% Renal',
+            None: '<1% Prerrenal | 1-2% Mixto | >2% Renal',
         },
         'relacion_bun_cr': {
             None: '10 - 20',
@@ -2363,21 +2363,83 @@ class CalculadorLaboratorio:
         },
     }
 
-    def obtener_referencia_calculo(self, nombre_calculo: str, sexo: str = None) -> Optional[str]:
+    # Rangos de referencia ajustados por grupo etario (edad en años)
+    # Fuentes: KDIGO 2012, Harrison's Principles of Internal Medicine
+    REFERENCIAS_POR_EDAD = {
+        'depuracion_cockcroft': [
+            # (edad_min, edad_max, ref_M, ref_F)
+            (0, 17,    '70 - 140 mL/min',  '70 - 140 mL/min'),
+            (18, 29,   '97 - 137 mL/min',  '88 - 128 mL/min'),
+            (30, 39,   '90 - 130 mL/min',  '82 - 120 mL/min'),
+            (40, 49,   '83 - 120 mL/min',  '75 - 112 mL/min'),
+            (50, 59,   '75 - 110 mL/min',  '68 - 102 mL/min'),
+            (60, 69,   '68 - 100 mL/min',  '61 - 93 mL/min'),
+            (70, 150,  '60 - 90 mL/min',   '54 - 84 mL/min'),
+        ],
+        'depuracion_creatinina': [
+            (0, 17,    '70 - 140 mL/min',  '70 - 140 mL/min'),
+            (18, 29,   '97 - 137 mL/min',  '88 - 128 mL/min'),
+            (30, 39,   '90 - 130 mL/min',  '82 - 120 mL/min'),
+            (40, 49,   '83 - 120 mL/min',  '75 - 112 mL/min'),
+            (50, 59,   '75 - 110 mL/min',  '68 - 102 mL/min'),
+            (60, 69,   '68 - 100 mL/min',  '61 - 93 mL/min'),
+            (70, 150,  '60 - 90 mL/min',   '54 - 84 mL/min'),
+        ],
+        'depuracion_corregida': [
+            (0, 17,    '70 - 140 mL/min/1.73m²',  '70 - 140 mL/min/1.73m²'),
+            (18, 29,   '97 - 137 mL/min/1.73m²',  '88 - 128 mL/min/1.73m²'),
+            (30, 39,   '90 - 130 mL/min/1.73m²',  '82 - 120 mL/min/1.73m²'),
+            (40, 49,   '83 - 120 mL/min/1.73m²',  '75 - 112 mL/min/1.73m²'),
+            (50, 59,   '75 - 110 mL/min/1.73m²',  '68 - 102 mL/min/1.73m²'),
+            (60, 69,   '68 - 100 mL/min/1.73m²',  '61 - 93 mL/min/1.73m²'),
+            (70, 150,  '60 - 90 mL/min/1.73m²',   '54 - 84 mL/min/1.73m²'),
+        ],
+        'egfr': [
+            (0, 17,    '> 90 mL/min/1.73m²',  '> 90 mL/min/1.73m²'),
+            (18, 39,   '> 90 mL/min/1.73m²',  '> 90 mL/min/1.73m²'),
+            (40, 49,   '> 85 mL/min/1.73m²',  '> 85 mL/min/1.73m²'),
+            (50, 59,   '> 80 mL/min/1.73m²',  '> 80 mL/min/1.73m²'),
+            (60, 69,   '> 70 mL/min/1.73m²',  '> 70 mL/min/1.73m²'),
+            (70, 150,  '> 60 mL/min/1.73m²',  '> 60 mL/min/1.73m²'),
+        ],
+        'excrecion_creatinina_24h': [
+            (0, 17,    '800 - 1800 mg/24h',  '600 - 1500 mg/24h'),
+            (18, 59,   '1000 - 2000 mg/24h', '800 - 1800 mg/24h'),
+            (60, 150,  '800 - 1700 mg/24h',  '600 - 1500 mg/24h'),
+        ],
+    }
+
+    def obtener_referencia_calculo(self, nombre_calculo: str, sexo: str = None,
+                                    edad: int = None) -> Optional[str]:
         """
-        Obtiene el valor de referencia para un cálculo según el sexo del paciente.
+        Obtiene el valor de referencia para un cálculo según sexo y edad del paciente.
 
         Args:
             nombre_calculo: Nombre canónico del cálculo
             sexo: 'M', 'F' o None
+            edad: Edad en años (opcional, para ajuste por grupo etario)
 
         Returns:
             Texto del valor de referencia, o None
         """
+        sexo_norm = sexo.upper()[:1] if sexo and isinstance(sexo, str) else None
+
+        # Intentar referencia ajustada por edad si está disponible
+        if edad is not None and nombre_calculo in self.REFERENCIAS_POR_EDAD:
+            try:
+                edad_val = int(edad)
+                for e_min, e_max, ref_m, ref_f in self.REFERENCIAS_POR_EDAD[nombre_calculo]:
+                    if e_min <= edad_val <= e_max:
+                        if sexo_norm == 'F':
+                            return ref_f
+                        return ref_m  # M o genérico
+            except (ValueError, TypeError):
+                pass
+
+        # Fallback a referencia estática por sexo
         refs = self.REFERENCIAS_CALCULOS.get(nombre_calculo)
         if not refs:
             return None
-        sexo_norm = sexo.upper()[:1] if sexo and isinstance(sexo, str) else None
         if sexo_norm in ('M', 'F') and sexo_norm in refs:
             return refs[sexo_norm]
         return refs.get(None)
