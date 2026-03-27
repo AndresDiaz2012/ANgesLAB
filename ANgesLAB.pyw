@@ -2729,8 +2729,8 @@ class MainApplication:
                                        highlightthickness=1, highlightbackground=COLORS['border'])
         entries['fecha_nac'].pack(side='left', ipady=5, padx=(0, 5))
         lbl_edad_pac = tk.Label(row5, text="", font=('Segoe UI', 11, 'bold'),
-                                bg='#e3f2fd', fg='#0d47a1', padx=8, pady=1,
-                                relief='groove', borderwidth=1)
+                                bg='white', fg='#0d47a1')
+        lbl_edad_pac.pack(side='left', padx=(0, 10))
 
         def _calc_edad_pac(*args):
             fs = entries['fecha_nac'].get().strip()
@@ -2745,14 +2745,12 @@ class MainApplication:
                         txt = f"Edad: {d}d" if m < 1 else f"Edad: {m}m"
                     else:
                         txt = f"Edad: {a} años"
-                    lbl_edad_pac.config(text=txt, bg='#e3f2fd')
-                    lbl_edad_pac.pack(side='left', padx=(0, 10))
+                    lbl_edad_pac.config(text=txt, bg='#e3f2fd',
+                                        relief='groove', borderwidth=1, padx=8, pady=1)
                 except ValueError:
-                    lbl_edad_pac.config(text="")
-                    lbl_edad_pac.pack_forget()
+                    lbl_edad_pac.config(text="", bg='white', relief='flat', borderwidth=0)
             else:
-                lbl_edad_pac.config(text="")
-                lbl_edad_pac.pack_forget()
+                lbl_edad_pac.config(text="", bg='white', relief='flat', borderwidth=0)
 
         entries['fecha_nac'].bind('<KeyRelease>', _calc_edad_pac)
         entries['fecha_nac'].bind('<FocusOut>', _calc_edad_pac)
@@ -4478,8 +4476,7 @@ class MainApplication:
                                       highlightthickness=1, highlightbackground=COLORS['border'])
         self.pac_fecha_nac.pack(side='left', ipady=4, padx=(0, 3))
         self.lbl_edad_calc = tk.Label(row_extra, text="", font=('Segoe UI', 11, 'bold'),
-                                       bg='#e3f2fd', fg='#0d47a1', padx=8, pady=1,
-                                       relief='groove', borderwidth=1)
+                                       bg='white', fg='#0d47a1')
         self.lbl_edad_calc.pack(side='left', padx=(0, 10))
 
         def _actualizar_edad_desde_fecha(*args):
@@ -4498,14 +4495,12 @@ class MainApplication:
                             txt = f"Edad: {meses}m"
                     else:
                         txt = f"Edad: {anios} años"
-                    self.lbl_edad_calc.config(text=txt, bg='#e3f2fd')
-                    self.lbl_edad_calc.pack(side='left', padx=(0, 10))
+                    self.lbl_edad_calc.config(text=txt, bg='#e3f2fd',
+                                              relief='groove', borderwidth=1, padx=8, pady=1)
                 except ValueError:
-                    self.lbl_edad_calc.config(text="")
-                    self.lbl_edad_calc.pack_forget()
+                    self.lbl_edad_calc.config(text="", bg='white', relief='flat', borderwidth=0)
             else:
-                self.lbl_edad_calc.config(text="")
-                self.lbl_edad_calc.pack_forget()
+                self.lbl_edad_calc.config(text="", bg='white', relief='flat', borderwidth=0)
 
         self.pac_fecha_nac.bind('<KeyRelease>', _actualizar_edad_desde_fecha)
         self.pac_fecha_nac.bind('<FocusOut>', _actualizar_edad_desde_fecha)
@@ -5119,8 +5114,7 @@ class MainApplication:
         self.pac_nombres.delete(0, 'end')
         self.pac_apellidos.delete(0, 'end')
         self.pac_fecha_nac.delete(0, 'end')
-        self.lbl_edad_calc.config(text="")
-        self.lbl_edad_calc.pack_forget()
+        self.lbl_edad_calc.config(text="", bg='white', relief='flat', borderwidth=0)
         self.pac_sexo.set('')
         self.pac_telefono.delete(0, 'end')
 
