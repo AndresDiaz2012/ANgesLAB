@@ -5,7 +5,7 @@ color 0B
 
 echo.
 echo ================================================================
-echo     ANgesLAB v2.1 - Instalando Dependencias de Python
+echo     ANgesLAB v2.0 - Instalando Dependencias de Python
 echo ================================================================
 echo.
 echo  Este proceso instalara las librerias necesarias para el
@@ -14,7 +14,7 @@ echo.
 echo ----------------------------------------------------------------
 
 echo.
-echo  [1/3] Instalando reportlab (generacion de reportes PDF)...
+echo  [1/5] Instalando reportlab (generacion de reportes PDF)...
 pip install reportlab --quiet --disable-pip-version-check
 if %errorlevel% neq 0 (
     echo         [ERROR] No se pudo instalar reportlab.
@@ -24,7 +24,7 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo  [2/3] Instalando Pillow (procesamiento de imagenes)...
+echo  [2/5] Instalando Pillow (procesamiento de imagenes)...
 pip install Pillow --quiet --disable-pip-version-check
 if %errorlevel% neq 0 (
     echo         [ERROR] No se pudo instalar Pillow.
@@ -34,13 +34,33 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo  [3/3] Instalando pypiwin32 (integracion Windows/COM)...
+echo  [3/5] Instalando pypiwin32 (integracion Windows/COM)...
 pip install pypiwin32 --quiet --disable-pip-version-check
 if %errorlevel% neq 0 (
     echo         [ERROR] No se pudo instalar pypiwin32.
     echo         Verifique su conexion a internet e intente nuevamente.
 ) else (
     echo         [OK] pypiwin32 instalado correctamente.
+)
+
+echo.
+echo  [4/5] Instalando qrcode (codigos QR en reportes)...
+pip install "qrcode[pil]" --quiet --disable-pip-version-check
+if %errorlevel% neq 0 (
+    echo         [AVISO] No se pudo instalar qrcode.
+    echo         Los codigos QR en reportes no estaran disponibles.
+) else (
+    echo         [OK] qrcode instalado correctamente.
+)
+
+echo.
+echo  [5/5] Instalando pyBCV (tasas de cambio BCV)...
+pip install pyBCV --quiet --disable-pip-version-check
+if %errorlevel% neq 0 (
+    echo         [AVISO] No se pudo instalar pyBCV.
+    echo         Las tasas BCV automaticas no estaran disponibles.
+) else (
+    echo         [OK] pyBCV instalado correctamente.
 )
 
 echo.
@@ -55,4 +75,3 @@ echo    3. Ejecutar como Administrador si es necesario
 echo.
 echo ================================================================
 echo.
-pause

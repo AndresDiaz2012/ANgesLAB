@@ -12,6 +12,9 @@ Fecha: 2026-02
 from datetime import datetime, timedelta
 import tempfile
 import os
+import logging
+
+_log = logging.getLogger('angeslab.cotizaciones')
 
 # ── ReportLab ────────────────────────────────────────────────────────────────
 try:
@@ -60,9 +63,23 @@ class GestorCotizaciones:
                     Estado         TEXT(20) DEFAULT 'Pendiente',
                     Observaciones  TEXT(255),
                     UsuarioID      INTEGER,
-                    SolicitudID    INTEGER
+                    SolicitudID    INTEGER,
+                    NombreSolicitante  TEXT(150),
+                    TelefonoSolicitante TEXT(50),
+                    CedulaSolicitante  TEXT(30)
                 )
             """)
+        # Migrar columnas de solicitante si no existen
+        for col, tipo in [('NombreSolicitante', 'TEXT(150)'),
+                          ('TelefonoSolicitante', 'TEXT(50)'),
+                          ('CedulaSolicitante', 'TEXT(30)')]:
+            try:
+                self.db.query(f"SELECT TOP 1 {col} FROM Cotizaciones")
+            except Exception:
+                try:
+                    self.db.execute(f"ALTER TABLE Cotizaciones ADD COLUMN {col} {tipo}")
+                except Exception:
+                    pass
         try:
             self.db.query("SELECT TOP 1 DetalleCotizacionID FROM DetalleCotizaciones")
         except Exception:
@@ -92,22 +109,28 @@ class GestorCotizaciones:
 
     # ── CRUD ─────────────────────────────────────────────────────────────────
 
-    def crear_cotizacion(self, paciente_id, pruebas, medico_id=None,
-                         descuento=0.0, observaciones='', dias_vigencia=15):
+    def crear_cotizacion(self, paciente_id=None, pruebas=None, medico_id=None,
+                         descuento=0.0, observaciones='', dias_vigencia=15,
+                         nombre_solicitante='', telefono_solicitante='',
+                         cedula_solicitante=''):
         """
         Crea una cotización.
 
         Args:
-            paciente_id: ID del paciente
+            paciente_id: ID del paciente (opcional si hay datos de solicitante)
             pruebas: list[dict] con {id, nombre, precio}
             medico_id: ID del médico (opcional)
             descuento: descuento monetario
             observaciones: texto libre
             dias_vigencia: días hasta vencimiento
+            nombre_solicitante: nombre libre del solicitante
+            telefono_solicitante: teléfono del solicitante
+            cedula_solicitante: cédula del solicitante
 
         Returns:
             dict con {exito, cotizacion_id, numero, mensaje}
         """
+        pruebas = pruebas or []
         try:
             numero = self._generar_numero()
             ahora  = datetime.now()
@@ -115,9 +138,8 @@ class GestorCotizaciones:
             subtotal = sum(float(p.get('precio', 0)) for p in pruebas)
             total    = max(subtotal - float(descuento), 0)
 
-            self.db.insert('Cotizaciones', {
+            datos = {
                 'NumeroCotizacion': numero,
-                'PacienteID':      paciente_id,
                 'MedicoID':        medico_id,
                 'FechaCotizacion': ahora,
                 'FechaVencimiento':vence,
@@ -127,7 +149,14 @@ class GestorCotizaciones:
                 'Estado':          'Pendiente',
                 'Observaciones':   observaciones,
                 'UsuarioID':       self.user.get('UsuarioID', 1),
-            })
+                'NombreSolicitante':   nombre_solicitante,
+                'TelefonoSolicitante': telefono_solicitante,
+                'CedulaSolicitante':   cedula_solicitante,
+            }
+            if paciente_id:
+                datos['PacienteID'] = paciente_id
+
+            self.db.insert('Cotizaciones', datos)
             cot = self.db.query_one(
                 f"SELECT CotizacionID FROM Cotizaciones WHERE NumeroCotizacion='{numero}'"
             )
@@ -159,7 +188,9 @@ class GestorCotizaciones:
                 f"(c.NumeroCotizacion LIKE '%{filtro}%' "
                 f"OR p.Nombres LIKE '%{filtro}%' "
                 f"OR p.Apellidos LIKE '%{filtro}%' "
-                f"OR p.NumeroDocumento LIKE '%{filtro}%')"
+                f"OR p.NumeroDocumento LIKE '%{filtro}%' "
+                f"OR c.NombreSolicitante LIKE '%{filtro}%' "
+                f"OR c.CedulaSolicitante LIKE '%{filtro}%')"
             )
         if estado and estado != 'Todos':
             where_parts.append(f"c.Estado = '{estado}'")
@@ -168,9 +199,14 @@ class GestorCotizaciones:
         sql = f"""
             SELECT c.CotizacionID, c.NumeroCotizacion, c.FechaCotizacion,
                    c.FechaVencimiento, c.Total, c.Estado,
-                   p.Nombres & ' ' & p.Apellidos AS Paciente,
-                   p.NumeroDocumento,
-                   c.SolicitudID
+                   IIF(c.PacienteID IS NOT NULL,
+                       p.Nombres & ' ' & p.Apellidos,
+                       c.NombreSolicitante) AS Paciente,
+                   IIF(c.PacienteID IS NOT NULL,
+                       p.NumeroDocumento,
+                       c.CedulaSolicitante) AS NumeroDocumento,
+                   c.SolicitudID, c.PacienteID,
+                   c.NombreSolicitante, c.TelefonoSolicitante, c.CedulaSolicitante
               FROM Cotizaciones c
               LEFT JOIN Pacientes p ON c.PacienteID = p.PacienteID
               {where}
@@ -182,11 +218,18 @@ class GestorCotizaciones:
         """Retorna la cotización y sus ítems."""
         cot = self.db.query_one(
             f"""SELECT c.*,
-                       p.Nombres & ' ' & p.Apellidos AS NombrePaciente,
-                       p.NumeroDocumento, p.Telefono1,
+                       IIF(c.PacienteID IS NOT NULL,
+                           p.Nombres & ' ' & p.Apellidos,
+                           c.NombreSolicitante) AS NombrePaciente,
+                       IIF(c.PacienteID IS NOT NULL,
+                           p.NumeroDocumento,
+                           c.CedulaSolicitante) AS NumeroDocumento,
+                       IIF(c.PacienteID IS NOT NULL,
+                           p.Telefono1,
+                           c.TelefonoSolicitante) AS Telefono1,
                        m.Nombres & ' ' & m.Apellidos AS NombreMedico
-                  FROM Cotizaciones c
-                  LEFT JOIN Pacientes p ON c.PacienteID = p.PacienteID
+                  FROM (Cotizaciones c
+                  LEFT JOIN Pacientes p ON c.PacienteID = p.PacienteID)
                   LEFT JOIN Medicos   m ON c.MedicoID   = m.MedicoID
                  WHERE c.CotizacionID = {cotizacion_id}"""
         )
@@ -196,7 +239,29 @@ class GestorCotizaciones:
         return cot, items
 
     def anular_cotizacion(self, cotizacion_id):
-        self.db.update('Cotizaciones', {'Estado': 'Anulada'}, f"CotizacionID={cotizacion_id}")
+        """Anula una cotización validando su estado actual.
+
+        Returns:
+            dict {exito, mensaje}
+        """
+        try:
+            cot = self.db.fetch_one(
+                "SELECT Estado FROM Cotizaciones WHERE CotizacionID=?",
+                (cotizacion_id,)
+            )
+            if not cot:
+                return {'exito': False, 'mensaje': 'Cotización no encontrada'}
+            estado = (cot.get('Estado') or '').strip()
+            if estado == 'Anulada':
+                return {'exito': False, 'mensaje': 'La cotización ya está anulada'}
+            if estado == 'Convertida':
+                return {'exito': False, 'mensaje': 'No se puede anular una cotización convertida en solicitud'}
+            self.db.update('Cotizaciones', {'Estado': 'Anulada'},
+                           f"CotizacionID={cotizacion_id}")
+            return {'exito': True, 'mensaje': 'Cotización anulada exitosamente'}
+        except Exception as e:
+            _log.error("Error anulando cotización %s: %s", cotizacion_id, e, exc_info=True)
+            return {'exito': False, 'mensaje': f'Error al anular: {e}'}
 
     def convertir_a_solicitud(self, cotizacion_id):
         """
@@ -214,55 +279,98 @@ class GestorCotizaciones:
             if not items:
                 return {'exito': False, 'mensaje': 'La cotización no tiene ítems'}
 
-            # Generar número de solicitud
-            anio = datetime.now().year
-            r = self.db.query_one(
-                f"SELECT MAX(NumeroSolicitud) AS Ult FROM Solicitudes "
-                f"WHERE NumeroSolicitud LIKE '{anio}-%'"
-            )
-            try:
-                n = int((r or {}).get('Ult', f'{anio}-000000').split('-')[-1]) + 1
-            except Exception:
-                n = 1
-            num_sol = f"{anio}-{n:06d}"
+            # Validar que la cotización tenga paciente registrado
+            pac_id = cot.get('PacienteID')
+            if not pac_id:
+                return {'exito': False,
+                        'mensaje': 'La cotización no tiene un paciente registrado.\n'
+                                   'Registre al paciente primero y vuelva a intentar.'}
 
+            # Verificar que las pruebas tengan PruebaID válido
+            pruebas_sin_id = [it for it in items if not it.get('PruebaID')]
+            if pruebas_sin_id:
+                return {'exito': False,
+                        'mensaje': 'Hay ítems sin prueba asociada en la cotización.\n'
+                                   'Verifique los datos antes de convertir.'}
+
+            # Generar número de solicitud usando el configurador si existe
+            ahora = datetime.now()
+            anio = ahora.year
+            try:
+                from modulos.config_numeracion import ConfiguradorNumeracion
+                configurador = ConfiguradorNumeracion(self.db)
+                num_sol = configurador.generar_numero('solicitud')
+            except Exception:
+                r = self.db.query_one(
+                    f"SELECT MAX(NumeroSolicitud) AS Ult FROM Solicitudes "
+                    f"WHERE NumeroSolicitud LIKE '{anio}-%'"
+                )
+                try:
+                    n = int((r or {}).get('Ult', f'{anio}-000000').split('-')[-1]) + 1
+                except Exception:
+                    n = 1
+                num_sol = f"{anio}-{n:06d}"
+
+            # Calcular montos desde los ítems
+            subtotal = sum(float(it.get('PrecioUnitario') or it.get('SubTotal') or 0)
+                          for it in items)
+            descuento = float(cot.get('Descuento') or 0)
+            total = float(cot.get('Total') or max(subtotal - descuento, 0))
+
+            # Crear la solicitud con todos los campos necesarios
             sol_data = {
                 'NumeroSolicitud':    num_sol,
-                'PacienteID':         cot['PacienteID'],
-                'FechaSolicitud':     datetime.now(),
+                'PacienteID':         pac_id,
+                'FechaSolicitud':     ahora,
+                'HoraSolicitud':      ahora.strftime('%H:%M:%S'),
+                'TipoServicio':       'Particular',
                 'EstadoSolicitud':    'Pendiente',
-                'MontoTotal':         float(cot.get('Total') or 0),
+                'PorcentajeDescuento': 0,
+                'MontoDescuento':     descuento,
+                'MontoIVA':           0,
+                'MontoNeto':          subtotal - descuento,
+                'MontoTotal':         total,
+                'Observaciones':      f'Generada desde cotización {cot.get("NumeroCotizacion", "")}',
                 'UsuarioRegistro':    self.user.get('UsuarioID', 1),
-                'FechaRegistro':      datetime.now(),
+                'FechaRegistro':      ahora,
             }
             if cot.get('MedicoID'):
                 sol_data['MedicoID'] = cot['MedicoID']
+
             self.db.insert('Solicitudes', sol_data)
             sol = self.db.query_one(
                 f"SELECT SolicitudID FROM Solicitudes WHERE NumeroSolicitud='{num_sol}'"
             )
             if not sol:
-                return {'exito': False, 'mensaje': 'Error al crear solicitud'}
+                return {'exito': False, 'mensaje': 'Error al crear solicitud en la base de datos'}
             sol_id = sol['SolicitudID']
 
+            # Insertar detalles (pruebas) de la solicitud
             for it in items:
+                precio = float(it.get('PrecioUnitario') or 0)
                 self.db.insert('DetalleSolicitudes', {
                     'SolicitudID':    sol_id,
-                    'PruebaID':       it.get('PruebaID'),
-                    'PrecioUnitario': float(it.get('PrecioUnitario') or 0),
+                    'PruebaID':       it['PruebaID'],
+                    'PrecioUnitario': precio,
                     'Cantidad':       1,
-                    'Subtotal':       float(it.get('SubTotal') or 0),
+                    'Subtotal':       precio,
                     'Estado':         'Pendiente',
                 })
 
+            # Marcar cotización como convertida
             self.db.update('Cotizaciones',
                            {'Estado': 'Convertida', 'SolicitudID': sol_id},
                            f"CotizacionID={cotizacion_id}")
 
             return {'exito': True, 'solicitud_id': sol_id,
-                    'numero_solicitud': num_sol, 'mensaje': 'Solicitud creada exitosamente'}
+                    'numero_solicitud': num_sol,
+                    'mensaje': f'Solicitud {num_sol} creada exitosamente'}
         except Exception as e:
-            return {'exito': False, 'mensaje': str(e)}
+            import logging
+            logging.getLogger('angeslab.cotizaciones').error(
+                "Error convirtiendo cotizacion %s a solicitud: %s",
+                cotizacion_id, e, exc_info=True)
+            return {'exito': False, 'mensaje': f'Error al convertir: {str(e)}'}
 
     # ── PDF ──────────────────────────────────────────────────────────────────
 

@@ -16,6 +16,9 @@ Copyright 2024-2026 ANgesLAB Solutions
 import tkinter as tk
 from tkinter import ttk, messagebox
 from datetime import datetime, date
+import logging
+
+_log_admin = logging.getLogger("angeslab.admin")
 
 try:
     from modulos.modulo_administrativo import (
@@ -81,13 +84,13 @@ class VentanaAdministrativa:
     def _obtener_formas_pago(self):
         try:
             return self.db.query("SELECT * FROM [FormasPago] WHERE Activo=True ORDER BY Nombre")
-        except:
+        except Exception:
             return []
 
     def _obtener_categorias(self):
         try:
             return self.db.query("SELECT * FROM [CategoriaGastos] WHERE Activo=True ORDER BY Nombre")
-        except:
+        except Exception:
             return []
 
     def _crear_tarjeta_kpi(self, parent, icon, label, value, color, formato_moneda=True):
@@ -240,7 +243,7 @@ class VentanaAdministrativa:
                     fecha_str = fecha_apertura.strftime('%d/%m/%Y %H:%M')
                 else:
                     fecha_str = str(fecha_apertura)
-            except:
+            except Exception:
                 fecha_str = str(fecha_apertura)
         else:
             fecha_str = 'N/A'
@@ -304,7 +307,7 @@ class VentanaAdministrativa:
                     hora = fecha.strftime('%H:%M:%S')
                 else:
                     hora = str(fecha).split(' ')[-1] if ' ' in str(fecha) else str(fecha)
-            except:
+            except Exception:
                 hora = str(fecha)
 
             tipo = mov.get('Tipo', '')
@@ -565,7 +568,7 @@ class VentanaAdministrativa:
                         fecha_e = fecha_e.strftime('%d/%m/%Y')
                     if isinstance(fecha_v, datetime):
                         fecha_v = fecha_v.strftime('%d/%m/%Y')
-                except:
+                except Exception:
                     pass
 
                 tree.insert('', 'end', iid=str(c.get('CuentaCobrarID', '')),
@@ -589,9 +592,31 @@ class VentanaAdministrativa:
         cargar_datos()
 
         # Botones
+        btn_frame = tk.Frame(main_frame, bg=COLORS['bg'])
+        btn_frame.pack(fill='x', pady=10)
+
         if self._puede_registrar_movimientos():
-            btn_frame = tk.Frame(main_frame, bg=COLORS['bg'])
-            btn_frame.pack(fill='x', pady=10)
+
+            def nueva_cxc():
+                dialogo = DialogoNuevaCxC(app.root, self.db)
+                if dialogo.resultado:
+                    exito, msg = self.gestor_cxc.crear_cuenta_manual(dialogo.resultado)
+                    if exito:
+                        messagebox.showinfo("Exito", msg)
+                        self.show_cuentas_cobrar(app)  # Refresh completo con KPIs
+                    else:
+                        messagebox.showerror("Error", msg)
+
+            def importar_solicitudes():
+                if not messagebox.askyesno("Confirmar",
+                        "Se importaran las solicitudes con saldo pendiente "
+                        "que no estan registradas en Cuentas por Cobrar.\n\n"
+                        "¿Desea continuar?"):
+                    return
+                cant, msg = self.gestor_cxc.importar_solicitudes_pendientes()
+                messagebox.showinfo("Importar Solicitudes", msg)
+                if cant > 0:
+                    self.show_cuentas_cobrar(app)
 
             def registrar_cobro():
                 sel = tree.selection()
@@ -617,9 +642,17 @@ class VentanaAdministrativa:
                         dialogo.resultado.get('referencia', ''))
                     if exito:
                         messagebox.showinfo("Exito", msg)
-                        cargar_datos()
+                        self.show_cuentas_cobrar(app)
                     else:
                         messagebox.showerror("Error", msg)
+
+            tk.Button(btn_frame, text="➕ Nueva Cuenta", font=('Segoe UI', 11, 'bold'),
+                      bg=COLORS['primary'], fg='white', relief='flat', padx=20, pady=8,
+                      cursor='hand2', command=nueva_cxc).pack(side='left', padx=5)
+
+            tk.Button(btn_frame, text="📋 Importar Solicitudes", font=('Segoe UI', 11, 'bold'),
+                      bg=COLORS['info'], fg='white', relief='flat', padx=20, pady=8,
+                      cursor='hand2', command=importar_solicitudes).pack(side='left', padx=5)
 
             tk.Button(btn_frame, text="💵 Registrar Cobro", font=('Segoe UI', 11, 'bold'),
                       bg=COLORS['success'], fg='white', relief='flat', padx=20, pady=8,
@@ -629,7 +662,7 @@ class VentanaAdministrativa:
     # VISTA 4: CUENTAS POR PAGAR
     # ==================================================================
     def show_cuentas_pagar(self, app):
-        if not self._puede_operar_caja():
+        if not self._puede_registrar_movimientos():
             messagebox.showwarning("Acceso Denegado",
                                    "No tiene permisos para esta seccion.")
             return
@@ -708,7 +741,7 @@ class VentanaAdministrativa:
                         fecha_e = fecha_e.strftime('%d/%m/%Y')
                     if isinstance(fecha_v, datetime):
                         fecha_v = fecha_v.strftime('%d/%m/%Y')
-                except:
+                except Exception:
                     pass
 
                 tree.insert('', 'end', iid=str(c.get('CuentaPagarID', '')),
@@ -783,7 +816,7 @@ class VentanaAdministrativa:
     # VISTA 5: GASTOS
     # ==================================================================
     def show_gastos(self, app):
-        if not self._puede_operar_caja():
+        if not self._puede_registrar_movimientos():
             messagebox.showwarning("Acceso Denegado",
                                    "No tiene permisos para esta seccion.")
             return
@@ -842,14 +875,14 @@ class VentanaAdministrativa:
                 if fd:
                     parts = fd.split('/')
                     fecha_desde = f"{parts[1]}/{parts[0]}/{parts[2]}"
-            except:
+            except Exception:
                 pass
             try:
                 fh = entry_hasta.get().strip()
                 if fh:
                     parts = fh.split('/')
                     fecha_hasta = f"{parts[1]}/{parts[0]}/{parts[2]}"
-            except:
+            except Exception:
                 pass
 
             cat_sel = combo_cat.get()
@@ -866,7 +899,7 @@ class VentanaAdministrativa:
                 try:
                     if isinstance(fecha, datetime):
                         fecha = fecha.strftime('%d/%m/%Y')
-                except:
+                except Exception:
                     pass
 
                 monto = float(g.get('Monto', 0) or 0)
@@ -1044,7 +1077,7 @@ class DialogoMovimientoCaja:
                 nombre = fp.get('Nombre', '')
                 formas.append(nombre)
                 self.formas_map[nombre] = fp.get('FormaPagoID')
-        except:
+        except Exception:
             formas = ['Efectivo', 'Transferencia', 'Punto de Venta']
 
         self.combo_pago = ttk.Combobox(content, font=('Segoe UI', 11), width=25,
@@ -1070,7 +1103,7 @@ class DialogoMovimientoCaja:
                 cat_list = self.db.query(
                     "SELECT Nombre FROM [CategoriaGastos] WHERE Activo=True ORDER BY Nombre")
                 cats = [c.get('Nombre', '') for c in cat_list]
-            except:
+            except Exception:
                 cats = ['Material', 'Servicios', 'Otros']
 
         self.combo_cat = ttk.Combobox(content, font=('Segoe UI', 11), width=25,
@@ -1217,7 +1250,7 @@ class DialogoCierreCaja:
                 color = COLORS['success'] if abs(dif) < 0.01 else (
                     COLORS['danger'] if dif < 0 else COLORS['warning'])
                 self.lbl_diferencia.config(text=f"Diferencia: ${dif:,.2f}", fg=color)
-            except:
+            except Exception:
                 self.lbl_diferencia.config(text="Diferencia: ---", fg=COLORS['text_light'])
 
         self.entry_efectivo.bind('<KeyRelease>', calcular_diferencia)
@@ -1362,6 +1395,163 @@ class DialogoRegistrarCobro:
         self.dialog.destroy()
 
 
+class DialogoNuevaCxC:
+    """Dialogo para crear nueva cuenta por cobrar con busqueda de paciente."""
+
+    def __init__(self, parent, db):
+        self.resultado = None
+        self.db = db
+        self.paciente_sel = None  # {PacienteID, Nombres, Apellidos}
+
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("Nueva Cuenta por Cobrar")
+        self.dialog.configure(bg='white')
+        self.dialog.grab_set()
+        self.dialog.focus_set()
+
+        ancho, alto = 540, 560
+        x = (self.dialog.winfo_screenwidth() - ancho) // 2
+        y = (self.dialog.winfo_screenheight() - alto) // 2
+        self.dialog.geometry(f"{ancho}x{alto}+{x}+{y}")
+        self.dialog.resizable(False, False)
+
+        self._crear_ui()
+        self.dialog.wait_window()
+
+    def _crear_ui(self):
+        header = tk.Frame(self.dialog, bg=COLORS['primary'], height=50)
+        header.pack(fill='x')
+        header.pack_propagate(False)
+        tk.Label(header, text="➕ Nueva Cuenta por Cobrar", font=('Segoe UI', 13, 'bold'),
+                 bg=COLORS['primary'], fg='white').pack(pady=12)
+
+        content = tk.Frame(self.dialog, bg='white')
+        content.pack(fill='both', expand=True, padx=25, pady=15)
+
+        # -- Busqueda de paciente --
+        tk.Label(content, text="Buscar Paciente:", font=('Segoe UI', 10, 'bold'),
+                 bg='white').pack(anchor='w', pady=(0, 3))
+
+        search_row = tk.Frame(content, bg='white')
+        search_row.pack(fill='x', pady=(0, 5))
+
+        self.entry_buscar = ttk.Entry(search_row, font=('Segoe UI', 11), width=30)
+        self.entry_buscar.pack(side='left', fill='x', expand=True)
+        self.entry_buscar.bind('<KeyRelease>', self._buscar_pacientes)
+
+        self.lbl_paciente = tk.Label(content, text="Paciente: (ninguno seleccionado)",
+                                      font=('Segoe UI', 10), bg='#fff9c4', fg=COLORS['text'],
+                                      padx=8, pady=4, anchor='w')
+        self.lbl_paciente.pack(fill='x', pady=(0, 5))
+
+        # Lista de resultados de busqueda
+        list_frame = tk.Frame(content, bg='white', height=90)
+        list_frame.pack(fill='x', pady=(0, 8))
+        list_frame.pack_propagate(False)
+
+        self.tree_pac = ttk.Treeview(list_frame, columns=('ID', 'Documento', 'Nombre'),
+                                      show='headings', height=3)
+        self.tree_pac.heading('ID', text='ID')
+        self.tree_pac.heading('Documento', text='Documento')
+        self.tree_pac.heading('Nombre', text='Nombre')
+        self.tree_pac.column('ID', width=35, anchor='center')
+        self.tree_pac.column('Documento', width=100)
+        self.tree_pac.column('Nombre', width=250)
+        self.tree_pac.pack(fill='both', expand=True)
+        self.tree_pac.bind('<<TreeviewSelect>>', self._seleccionar_paciente)
+
+        # -- Campos de la cuenta --
+        tk.Label(content, text="Monto ($):", font=('Segoe UI', 10),
+                 bg='white').pack(anchor='w', pady=(5, 2))
+        self.entry_monto = ttk.Entry(content, font=('Segoe UI', 11), width=15)
+        self.entry_monto.pack(anchor='w', pady=(0, 5))
+
+        row_dias = tk.Frame(content, bg='white')
+        row_dias.pack(fill='x', pady=(5, 5))
+        tk.Label(row_dias, text="Dias Vencimiento:", font=('Segoe UI', 10),
+                 bg='white').pack(side='left')
+        self.entry_dias = ttk.Entry(row_dias, font=('Segoe UI', 11), width=8)
+        self.entry_dias.pack(side='left', padx=10)
+        self.entry_dias.insert(0, "30")
+
+        tk.Label(content, text="Observaciones:", font=('Segoe UI', 10),
+                 bg='white').pack(anchor='w', pady=(5, 2))
+        self.txt_obs = tk.Text(content, font=('Segoe UI', 10), height=2, width=40,
+                                relief='solid', borderwidth=1)
+        self.txt_obs.pack(fill='x', pady=(0, 5))
+
+        # Botones
+        btn_frame = tk.Frame(self.dialog, bg='white')
+        btn_frame.pack(side='bottom', fill='x', padx=25, pady=15)
+
+        tk.Button(btn_frame, text="✅ Guardar", font=('Segoe UI', 11, 'bold'),
+                  bg=COLORS['primary'], fg='white', relief='flat', padx=20, pady=8,
+                  cursor='hand2', command=self._guardar).pack(side='left', padx=5)
+        tk.Button(btn_frame, text="❌ Cancelar", font=('Segoe UI', 11),
+                  bg=COLORS['text_light'], fg='white', relief='flat', padx=20, pady=8,
+                  cursor='hand2', command=self.dialog.destroy).pack(side='right', padx=5)
+
+    def _buscar_pacientes(self, event=None):
+        texto = self.entry_buscar.get().strip()
+        for item in self.tree_pac.get_children():
+            self.tree_pac.delete(item)
+        if len(texto) < 2:
+            return
+        texto_safe = texto.replace("'", "''").replace("%", "").replace("_", "")
+        try:
+            pacientes = self.db.query(
+                f"SELECT TOP 20 PacienteID, NumeroDocumento, Nombres, Apellidos "
+                f"FROM Pacientes "
+                f"WHERE Nombres & ' ' & Apellidos LIKE '%{texto_safe}%' "
+                f"   OR NumeroDocumento LIKE '%{texto_safe}%' "
+                f"ORDER BY Apellidos, Nombres"
+            )
+            for p in pacientes:
+                nombre = f"{p.get('Nombres', '')} {p.get('Apellidos', '')}"
+                self.tree_pac.insert('', 'end', iid=str(p.get('PacienteID', '')),
+                                      values=(p.get('PacienteID', ''),
+                                              p.get('NumeroDocumento', ''),
+                                              nombre))
+        except Exception:
+            pass
+
+    def _seleccionar_paciente(self, event=None):
+        sel = self.tree_pac.selection()
+        if sel:
+            vals = self.tree_pac.item(sel[0], 'values')
+            self.paciente_sel = {
+                'PacienteID': int(vals[0]),
+                'Nombre': vals[2],
+            }
+            self.lbl_paciente.config(text=f"Paciente: {vals[2]}  (ID: {vals[0]})")
+
+    def _guardar(self):
+        if not self.paciente_sel:
+            messagebox.showerror("Error", "Seleccione un paciente.", parent=self.dialog)
+            return
+        try:
+            monto = float(self.entry_monto.get().replace(',', ''))
+        except ValueError:
+            messagebox.showerror("Error", "Ingrese un monto valido.", parent=self.dialog)
+            return
+        if monto <= 0:
+            messagebox.showerror("Error", "El monto debe ser mayor a cero.", parent=self.dialog)
+            return
+        try:
+            dias = int(self.entry_dias.get())
+        except ValueError:
+            dias = 30
+
+        self.resultado = {
+            'PacienteID': self.paciente_sel['PacienteID'],
+            'NombrePaciente': self.paciente_sel['Nombre'],
+            'MontoOriginal': monto,
+            'DiasVencimiento': dias,
+            'Observaciones': self.txt_obs.get('1.0', 'end-1c').strip(),
+        }
+        self.dialog.destroy()
+
+
 class DialogoNuevaCxP:
     """Dialogo para crear nueva cuenta por pagar."""
 
@@ -1423,7 +1613,7 @@ class DialogoNuevaCxP:
             for c in cat_list:
                 cats.append(c.get('Nombre', ''))
                 self.cat_map[c.get('Nombre', '')] = c.get('CategoriaID')
-        except:
+        except Exception:
             cats = ['Otros']
 
         self.combo_cat = ttk.Combobox(content, font=('Segoe UI', 11), width=25,
@@ -1628,7 +1818,7 @@ class DialogoNuevoGasto:
             for c in cat_list:
                 cats.append(c.get('Nombre', ''))
                 self.cat_map[c.get('Nombre', '')] = c.get('CategoriaID')
-        except:
+        except Exception:
             cats = ['Otros']
 
         self.combo_cat = ttk.Combobox(content, font=('Segoe UI', 11), width=25,
@@ -1661,7 +1851,7 @@ class DialogoNuevoGasto:
                 nombre = fp.get('Nombre', '')
                 formas.append(nombre)
                 self.formas_map[nombre] = fp.get('FormaPagoID')
-        except:
+        except Exception:
             formas = ['Efectivo']
 
         self.combo_pago = ttk.Combobox(content, font=('Segoe UI', 11), width=25,
@@ -1733,7 +1923,7 @@ def _inicializar_tablas_administrativas(db):
         try:
             db.query(f"SELECT TOP 1 * FROM [{nombre}]")
             return True
-        except:
+        except Exception:
             return False
 
     tablas = [
@@ -1899,6 +2089,16 @@ def _inicializar_tablas_administrativas(db):
                 FechaActualizacion DATETIME
             )
         """),
+        ('TasasCambio', """
+            CREATE TABLE TasasCambio (
+                TasaID        AUTOINCREMENT PRIMARY KEY,
+                Fecha         DATETIME NOT NULL,
+                Moneda        TEXT(10) NOT NULL,
+                Tasa          DOUBLE NOT NULL,
+                FuenteAPI     TEXT(50) DEFAULT 'BCV',
+                FechaConsulta DATETIME
+            )
+        """),
     ]
 
     creadas = 0
@@ -1906,16 +2106,77 @@ def _inicializar_tablas_administrativas(db):
         if not _tabla_existe(nombre):
             try:
                 db.execute(ddl)
-                print(f"[ADMIN] Tabla {nombre} creada")
+                logging.getLogger("angeslab.ventana_administrativa").debug("[ADMIN] Tabla %s creada", nombre)
                 creadas += 1
             except Exception as e:
-                print(f"[ADMIN] Error creando tabla {nombre}: {e}")
+                logging.getLogger("angeslab.ventana_administrativa").warning("[ADMIN] Error creando tabla {nombre}: %s", e)
 
     # Insertar datos iniciales si se crearon tablas nuevas
     if creadas > 0:
         _insertar_datos_iniciales_admin(db)
 
+    # ── Migracion: agregar columnas SENIAT/IGTF/multi-moneda ──────────
+    _migrar_columnas_fiscales(db)
+
     return creadas
+
+
+def _migrar_columnas_fiscales(db):
+    """Agrega columnas de IGTF, multi-moneda y SENIAT a tablas existentes."""
+
+    # Columnas nuevas en Facturas
+    _cols_facturas = {
+        'MontoIGTF': 'CURRENCY DEFAULT 0',
+        'TasaIGTF': 'DOUBLE DEFAULT 0',
+        'AplicaIGTF': 'YESNO DEFAULT FALSE',
+        'MonedaFactura': "TEXT(10) DEFAULT 'USD'",
+        'TasaCambioDia': 'DOUBLE DEFAULT 1',
+        'MontoTotalBs': 'CURRENCY DEFAULT 0',
+        'MontoTotalUSD': 'CURRENCY DEFAULT 0',
+        'TipoDocumento': "TEXT(10) DEFAULT 'Factura'",
+        'FacturaAfectadaID': 'INTEGER',
+    }
+    for col, tipo in _cols_facturas.items():
+        try:
+            db.query(f"SELECT TOP 1 [{col}] FROM Facturas")
+        except Exception:
+            try:
+                db.execute(f"ALTER TABLE Facturas ADD COLUMN [{col}] {tipo}")
+                logging.getLogger("angeslab.ventana_administrativa").debug("[ADMIN] Facturas: columna %s agregada", col)
+            except Exception:
+                pass
+
+    # Columnas nuevas en Cobros
+    _cols_cobros = {
+        'MontoIGTF': 'CURRENCY DEFAULT 0',
+        'AplicaIGTF': 'YESNO DEFAULT FALSE',
+        'MonedaPago': "TEXT(10) DEFAULT 'USD'",
+    }
+    for col, tipo in _cols_cobros.items():
+        try:
+            db.query(f"SELECT TOP 1 [{col}] FROM Cobros")
+        except Exception:
+            try:
+                db.execute(f"ALTER TABLE Cobros ADD COLUMN [{col}] {tipo}")
+                logging.getLogger("angeslab.ventana_administrativa").debug("[ADMIN] Cobros: columna %s agregada", col)
+            except Exception:
+                pass
+
+    # Columnas nuevas en ConfiguracionAdministrativa
+    _cols_config = {
+        'TasaCOP_USD': 'DOUBLE DEFAULT 0',
+        'IGTFPorDefecto': 'DOUBLE DEFAULT 3',
+        'UltimaActualizacionBCV': 'DATETIME',
+    }
+    for col, tipo in _cols_config.items():
+        try:
+            db.query(f"SELECT TOP 1 [{col}] FROM ConfiguracionAdministrativa")
+        except Exception:
+            try:
+                db.execute(f"ALTER TABLE ConfiguracionAdministrativa ADD COLUMN [{col}] {tipo}")
+                logging.getLogger("angeslab.ventana_administrativa").debug("[ADMIN] ConfiguracionAdministrativa: columna %s agregada", col)
+            except Exception:
+                pass
 
 
 def _insertar_datos_iniciales_admin(db):
@@ -1938,10 +2199,10 @@ def _insertar_datos_iniciales_admin(db):
                         f"INSERT INTO [Roles] (NombreRol, Descripcion, NivelAcceso, Activo) "
                         f"VALUES ('{nombre}', '{desc}', {nivel}, True)"
                     )
-                except:
+                except Exception:
                     pass
-            print("[ADMIN] Roles iniciales insertados")
-    except:
+            _log_admin.debug("[ADMIN] Roles iniciales insertados")
+    except Exception:
         pass
 
     # Formas de pago
@@ -1963,10 +2224,10 @@ def _insertar_datos_iniciales_admin(db):
                         f"INSERT INTO [FormasPago] (Nombre, Activo, RequiereBanco, RequiereReferencia) "
                         f"VALUES ('{nombre}', True, {req_banco}, {req_ref})"
                     )
-                except:
+                except Exception:
                     pass
-            print("[ADMIN] Formas de pago insertadas")
-    except:
+            _log_admin.debug("[ADMIN] Formas de pago insertadas")
+    except Exception:
         pass
 
     # Bancos Venezuela
@@ -1990,10 +2251,10 @@ def _insertar_datos_iniciales_admin(db):
                         f"INSERT INTO [Bancos] (Nombre, Codigo, Activo) "
                         f"VALUES ('{nombre}', '{codigo}', True)"
                     )
-                except:
+                except Exception:
                     pass
-            print("[ADMIN] Bancos insertados")
-    except:
+            _log_admin.debug("[ADMIN] Bancos insertados")
+    except Exception:
         pass
 
     # Categorias de gastos
@@ -2018,10 +2279,10 @@ def _insertar_datos_iniciales_admin(db):
                         f"INSERT INTO [CategoriaGastos] (Nombre, Descripcion, Activo) "
                         f"VALUES ('{nombre}', '{desc}', True)"
                     )
-                except:
+                except Exception:
                     pass
-            print("[ADMIN] Categorias de gastos insertadas")
-    except:
+            _log_admin.debug("[ADMIN] Categorias de gastos insertadas")
+    except Exception:
         pass
 
     # Configuracion administrativa
@@ -2036,8 +2297,8 @@ def _insertar_datos_iniciales_admin(db):
                 f"MonedaSecundaria, TasaCambio, FechaActualizacion) "
                 f"VALUES (5000, 30, 7, False, 1000, False, 'USD', 1, {fecha})"
             )
-            print("[ADMIN] Configuracion administrativa inicializada")
-    except:
+            _log_admin.debug("[ADMIN] Configuracion administrativa inicializada")
+    except Exception:
         pass
 
     # Permisos por modulo
@@ -2067,10 +2328,10 @@ def _insertar_datos_iniciales_admin(db):
                             f"(RolID, NombreModulo, PuedeVer, PuedeCrear, PuedeEditar, PuedeEliminar, PuedeExportar) "
                             f"VALUES ({rol_id}, '{modulo}', {v}, {c}, {e}, {el}, {ex})"
                         )
-                    except:
+                    except Exception:
                         pass
-            print("[ADMIN] Permisos por modulo insertados")
-    except:
+            _log_admin.debug("[ADMIN] Permisos por modulo insertados")
+    except Exception:
         pass
 
 
@@ -2079,17 +2340,25 @@ def crear_ventana_administrativa(db, user):
     try:
         # Verificar si las tablas existen
         db.query("SELECT TOP 1 * FROM [CajaChica]")
-    except:
+    except Exception:
         # Las tablas no existen: crearlas automaticamente
-        print("[ADMIN] Tablas administrativas no encontradas. Creando automaticamente...")
+        _log_admin.debug("[ADMIN] Tablas administrativas no encontradas. Creando automaticamente...")
         try:
             _inicializar_tablas_administrativas(db)
         except Exception as e:
-            print(f"[ADMIN] Error en auto-migracion: {e}")
+            logging.getLogger("angeslab.ventana_administrativa").warning("[ADMIN] Error en auto-migracion: %s", e)
             return None
+
+    # ── Migracion fiscal: siempre ejecutar (idempotente) ──────────────
+    # Agrega columnas SENIAT/IGTF/multi-moneda a tablas existentes.
+    # Es seguro llamar cada vez: verifica existencia antes de crear.
+    try:
+        _migrar_columnas_fiscales(db)
+    except Exception as e:
+        logging.getLogger("angeslab.ventana_administrativa").warning("[ADMIN] Advertencia en migracion fiscal: %s", e)
 
     try:
         return VentanaAdministrativa(db, user)
     except Exception as e:
-        print(f"[ADMIN] Error creando VentanaAdministrativa: {e}")
+        logging.getLogger("angeslab.ventana_administrativa").warning("[ADMIN] Error creando VentanaAdministrativa: %s", e)
         return None

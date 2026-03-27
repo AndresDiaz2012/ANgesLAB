@@ -224,7 +224,7 @@ class ReportesEspecificaciones:
             self.lab_direccion = config.get('Direccion', '') if config else ''
             self.lab_telefono = config.get('Telefono', '') if config else ''
             self.lab_email = config.get('Email', '') if config else ''
-        except:
+        except Exception:
             self.lab_nombre = 'LABORATORIO CLINICO'
             self.lab_rif = 'J-00000000-0'
             self.lab_direccion = ''
@@ -1354,7 +1354,7 @@ class ReportesEspecificaciones:
                 {where_usuario}
                 ORDER BY h.FechaAccion DESC
             """)
-        except:
+        except Exception:
             historial = []
 
         html = self._generar_encabezado_html(
@@ -1813,7 +1813,7 @@ class ReportesEspecificaciones:
                 WHERE p.Activo = True {where_cat}
                 ORDER BY p.Categoria, p.Nombre
             """)
-        except:
+        except Exception:
             productos = []
 
         html = self._generar_encabezado_html(
@@ -1891,7 +1891,7 @@ class ReportesEspecificaciones:
                 WHERE p.Activo = True
                 ORDER BY p.Nombre
             """)
-        except:
+        except Exception:
             productos = []
 
         html = self._generar_encabezado_html(
@@ -1976,7 +1976,7 @@ class ReportesEspecificaciones:
                 WHERE p.Activo = True AND p.Stock <= p.StockMinimo
                 ORDER BY (p.Stock - p.StockMinimo), p.Nombre
             """)
-        except:
+        except Exception:
             productos = []
 
         html = self._generar_encabezado_html(
@@ -2177,7 +2177,7 @@ class ReportesEspecificaciones:
                 SELECT SaldoInicial FROM CierreCaja
                 WHERE DATEVALUE(Fecha) = #{f_str}#
             """)
-        except:
+        except Exception:
             saldo_inicial = None
 
         ingresos = self.db.query_one(f"""
@@ -2574,7 +2574,7 @@ class ReportesEspecificaciones:
                     return 'mil ' + self._numero_a_letras(resto)
                 return self._numero_a_letras(miles) + ' mil ' + self._numero_a_letras(resto)
             return str(numero)
-        except:
+        except Exception:
             return str(numero)
 
 

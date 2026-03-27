@@ -20,6 +20,7 @@ from datetime import datetime
 try:
     from reportlab.lib.pagesizes import letter, legal, A4
     from reportlab.lib.units import inch
+    from reportlab.lib.utils import ImageReader
     from reportlab.platypus import Image as RLImage
     REPORTLAB_OK = True
 except ImportError:
@@ -77,15 +78,15 @@ class LayoutCalculator:
 
         # ── Márgenes ──────────────────────────────────────────────────
         if self.es_media_carta:
+            self.margin_left   = 0.25 * inch
+            self.margin_right  = 0.25 * inch
+            self.margin_top    = 0.2  * inch
+            self.margin_bottom = 0.9 * inch if self._tiene_bio else 0.3 * inch
+        else:
             self.margin_left   = 0.35 * inch
             self.margin_right  = 0.35 * inch
-            self.margin_top    = 0.3  * inch
-            self.margin_bottom = 1.1 * inch if self._tiene_bio else 0.4 * inch
-        else:
-            self.margin_left   = 0.5 * inch
-            self.margin_right  = 0.5 * inch
-            self.margin_top    = 0.4 * inch
-            self.margin_bottom = 1.3 * inch if self._tiene_bio else 0.5 * inch
+            self.margin_top    = 0.25 * inch
+            self.margin_bottom = 1.1 * inch if self._tiene_bio else 0.35 * inch
 
         # Ancho de contenido disponible
         self.content_width = self.page_width - self.margin_left - self.margin_right
@@ -96,12 +97,16 @@ class LayoutCalculator:
         else:
             self._font_scale = 1.0
 
-        # Fuentes del header
-        self.font_lab_nombre  = self._fs(10)  # Nombre laboratorio
-        self.font_lab_detalle = self._fs(8)   # Dirección, teléfono, etc.
-        self.font_lab_pie     = self._fs(7)   # "Impreso por ANgesLAB..."
-        self.font_pac_label   = self._fs(8)   # Labels "NOMBRE:", "CÉDULA:"
-        self.font_pac_valor   = self._fs(8)   # Valores paciente
+        # Fuentes del header (estilo moderno Clínica Santiago)
+        self.font_lab_nombre  = self._fs(11)  # Nombre laboratorio (bold, prominente)
+        self.font_lab_detalle = self._fs(7.5) # Dirección, teléfono, etc.
+        self.font_lab_pie     = self._fs(6.5) # Texto sutil pie de header
+        self.font_orden_label = self._fs(8)   # "ORDEN NO." label
+        self.font_orden_valor = self._fs(10)  # Número de orden (bold)
+        self.font_pac_nombre  = self._fs(9)   # Nombre paciente (bold)
+        self.font_pac_label   = self._fs(7.5) # Labels "Cédula:", "Edad:"
+        self.font_pac_valor   = self._fs(7.5) # Valores paciente
+        self.font_informe_titulo = self._fs(10) # "Informe de resultados"
 
         # Fuentes del cuerpo
         self.font_titulo_prueba = self._fs(9)   # Título de prueba
@@ -115,48 +120,40 @@ class LayoutCalculator:
         self.font_bio_area    = self._fs(6)   # Área
         self.font_generado    = self._fs(7)   # "Documento generado..."
 
-        # ── Header ────────────────────────────────────────────────────
+        # ── Header (estilo moderno: logo + info lab + orden + nombre + barra + datos) ──
         if self.es_media_carta:
-            self.header_height = 1.65 * inch
-            self.logo_width    = 0.85 * inch
-            self.logo_height   = 0.7  * inch
+            self.header_height = 1.85 * inch
+            self.logo_width    = 1.50 * inch
+            self.logo_height   = 1.50 * inch
+            self.info_section_height = 0.65 * inch  # Altura de referencia para layout
         else:
-            self.header_height = 2.0 * inch
-            self.logo_width    = 1.2 * inch
-            self.logo_height   = 1.0 * inch
+            self.header_height = 2.10 * inch
+            self.logo_width    = 2.20 * inch
+            self.logo_height   = 2.20 * inch
+            self.info_section_height = 0.85 * inch  # Altura de referencia para layout
 
         # Posición info laboratorio (a la derecha del logo)
-        self.info_lab_x_offset = self.logo_width + 0.2 * inch  # desde margin_left
-        self.info_line_height  = self._fs(11)  # interlineado info lab
+        self.info_lab_x_offset = self.logo_width + 0.15 * inch
+        self.info_line_height  = self._fs(10)  # interlineado info lab (más compacto)
 
         # Máximo caracteres de dirección por línea (proporcional)
         self.max_chars_direccion = int(70 * self._sx) if not self.es_media_carta else 40
 
-        # ── Cuadro de Datos del Paciente ──────────────────────────────
+        # ── Datos del Paciente (layout 2 columnas bajo barra separadora) ──
         if self.es_media_carta:
-            self.box_height = 0.85 * inch   # Más alto para 2 columnas
-            self.box_y_offset = self.logo_height + 0.25 * inch
-            self.box_row_spacing = 0.18 * inch
-            self.box_cols = 2  # 2 columnas en media carta
-            # Posiciones de columnas (relativas a margin_left)
-            self.box_col1_x = 0.08 * inch
-            self.box_col2_x = self.content_width * 0.50
-            self.box_col3_x = self.box_col2_x  # No se usa en 2 cols
-            self.box_val_offset = 0.5 * inch
+            self.pac_row_spacing = 0.10 * inch  # interlineado muy compacto
+            self.pac_col2_x = self.content_width * 0.52  # columna derecha
+            self.pac_val_offset_col1 = 1.15 * inch
+            self.pac_val_offset_col2 = 1.10 * inch
         else:
-            self.box_height = 0.7 * inch
-            self.box_y_offset = self.logo_height + 0.35 * inch
-            self.box_row_spacing = 0.22 * inch
-            self.box_cols = 3  # 3 columnas en formato normal
-            # Posiciones de columnas (proporcionales al ancho)
-            self.box_col1_x = 0.1 * inch
-            self.box_col2_x = self.content_width * 0.38
-            self.box_col3_x = self.content_width * 0.70
-            self.box_val_offset = 0.55 * inch
+            self.pac_row_spacing = 0.11 * inch  # interlineado compacto
+            self.pac_col2_x = self.content_width * 0.52
+            self.pac_val_offset_col1 = 1.35 * inch
+            self.pac_val_offset_col2 = 1.25 * inch
 
-        # Truncamiento de texto en cuadro paciente
-        self.max_nombre_chars = 35 if not self.es_media_carta else 22
-        self.max_medico_chars = 25 if not self.es_media_carta else 18
+        # Truncamiento de texto
+        self.max_nombre_chars = 50 if not self.es_media_carta else 28
+        self.max_medico_chars = 35 if not self.es_media_carta else 20
 
         # ── QR Code ───────────────────────────────────────────────────
         if self.es_media_carta:
@@ -212,9 +209,9 @@ class LayoutCalculator:
             self.max_firmas = 3  # Máximo 3 firmas en formatos grandes
 
         # ── Espaciadores ──────────────────────────────────────────────
-        self.space_after_prueba = 0.15 * inch if not self.es_media_carta else 0.10 * inch
-        self.space_before_titulo = 12 if not self.es_media_carta else 8
-        self.space_after_titulo = 8 if not self.es_media_carta else 5
+        self.space_after_prueba = 0.08 * inch if not self.es_media_carta else 0.05 * inch
+        self.space_before_titulo = 2 if not self.es_media_carta else 2
+        self.space_after_titulo = 1 if not self.es_media_carta else 1
 
     def _fs(self, base_size):
         """Aplica factor de escala a un tamaño de fuente base."""
@@ -250,13 +247,10 @@ class QRGenerator:
     """
     Genera códigos QR de verificación para reportes de laboratorio.
 
-    El QR contiene:
-        ANGESLAB|NumeroSolicitud|FechaSolicitud|Hash12
+    El QR contiene texto estructurado legible al escanearlo:
+        Laboratorio / Orden / Paciente / Cédula / Fecha / Hash
 
-    El hash SHA-256 (12 primeros chars) se calcula desde:
-        "{NumeroSolicitud}|{FechaSolicitud}|{NombrePaciente}"
-
-    Esto permite verificar la autenticidad del reporte impreso.
+    El hash SHA-256 (12 primeros chars) permite verificar autenticidad.
     """
 
     @staticmethod
@@ -271,31 +265,67 @@ class QRGenerator:
         return hashlib.sha256(contenido.encode('utf-8')).hexdigest()[:12].upper()
 
     @staticmethod
-    def generar_qr_image(numero_solicitud, fecha_solicitud, nombre_paciente, size_px=150):
+    def generar_contenido_qr(numero_solicitud, fecha_solicitud, nombre_paciente,
+                              cedula='', nombre_lab='', estado=''):
         """
-        Genera imagen QR y retorna un BytesIO listo para ReportLab.
+        Genera el contenido textual del QR con información legible.
+
+        Al escanear con cualquier teléfono mostrará los datos del reporte
+        de forma clara y verificable, incluyendo si los resultados están listos.
+        """
+        hash_verificacion = QRGenerator.generar_hash(
+            numero_solicitud, fecha_solicitud, nombre_paciente
+        )
+
+        # Determinar estado legible para el QR
+        estado_upper = (estado or '').strip().lower()
+        if estado_upper in ('completada', 'entregada'):
+            estado_qr = 'RESULTADOS LISTOS'
+        else:
+            estado_qr = 'EN PROCESO'
+
+        lineas = []
+        if nombre_lab:
+            lineas.append(nombre_lab)
+        lineas.append(f"Orden: {numero_solicitud}")
+        lineas.append(f"Paciente: {nombre_paciente}")
+        if cedula:
+            lineas.append(f"C.I.: {cedula}")
+        lineas.append(f"Fecha: {fecha_solicitud}")
+        lineas.append(f"Estado: {estado_qr}")
+        lineas.append(f"Verificacion: {hash_verificacion}")
+
+        return '\n'.join(lineas)
+
+    @staticmethod
+    def generar_qr_image(numero_solicitud, fecha_solicitud, nombre_paciente,
+                          size_px=150, cedula='', nombre_lab='', estado=''):
+        """
+        Genera imagen QR y retorna un ImageReader listo para ReportLab.
 
         Args:
             numero_solicitud: Número de la solicitud
             fecha_solicitud: Fecha en formato dd/mm/yyyy
             nombre_paciente: Nombre completo del paciente
             size_px: Tamaño en píxeles de la imagen
+            cedula: Cédula del paciente
+            nombre_lab: Nombre del laboratorio
+            estado: Estado de la solicitud
 
         Returns:
-            io.BytesIO con la imagen PNG, o None si no está disponible
+            ImageReader con la imagen PNG, o None si no está disponible
         """
         if not QRGenerator.disponible():
             return None
 
         try:
-            hash_verificacion = QRGenerator.generar_hash(
-                numero_solicitud, fecha_solicitud, nombre_paciente
+            contenido_qr = QRGenerator.generar_contenido_qr(
+                numero_solicitud, fecha_solicitud, nombre_paciente,
+                cedula, nombre_lab, estado
             )
 
-            contenido_qr = f"ANGESLAB|{numero_solicitud}|{fecha_solicitud}|{hash_verificacion}"
-
             qr = qrcode.QRCode(
-                version=1,
+                version=None,
                 error_correction=ERROR_CORRECT_M,
                 box_size=6,
                 border=2,
@@ -311,15 +341,19 @@ class QRGenerator:
             buf = io.BytesIO()
             img.save(buf, format='PNG')
             buf.seek(0)
+            # Envolver en ImageReader para compatibilidad con canvas.drawImage
+            if REPORTLAB_OK:
+                return ImageReader(buf)
             return buf
 
         except Exception:
             return None
 
     @staticmethod
-    def generar_rl_image(numero_solicitud, fecha_solicitud, nombre_paciente, width, height):
+    def generar_rl_image(numero_solicitud, fecha_solicitud, nombre_paciente, width, height,
+                          cedula='', nombre_lab='', estado=''):
         """
-        Genera un objeto ReportLab Image listo para insertar en el canvas.
+        Genera un objeto ReportLab Image listo para insertar en flowables.
 
         Args:
             width: Ancho en puntos ReportLab
@@ -332,7 +366,8 @@ class QRGenerator:
             return None
 
         buf = QRGenerator.generar_qr_image(
-            numero_solicitud, fecha_solicitud, nombre_paciente
+            numero_solicitud, fecha_solicitud, nombre_paciente,
+            cedula=cedula, nombre_lab=nombre_lab, estado=estado
         )
         if buf is None:
             return None
@@ -343,22 +378,26 @@ class QRGenerator:
             return None
 
 
-def dibujar_qr_en_header(canvas, layout, numero_solicitud, fecha_solicitud, nombre_paciente):
+def dibujar_qr_en_header(canvas, layout, numero_solicitud, fecha_solicitud, nombre_paciente,
+                          cedula='', nombre_lab='', estado=''):
     """
     Dibuja el QR de verificación en la esquina superior derecha del header.
 
-    Args:
-        canvas: ReportLab canvas object
-        layout: LayoutCalculator instance
-        numero_solicitud: Número de solicitud
-        fecha_solicitud: Fecha formateada dd/mm/yyyy
-        nombre_paciente: Nombre completo
+    Al escanear el QR se muestra:
+      - Nombre del laboratorio
+      - Número de orden
+      - Nombre del paciente
+      - Cédula
+      - Fecha
+      - Estado (RESULTADOS LISTOS / EN PROCESO)
+      - Código de verificación (hash)
     """
     if not QRGenerator.disponible():
         return
 
     buf = QRGenerator.generar_qr_image(
-        numero_solicitud, fecha_solicitud, nombre_paciente
+        numero_solicitud, fecha_solicitud, nombre_paciente,
+        cedula=cedula, nombre_lab=nombre_lab, estado=estado
     )
     if buf is None:
         return

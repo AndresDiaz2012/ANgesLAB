@@ -57,7 +57,7 @@ class GeneradorPDF:
             self.lab_rif = (config.get('RIF') or '') if config else ''
             self.lab_telefono = (config.get('Telefono1') or config.get('Telefono') or '') if config else ''
             self.lab_whatsapp = (config.get('WhatsApp') or '') if config else ''
-        except:
+        except Exception:
             self.lab_nombre = 'LABORATORIO CLINICO'
             self.lab_direccion = ''
             self.lab_rif = ''
@@ -312,7 +312,7 @@ class GeneradorPDF:
 
                             tabla_res.setStyle(TableStyle(estilo_res))
                             elementos.append(tabla_res)
-                    except:
+                    except Exception:
                         pass
 
                     # Espaciado entre secciones de prueba
@@ -321,7 +321,7 @@ class GeneradorPDF:
                 elementos.append(Paragraph(
                     "No hay pruebas registradas para esta solicitud.",
                     ParagraphStyle('NoPruebas', fontSize=8)))
-        except:
+        except Exception:
             elementos.append(Paragraph(
                 "No se pudieron cargar las pruebas.",
                 ParagraphStyle('Error', fontSize=8)))
@@ -494,7 +494,7 @@ class EnviadorResultados:
         try:
             config = self.db.query_one("SELECT * FROM ConfiguracionSistema")
             self.lab_nombre = config.get('NombreLaboratorio', 'Laboratorio') if config else 'Laboratorio'
-        except:
+        except Exception:
             self.lab_nombre = 'Laboratorio'
 
     def obtener_datos_paciente(self, solicitud_id):

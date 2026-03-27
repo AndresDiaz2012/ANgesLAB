@@ -111,7 +111,7 @@ class ReportesResultados:
         if CONFIG_ADMIN_DISPONIBLE:
             try:
                 self.config_admin = ConfiguradorAdministrativo(db)
-            except:
+            except Exception:
                 self.config_admin = None
         else:
             self.config_admin = None
@@ -181,6 +181,22 @@ class ReportesResultados:
             prueba['resultados'] = resultados
 
         solicitud['pruebas'] = pruebas
+
+        # Post-proceso: aplicar valores de referencia especificos por edad/sexo
+        try:
+            from modulos.valores_referencia import obtener_gestor as _obtener_gestor_ref
+            _gestor_ref = _obtener_gestor_ref(self.db)
+            sexo_pac = solicitud.get('Sexo')
+            fn_pac = solicitud.get('FechaNacimiento')
+            if sexo_pac or fn_pac:
+                for prueba in pruebas:
+                    for resultado in (prueba.get('resultados') or []):
+                        ref_esp = _gestor_ref.resolver_valor_referencia(
+                            resultado['ParametroID'], sexo_pac, fn_pac)
+                        if ref_esp:
+                            resultado['ValorReferencia'] = ref_esp
+        except Exception:
+            pass  # Degradacion gracil si el modulo no esta disponible
 
         return solicitud
 

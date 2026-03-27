@@ -11,7 +11,7 @@ Clases:
 - GestorGastos: Registro y control de gastos
 - ResumenFinanciero: Dashboard e indicadores
 
-Copyright © 2024-2025 ANgesLAB Solutions
+Copyright © 2024-2026 ANgesLAB Solutions
 """
 
 from datetime import datetime, date, timedelta
@@ -34,7 +34,7 @@ class ControlAcceso:
             self.db.query("SELECT TOP 1 * FROM [PermisosModulo]")
             self.db.query("SELECT TOP 1 * FROM [UsuarioRol]")
             self._tablas_disponibles = True
-        except:
+        except Exception:
             self._tablas_disponibles = False
         return self._tablas_disponibles
 
@@ -68,7 +68,7 @@ class ControlAcceso:
             tiene = bool(resultado and resultado.get(tipo))
             self._cache[cache_key] = tiene
             return tiene
-        except:
+        except Exception:
             return True
 
     def obtener_permisos_modulo(self, usuario_id, modulo):
@@ -93,7 +93,7 @@ class ControlAcceso:
                 'PuedeVer': False, 'PuedeCrear': False, 'PuedeEditar': False,
                 'PuedeEliminar': False, 'PuedeExportar': False
             }
-        except:
+        except Exception:
             return {
                 'PuedeVer': True, 'PuedeCrear': True, 'PuedeEditar': True,
                 'PuedeEliminar': True, 'PuedeExportar': True
@@ -152,7 +152,7 @@ class ControlAcceso:
         """Lista todos los roles activos."""
         try:
             return self.db.query("SELECT * FROM [Roles] WHERE Activo=True ORDER BY NivelAcceso DESC")
-        except:
+        except Exception:
             return []
 
     def listar_usuarios_con_roles(self):
@@ -165,7 +165,7 @@ class ControlAcceso:
                 "LEFT JOIN [Roles] r ON ur.RolID = r.RolID "
                 "ORDER BY u.NombreCompleto"
             )
-        except:
+        except Exception:
             return []
 
 
@@ -183,7 +183,7 @@ class GestorCajaChica:
                 f"SELECT * FROM [CajaChica] WHERE Estado='Abierta' "
                 f"AND FechaApertura >= #{hoy}#"
             )
-        except:
+        except Exception:
             return None
 
     def abrir_caja(self, monto_apertura, efectivo_inicial, usuario_id):
@@ -308,7 +308,7 @@ class GestorCajaChica:
                 f"LEFT JOIN [FormasPago] fp ON m.FormaPagoID = fp.FormaPagoID "
                 f"WHERE m.CajaID={caja_id} ORDER BY m.Fecha DESC"
             )
-        except:
+        except Exception:
             return []
 
     def obtener_resumen_caja(self, caja_id):
@@ -323,7 +323,7 @@ class GestorCajaChica:
                 f"GROUP BY fp.Nombre, m.Tipo"
             )
             return {'caja': caja, 'desglose': desglose}
-        except:
+        except Exception:
             return {'caja': None, 'desglose': []}
 
 
@@ -405,6 +405,87 @@ class GestorCuentasPorCobrar:
         except Exception as e:
             return False, f"Error al registrar cobro: {e}"
 
+    def crear_cuenta_manual(self, datos):
+        """Crea una cuenta por cobrar manualmente (sin factura)."""
+        try:
+            monto = float(datos.get('MontoOriginal', 0))
+            paciente_id = datos.get('PacienteID', 'Null')
+            nombre = str(datos.get('NombrePaciente', '')).replace("'", "''")
+            factura_id = datos.get('FacturaID', 'Null')
+            obs = str(datos.get('Observaciones', '')).replace("'", "''")
+
+            fecha_emision = datetime.now()
+            dias_venc = int(datos.get('DiasVencimiento', 30))
+            fecha_venc = fecha_emision + timedelta(days=dias_venc)
+            fe = fecha_emision.strftime('#%m/%d/%Y %H:%M:%S#')
+            fv = fecha_venc.strftime('#%m/%d/%Y#')
+
+            self.db.execute(
+                f"INSERT INTO [CuentasPorCobrar] (FacturaID, PacienteID, NombrePaciente, "
+                f"FechaEmision, FechaVencimiento, MontoOriginal, MontoCobrado, SaldoPendiente, "
+                f"DiasVencida, Estado, Observaciones) "
+                f"VALUES ({factura_id}, {paciente_id}, '{nombre}', {fe}, {fv}, "
+                f"{monto}, 0, {monto}, 0, 'Pendiente', '{obs}')"
+            )
+            return True, "Cuenta por cobrar creada"
+        except Exception as e:
+            return False, f"Error al crear cuenta: {e}"
+
+    def importar_solicitudes_pendientes(self):
+        """Importa solicitudes con saldo pendiente que no estan en CxC."""
+        try:
+            # Solicitudes cobradas parcialmente o sin cobrar
+            sql = """
+                SELECT s.SolicitudID, s.NumeroSolicitud, s.PacienteID,
+                       p.Nombres & ' ' & p.Apellidos AS NombrePaciente,
+                       s.MontoTotal, Nz(s.MontoCobrado, 0) AS MontoCobrado,
+                       s.FechaSolicitud
+                FROM Solicitudes s
+                LEFT JOIN Pacientes p ON s.PacienteID = p.PacienteID
+                WHERE Nz(s.MontoTotal, 0) > 0
+                  AND (Nz(s.MontoTotal, 0) - Nz(s.MontoCobrado, 0)) > 0.01
+                  AND s.SolicitudID NOT IN (
+                      SELECT Nz(FacturaID, 0) FROM [CuentasPorCobrar]
+                  )
+                ORDER BY s.FechaSolicitud DESC
+            """
+            pendientes = self.db.query(sql)
+            if not pendientes:
+                return 0, "No hay solicitudes pendientes por importar"
+
+            importadas = 0
+            for sol in pendientes:
+                monto_total = float(sol.get('MontoTotal', 0) or 0)
+                monto_cobrado = float(sol.get('MontoCobrado', 0) or 0)
+                saldo = monto_total - monto_cobrado
+                nombre = str(sol.get('NombrePaciente', '')).replace("'", "''")
+                pac_id = sol.get('PacienteID', 'Null') or 'Null'
+                sol_id = sol.get('SolicitudID', 'Null')
+
+                fecha_sol = sol.get('FechaSolicitud')
+                if isinstance(fecha_sol, datetime):
+                    fe = fecha_sol.strftime('#%m/%d/%Y %H:%M:%S#')
+                else:
+                    fe = datetime.now().strftime('#%m/%d/%Y %H:%M:%S#')
+                fv = (datetime.now() + timedelta(days=30)).strftime('#%m/%d/%Y#')
+
+                try:
+                    self.db.execute(
+                        f"INSERT INTO [CuentasPorCobrar] (FacturaID, PacienteID, NombrePaciente, "
+                        f"FechaEmision, FechaVencimiento, MontoOriginal, MontoCobrado, SaldoPendiente, "
+                        f"DiasVencida, Estado, Observaciones) "
+                        f"VALUES ({sol_id}, {pac_id}, '{nombre}', {fe}, {fv}, "
+                        f"{saldo}, 0, {saldo}, 0, 'Pendiente', "
+                        f"'Importado de Solicitud #{sol.get('NumeroSolicitud', '')}')"
+                    )
+                    importadas += 1
+                except Exception:
+                    pass
+
+            return importadas, f"{importadas} solicitud(es) importada(s) como cuentas por cobrar"
+        except Exception as e:
+            return 0, f"Error al importar: {e}"
+
     def listar_cuentas(self, estado=None, paciente=None, solo_vencidas=False):
         """Lista cuentas por cobrar con filtros."""
         try:
@@ -431,10 +512,10 @@ class GestorCuentasPorCobrar:
                             fv = datetime.strptime(fv, '%m/%d/%Y')
                         dias = (hoy - fv).days
                         c['DiasVencida'] = max(0, dias)
-                    except:
+                    except Exception:
                         pass
             return cuentas
-        except:
+        except Exception:
             return []
 
     def obtener_resumen_cartera(self):
@@ -458,7 +539,7 @@ class GestorCuentasPorCobrar:
                         if isinstance(fv, str):
                             fv = datetime.strptime(fv, '%m/%d/%Y')
                         dias = (hoy - fv).days
-                    except:
+                    except Exception:
                         pass
 
                 if dias <= 0:
@@ -473,7 +554,7 @@ class GestorCuentasPorCobrar:
                     resumen['mas_90'] += saldo
 
             return resumen
-        except:
+        except Exception:
             return {
                 'vigente': 0, '30_dias': 0, '60_dias': 0,
                 '90_dias': 0, 'mas_90': 0, 'total': 0
@@ -567,7 +648,7 @@ class GestorCuentasPorPagar:
                 sql += f" AND cp.ProveedorNombre LIKE '%{prov_safe}%'"
             sql += " ORDER BY cp.FechaEmision DESC"
             return self.db.query(sql)
-        except:
+        except Exception:
             return []
 
     def obtener_resumen(self):
@@ -591,10 +672,10 @@ class GestorCuentasPorPagar:
                             vencidas += saldo
                         else:
                             por_vencer += saldo
-                    except:
+                    except Exception:
                         por_vencer += saldo
             return {'total': total, 'por_vencer': por_vencer, 'vencidas': vencidas, 'cantidad': len(cuentas)}
-        except:
+        except Exception:
             return {'total': 0, 'por_vencer': 0, 'vencidas': 0, 'cantidad': 0}
 
 
@@ -703,7 +784,7 @@ class GestorGastos:
                 sql += f" AND g.CategoriaGastoID={int(categoria_id)}"
             sql += " ORDER BY g.Fecha DESC"
             return self.db.query(sql)
-        except:
+        except Exception:
             return []
 
     def resumen_gastos_por_categoria(self, fecha_desde=None, fecha_hasta=None):
@@ -725,14 +806,14 @@ class GestorGastos:
                     sql += f" AND g.Fecha <= #{fh}#"
             sql += " GROUP BY cg.Nombre ORDER BY SUM(g.Monto) DESC"
             return self.db.query(sql)
-        except:
+        except Exception:
             return []
 
     def listar_categorias(self):
         """Lista categorías de gastos activas."""
         try:
             return self.db.query("SELECT * FROM [CategoriaGastos] WHERE Activo=True ORDER BY Nombre")
-        except:
+        except Exception:
             return []
 
 
@@ -764,7 +845,7 @@ class ResumenFinanciero:
                 'egresos': total_egresos,
                 'saldo': total_ingresos - total_egresos
             }
-        except:
+        except Exception:
             return {'fecha': fecha, 'ingresos': 0, 'egresos': 0, 'saldo': 0}
 
     def resumen_mensual(self, anio=None, mes=None):
@@ -799,7 +880,7 @@ class ResumenFinanciero:
                 'egresos': total_egresos,
                 'saldo': total_ingresos - total_egresos
             }
-        except:
+        except Exception:
             return {'anio': anio, 'mes': mes, 'ingresos': 0, 'egresos': 0, 'saldo': 0}
 
     def resumen_periodo(self, fecha_desde, fecha_hasta):
@@ -824,7 +905,7 @@ class ResumenFinanciero:
                 'egresos': total_egresos,
                 'saldo': total_ingresos - total_egresos
             }
-        except:
+        except Exception:
             return {
                 'desde': fecha_desde, 'hasta': fecha_hasta,
                 'ingresos': 0, 'egresos': 0, 'saldo': 0
@@ -862,7 +943,7 @@ class ResumenFinanciero:
                 'caja_abierta': caja is not None,
                 'caja_estado': caja.get('Estado', 'Sin caja') if caja else 'Sin caja',
             }
-        except:
+        except Exception:
             return {
                 'ingresos_hoy': 0, 'egresos_hoy': 0, 'saldo_hoy': 0,
                 'ingresos_mes': 0, 'egresos_mes': 0, 'saldo_mes': 0,
@@ -885,12 +966,12 @@ class ResumenFinanciero:
                 sql += f" AND m.Fecha <= #{fecha_hasta}#"
             sql += " GROUP BY fp.Nombre ORDER BY SUM(m.Monto) DESC"
             return self.db.query(sql)
-        except:
+        except Exception:
             return []
 
     def listar_formas_pago(self):
         """Lista formas de pago activas."""
         try:
             return self.db.query("SELECT * FROM [FormasPago] WHERE Activo=True ORDER BY Nombre")
-        except:
+        except Exception:
             return []

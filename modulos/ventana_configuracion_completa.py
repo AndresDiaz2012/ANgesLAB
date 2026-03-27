@@ -15,6 +15,7 @@ Copyright © 2024-2026 ANgesLAB Solutions
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
+import logging
 from datetime import datetime
 import os
 
@@ -89,6 +90,7 @@ class VentanaConfiguracionCompleta:
         if es_admin_o_dev:
             self._crear_tab_numeracion()
             self._crear_tab_precios()
+            self._crear_tab_financiera()
         self._crear_tab_personalizacion()
         if es_admin_o_dev:
             self._crear_tab_usuarios()
@@ -154,7 +156,7 @@ class VentanaConfiguracionCompleta:
             row=0, column=0, columnspan=2, sticky='w', pady=(0, 20))
 
         info = [
-            ("Versión:", "1.0.0"),
+            ("Versión:", "2.0.0"),
             ("Base de datos:", "ANgesLAB.accdb"),
             ("Usuario actual:", self.user.get('NombreCompleto', 'N/A')),
             ("Nombre de usuario:", self.user.get('NombreUsuario', 'N/A')),
@@ -313,6 +315,345 @@ class VentanaConfiguracionCompleta:
 
         # Cargar precios
         self._cargar_precios()
+
+    # ==================================================================
+    # TAB FINANCIERA (IGTF, TASAS DE CAMBIO, MONEDA)
+    # ==================================================================
+
+    def _crear_tab_financiera(self):
+        """Pestana: Configuracion financiera, IGTF y tasas de cambio."""
+        tab, frame = self._crear_tab_con_scroll("💰 Financiera")
+
+        # --- Titulo ---
+        ttk.Label(frame, text="Configuracion Financiera, IGTF y Tasas de Cambio",
+                 font=('Segoe UI', 14, 'bold')).pack(anchor='w', pady=(0, 5))
+        ttk.Label(frame, text="Configure moneda, impuestos IGTF y tasas de cambio BCV.",
+                 font=('Segoe UI', 10), foreground='gray').pack(anchor='w', pady=(0, 20))
+
+        # ============================================
+        # Seccion 1: Moneda
+        # ============================================
+        sec_moneda = ttk.LabelFrame(frame, text="  💵 Moneda  ", padding=15)
+        sec_moneda.pack(fill='x', pady=(0, 15))
+
+        mon_row = ttk.Frame(sec_moneda)
+        mon_row.pack(fill='x', pady=5)
+
+        ttk.Label(mon_row, text="Moneda Principal:",
+                 font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 10))
+        self.combo_moneda_fin = ttk.Combobox(mon_row, state='readonly', width=12,
+                                              values=['USD', 'VES', 'EUR', 'COP'],
+                                              font=('Segoe UI', 10))
+        self.combo_moneda_fin.set('USD')
+        self.combo_moneda_fin.pack(side=tk.LEFT, padx=(0, 20))
+
+        ttk.Label(mon_row, text="Simbolo:",
+                 font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 10))
+        self.entry_simbolo_fin = ttk.Entry(mon_row, width=8, font=('Segoe UI', 10))
+        self.entry_simbolo_fin.insert(0, '$')
+        self.entry_simbolo_fin.pack(side=tk.LEFT, padx=(0, 20))
+
+        ttk.Label(mon_row, text="Decimales:",
+                 font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 10))
+        self.spin_decimales_fin = ttk.Spinbox(mon_row, from_=0, to=4, width=5,
+                                               font=('Segoe UI', 10))
+        self.spin_decimales_fin.set(2)
+        self.spin_decimales_fin.pack(side=tk.LEFT)
+
+        # ============================================
+        # Seccion 2: IVA y Descuentos
+        # ============================================
+        sec_iva = ttk.LabelFrame(frame, text="  📋 IVA y Descuentos  ", padding=15)
+        sec_iva.pack(fill='x', pady=(0, 15))
+
+        iva_row = ttk.Frame(sec_iva)
+        iva_row.pack(fill='x', pady=5)
+
+        ttk.Label(iva_row, text="IVA por Defecto (%):",
+                 font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 10))
+        self.spin_iva_fin = ttk.Spinbox(iva_row, from_=0, to=100, increment=0.5,
+                                         width=8, font=('Segoe UI', 10))
+        self.spin_iva_fin.set(16.0)
+        self.spin_iva_fin.pack(side=tk.LEFT, padx=(0, 30))
+
+        ttk.Label(iva_row, text="Descuento Maximo (%):",
+                 font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 10))
+        self.spin_desc_max_fin = ttk.Spinbox(iva_row, from_=0, to=100, increment=5,
+                                              width=8, font=('Segoe UI', 10))
+        self.spin_desc_max_fin.set(50.0)
+        self.spin_desc_max_fin.pack(side=tk.LEFT)
+
+        # ============================================
+        # Seccion 3: IGTF
+        # ============================================
+        sec_igtf = ttk.LabelFrame(frame, text="  🏦 IGTF (Grandes Transacciones Financieras)  ", padding=15)
+        sec_igtf.pack(fill='x', pady=(0, 15))
+
+        igtf_row1 = ttk.Frame(sec_igtf)
+        igtf_row1.pack(fill='x', pady=5)
+
+        self.var_igtf_activo = tk.BooleanVar(value=True)
+        ttk.Checkbutton(igtf_row1, text="IGTF Activo",
+                        variable=self.var_igtf_activo,
+                        style='TCheckbutton').pack(side=tk.LEFT, padx=(0, 30))
+
+        ttk.Label(igtf_row1, text="Tasa IGTF (%):",
+                 font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 10))
+        self.spin_igtf = ttk.Spinbox(igtf_row1, from_=0, to=10, increment=0.5,
+                                      width=8, font=('Segoe UI', 10))
+        self.spin_igtf.set(3.0)
+        self.spin_igtf.pack(side=tk.LEFT, padx=(0, 30))
+
+        ttk.Label(igtf_row1, text="Tipo Contribuyente:",
+                 font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 10))
+        self.combo_tipo_contrib = ttk.Combobox(igtf_row1,
+                                                values=['Ordinario', 'Especial'],
+                                                state='readonly', width=14,
+                                                font=('Segoe UI', 10))
+        self.combo_tipo_contrib.set('Ordinario')
+        self.combo_tipo_contrib.pack(side=tk.LEFT)
+
+        ttk.Label(sec_igtf,
+                 text="Se aplica automaticamente a pagos en Divisa/Zelle (3% sobre base imponible).",
+                 foreground='gray', font=('Segoe UI', 9)).pack(anchor='w', pady=(5, 0))
+
+        # ============================================
+        # Seccion 4: Tasas de Cambio
+        # ============================================
+        sec_tasas = ttk.LabelFrame(frame, text="  📈 Tasas de Cambio (BCV)  ", padding=15)
+        sec_tasas.pack(fill='x', pady=(0, 15))
+
+        # Tasa USD/Bs (solo lectura, viene del BCV)
+        tasa_row1 = ttk.Frame(sec_tasas)
+        tasa_row1.pack(fill='x', pady=3)
+
+        ttk.Label(tasa_row1, text="Tasa BCV USD/Bs:",
+                 font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 10))
+        self.label_tasa_usd = ttk.Label(tasa_row1, text="--",
+                                         font=('Segoe UI', 12, 'bold'), foreground='#1565c0')
+        self.label_tasa_usd.pack(side=tk.LEFT, padx=(0, 40))
+
+        ttk.Label(tasa_row1, text="Tasa BCV EUR/Bs:",
+                 font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 10))
+        self.label_tasa_eur = ttk.Label(tasa_row1, text="--",
+                                         font=('Segoe UI', 12, 'bold'), foreground='#1565c0')
+        self.label_tasa_eur.pack(side=tk.LEFT)
+
+        # Tasa COP/USD (manual)
+        tasa_row2 = ttk.Frame(sec_tasas)
+        tasa_row2.pack(fill='x', pady=(10, 3))
+
+        ttk.Label(tasa_row2, text="Tasa COP/USD (manual):",
+                 font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 10))
+        self.entry_tasa_cop = ttk.Entry(tasa_row2, width=15, font=('Segoe UI', 10))
+        self.entry_tasa_cop.pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Label(tasa_row2, text="COP por 1 USD",
+                 foreground='gray', font=('Segoe UI', 9)).pack(side=tk.LEFT)
+
+        # Boton actualizar BCV y timestamp
+        tasa_row3 = ttk.Frame(sec_tasas)
+        tasa_row3.pack(fill='x', pady=(10, 5))
+
+        ttk.Button(tasa_row3, text="🔄 Actualizar Tasas BCV",
+                  command=self._actualizar_tasas_bcv, width=25).pack(side=tk.LEFT, padx=(0, 15))
+
+        self.label_ultima_act = ttk.Label(tasa_row3,
+                                           text="Ultima actualizacion: --",
+                                           foreground='gray', font=('Segoe UI', 9))
+        self.label_ultima_act.pack(side=tk.LEFT)
+
+        ttk.Label(sec_tasas,
+                 text="Las tasas BCV se obtienen automaticamente via pyBCV. "
+                      "Si no esta instalado, ejecute: pip install pyBCV",
+                 foreground='gray', font=('Segoe UI', 9)).pack(anchor='w', pady=(5, 0))
+
+        # ============================================
+        # Botones de accion
+        # ============================================
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill='x', pady=15)
+
+        ttk.Button(btn_frame, text="💾 Guardar Configuracion Financiera",
+                  command=self._guardar_config_financiera, width=35).pack(side='left', padx=5)
+
+        # Cargar datos guardados
+        self._cargar_config_financiera()
+
+    def _actualizar_tasas_bcv(self):
+        """Consulta las tasas BCV y actualiza la interfaz."""
+        try:
+            from modulos.tasas_cambio import GestorTasasCambio
+            gestor = GestorTasasCambio(self.db)
+            tasas = gestor.actualizar_tasas_bcv()
+
+            if 'USD' in tasas:
+                self.label_tasa_usd.config(text=f"Bs. {tasas['USD']:,.4f}")
+            if 'EUR' in tasas:
+                self.label_tasa_eur.config(text=f"Bs. {tasas['EUR']:,.4f}")
+
+            self.label_ultima_act.config(
+                text=f"Ultima actualizacion: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+
+            messagebox.showinfo("Tasas Actualizadas",
+                                "Las tasas BCV se han actualizado correctamente.",
+                                parent=self.win)
+
+        except ImportError:
+            messagebox.showwarning("pyBCV no disponible",
+                                   "El modulo pyBCV no esta instalado.\n"
+                                   "Ejecute: pip install pyBCV",
+                                   parent=self.win)
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al actualizar tasas BCV:\n{e}",
+                                parent=self.win)
+
+    def _cargar_config_financiera(self):
+        """Carga la configuracion financiera desde la BD."""
+        try:
+            config = self.db.query_one("SELECT * FROM ConfiguracionLaboratorio")
+            if config:
+                # Moneda
+                self.combo_moneda_fin.set(config.get('MonedaPrincipal', 'USD') or 'USD')
+                self.entry_simbolo_fin.delete(0, tk.END)
+                self.entry_simbolo_fin.insert(0, config.get('SimboloMoneda', '$') or '$')
+                self.spin_decimales_fin.delete(0, tk.END)
+                self.spin_decimales_fin.insert(0, config.get('DecimalesPrecios', 2))
+
+                # IVA
+                self.spin_iva_fin.delete(0, tk.END)
+                self.spin_iva_fin.insert(0, config.get('IVAPorDefecto', 16.0))
+                self.spin_desc_max_fin.delete(0, tk.END)
+                self.spin_desc_max_fin.insert(0, config.get('DescuentoMaximo', 50.0))
+
+                # IGTF
+                self.var_igtf_activo.set(config.get('IGTFActivo', True))
+                self.spin_igtf.delete(0, tk.END)
+                self.spin_igtf.insert(0, config.get('TasaIGTF', 3.0))
+                self.combo_tipo_contrib.set(config.get('TipoContribuyente', 'Ordinario') or 'Ordinario')
+
+        except Exception as e:
+            logging.getLogger("angeslab.ventana_configuracion_completa").warning("[CONFIG-FIN] Error cargando config financiera: %s", e)
+
+        # Tasas de cambio
+        try:
+            from modulos.tasas_cambio import GestorTasasCambio
+            gestor = GestorTasasCambio(self.db)
+
+            tasa_usd = gestor.get_tasa_actual('USD')
+            if tasa_usd and tasa_usd != 1.0:
+                self.label_tasa_usd.config(text=f"Bs. {tasa_usd:,.4f}")
+
+            tasa_eur = gestor.get_tasa_actual('EUR')
+            if tasa_eur and tasa_eur != 1.0:
+                self.label_tasa_eur.config(text=f"Bs. {tasa_eur:,.4f}")
+
+            ultima = gestor.get_ultima_actualizacion()
+            if ultima:
+                try:
+                    self.label_ultima_act.config(
+                        text=f"Ultima actualizacion: {ultima.strftime('%d/%m/%Y %H:%M')}")
+                except Exception:
+                    pass
+
+        except Exception as e:
+            logging.getLogger("angeslab.ventana_configuracion_completa").warning("[CONFIG-FIN] Error cargando tasas: %s", e)
+
+        # Tasa COP/USD
+        try:
+            config_admin = self.db.query_one(
+                "SELECT TasaCOP_USD FROM ConfiguracionAdministrativa")
+            if config_admin and config_admin.get('TasaCOP_USD'):
+                cop_val = config_admin['TasaCOP_USD']
+                if cop_val and float(cop_val) > 0:
+                    self.entry_tasa_cop.delete(0, tk.END)
+                    self.entry_tasa_cop.insert(0, str(cop_val))
+        except Exception:
+            pass
+
+    def _guardar_config_financiera(self):
+        """Guarda la configuracion financiera en la BD."""
+        try:
+            # Asegurar columnas IGTF existen en ConfiguracionLaboratorio
+            _cols_fiscal = {
+                'IGTFActivo': 'BIT',
+                'TasaIGTF': 'DOUBLE',
+                'TipoContribuyente': 'TEXT(20)',
+            }
+            for col, tipo in _cols_fiscal.items():
+                try:
+                    self.db.query(f"SELECT TOP 1 [{col}] FROM ConfiguracionLaboratorio")
+                except Exception:
+                    try:
+                        self.db.execute(
+                            f"ALTER TABLE ConfiguracionLaboratorio ADD COLUMN [{col}] {tipo}")
+                    except Exception:
+                        pass
+
+            # Leer valores de la interfaz
+            moneda = self.combo_moneda_fin.get() or 'USD'
+            simbolo = (self.entry_simbolo_fin.get() or '$').replace("'", "''")
+            decimales = int(self.spin_decimales_fin.get())
+            iva = float(self.spin_iva_fin.get())
+            desc_max = float(self.spin_desc_max_fin.get())
+            igtf_activo = self.var_igtf_activo.get()
+            tasa_igtf = float(self.spin_igtf.get())
+            tipo_contrib = (self.combo_tipo_contrib.get() or 'Ordinario').replace("'", "''")
+
+            self.db.execute(f"""
+                UPDATE ConfiguracionLaboratorio
+                SET MonedaPrincipal = '{moneda}',
+                    SimboloMoneda = '{simbolo}',
+                    DecimalesPrecios = {decimales},
+                    IVAPorDefecto = {iva},
+                    DescuentoMaximo = {desc_max},
+                    IGTFActivo = {igtf_activo},
+                    TasaIGTF = {tasa_igtf},
+                    TipoContribuyente = '{tipo_contrib}'
+            """)
+
+            # Guardar tasa COP/USD manual
+            tasa_cop_str = self.entry_tasa_cop.get().strip()
+            if tasa_cop_str:
+                try:
+                    tasa_cop_val = float(tasa_cop_str)
+                    # Guardar en ConfiguracionAdministrativa
+                    try:
+                        self.db.query("SELECT TOP 1 [TasaCOP_USD] FROM ConfiguracionAdministrativa")
+                    except Exception:
+                        try:
+                            self.db.execute(
+                                "ALTER TABLE ConfiguracionAdministrativa "
+                                "ADD COLUMN [TasaCOP_USD] DOUBLE DEFAULT 0")
+                        except Exception:
+                            pass
+                    self.db.execute(
+                        f"UPDATE ConfiguracionAdministrativa SET TasaCOP_USD = {tasa_cop_val}")
+
+                    # Tambien guardar en TasasCambio para historial
+                    try:
+                        from modulos.tasas_cambio import GestorTasasCambio
+                        gestor = GestorTasasCambio(self.db)
+                        gestor.guardar_tasa_manual('COP_USD', tasa_cop_val)
+                    except Exception:
+                        pass
+                except (ValueError, TypeError):
+                    pass
+
+            messagebox.showinfo("Exito",
+                              "Configuracion financiera guardada correctamente.\n\n"
+                              "Los cambios se aplicaran inmediatamente.",
+                              parent=self.win)
+
+            if self.callback_actualizar:
+                try:
+                    self.callback_actualizar()
+                except Exception:
+                    pass
+
+        except Exception as e:
+            messagebox.showerror("Error",
+                                f"Error al guardar configuracion financiera:\n{e}",
+                                parent=self.win)
 
     def _crear_tab_personalizacion(self):
         """Pestaña 4: Personalización"""
@@ -692,7 +1033,7 @@ class VentanaConfiguracionCompleta:
                             "No puede desactivar o cambiar el nivel del ultimo usuario con privilegios.",
                             parent=win)
                         return
-                except:
+                except Exception:
                     pass
 
             try:
@@ -781,9 +1122,9 @@ class VentanaConfiguracionCompleta:
                 # Generar hash seguro
                 pwd_hash, pwd_salt = SeguridadContrasenas.hash_password(nueva)
                 self.db.execute(
-                    f"UPDATE Usuarios SET PasswordHash='{pwd_hash}', "
-                    f"PasswordSalt='{pwd_salt}', Password='' "
-                    f"WHERE UsuarioID={user_id}"
+                    f"UPDATE [Usuarios] SET [PasswordHash]='{pwd_hash}', "
+                    f"[PasswordSalt]='{pwd_salt}', [Password]='' "
+                    f"WHERE [UsuarioID]={user_id}"
                 )
                 messagebox.showinfo("Éxito", "Contraseña actualizada correctamente", parent=win)
                 win.destroy()
@@ -993,6 +1334,12 @@ class VentanaConfiguracionCompleta:
         """Recarga toda la configuración"""
         self._cargar_precios()
         self._cargar_personalizacion()
+        # Recargar financiera si la pestana existe
+        if hasattr(self, 'var_igtf_activo'):
+            try:
+                self._cargar_config_financiera()
+            except Exception:
+                pass
 
     def _cargar_precios(self):
         """Carga los precios de las pruebas, opcionalmente filtrados por área"""
@@ -1052,9 +1399,9 @@ class VentanaConfiguracionCompleta:
                         else:
                             entry.delete(0, tk.END)
                             entry.insert(0, valor)
-                    except:
+                    except Exception:
                         pass
-        except:
+        except Exception:
             pass
 
     def _editar_precio(self):
@@ -1305,13 +1652,31 @@ class VentanaConfiguracionCompleta:
 
         # Verificar contraseña actual
         try:
+            from modulos.seguridad_db import SeguridadContrasenas
+
             user_id = self.user.get('UsuarioID')
             user_actual = self.db.query_one(f"""
-                SELECT * FROM Usuarios
-                WHERE UsuarioID = {user_id} AND Password = '{pass_actual.replace("'", "''")}'
+                SELECT * FROM [Usuarios]
+                WHERE [UsuarioID] = {user_id}
             """)
 
             if not user_actual:
+                messagebox.showerror("Error", "Usuario no encontrado")
+                return
+
+            # Verificar contra hash o plain text (retrocompat)
+            hash_guardado = user_actual.get('PasswordHash', '') or ''
+            salt_guardado = user_actual.get('PasswordSalt', '') or ''
+            pass_plain = user_actual.get('Password', '') or ''
+
+            password_ok = False
+            if hash_guardado and salt_guardado:
+                password_ok = SeguridadContrasenas.verificar_password(
+                    pass_actual, hash_guardado, salt_guardado)
+            elif pass_plain:
+                password_ok = (pass_actual == pass_plain)
+
+            if not password_ok:
                 messagebox.showerror("Error", "La contraseña actual es incorrecta")
                 return
 
@@ -1319,12 +1684,15 @@ class VentanaConfiguracionCompleta:
             if not messagebox.askyesno("Confirmar", "¿Está seguro de cambiar la contraseña?"):
                 return
 
-            # Actualizar contraseña
-            self.db.execute(f"""
-                UPDATE Usuarios
-                SET Password = '{pass_nueva.replace("'", "''")}'
-                WHERE UsuarioID = {user_id}
-            """)
+            # Hash nueva contraseña con PBKDF2
+            pwd_hash, pwd_salt = SeguridadContrasenas.hash_password(pass_nueva)
+
+            # Actualizar contraseña (hash + limpiar plain text)
+            self.db.execute(
+                f"UPDATE [Usuarios] SET [PasswordHash]='{pwd_hash}', "
+                f"[PasswordSalt]='{pwd_salt}', [Password]='' "
+                f"WHERE [UsuarioID]={user_id}"
+            )
 
             messagebox.showinfo("Éxito",
                               "Contraseña actualizada correctamente.\n"
@@ -1347,9 +1715,23 @@ class VentanaConfiguracionCompleta:
             return
         try:
             from modulos.ventana_config_administrativa import abrir_ventana_config_administrativa
-            abrir_ventana_config_administrativa(self.win, self.db, self.callback_actualizar)
+            # Liberar grab de esta ventana para que la hija pueda tomar el suyo
+            self.win.grab_release()
+            v = abrir_ventana_config_administrativa(self.win, self.db, self.callback_actualizar)
+            # Restaurar grab de esta ventana cuando la hija se cierre
+            def _restaurar_grab(event=None):
+                try:
+                    if self.win.winfo_exists():
+                        self.win.grab_set()
+                except Exception:
+                    pass
+            v.win.bind("<Destroy>", _restaurar_grab, add="+")
         except Exception as e:
             messagebox.showerror("Error", f"Error al abrir configuración administrativa:\n{e}")
+            try:
+                self.win.grab_set()
+            except Exception:
+                pass
 
     def _resetear_bd(self, tipo):
         """
@@ -1452,7 +1834,7 @@ class VentanaConfiguracionCompleta:
                 for query in info['queries']:
                     try:
                         self.db.execute(query)
-                    except:
+                    except Exception:
                         pass  # Algunas pueden fallar si no hay datos
 
             messagebox.showinfo("Completado", info['exito'])
@@ -1721,7 +2103,7 @@ class VentanaConfiguracionCompleta:
                     "configurada correctamente para ANgesLAB.",
                     "",
                     "Sistema de Gestión de Laboratorio Clínico",
-                    "ANgesLAB v1.0.0",
+                    "ANgesLAB v2.0.0",
                 ]
 
                 for linea in lineas:
@@ -1855,10 +2237,64 @@ class VentanaConfiguracionCompleta:
         # Cargar datos iniciales
         self._cargar_bioanalistas()
 
+    def _asegurar_tabla_bioanalistas(self):
+        """Asegura que la tabla Bioanalistas exista con todas las columnas necesarias.
+        Retorna True si la tabla está lista, False si no se pudo preparar."""
+        # Verificar si la tabla existe intentando una consulta simple
+        try:
+            self.db.query_one("SELECT TOP 1 [BioanalistaID] FROM [Bioanalistas]")
+            # Tabla existe, verificar columnas necesarias
+            columnas_requeridas = {
+                'NombreCompleto': 'TEXT(200)',
+                'Cedula': 'TEXT(20)',
+                'NumeroRegistro': 'TEXT(50)',
+                'AreaID': 'LONG',
+                'RutaFirma': 'TEXT(255)',
+                'Activo': 'BIT',
+            }
+            for col, tipo in columnas_requeridas.items():
+                try:
+                    self.db.query_one(f"SELECT TOP 1 [{col}] FROM [Bioanalistas]")
+                except Exception:
+                    try:
+                        self.db.execute(f"ALTER TABLE [Bioanalistas] ADD COLUMN [{col}] {tipo}")
+                    except Exception:
+                        pass
+            return True
+        except Exception:
+            return self._crear_tabla_bioanalistas()
+
+    def _crear_tabla_bioanalistas(self):
+        """Crea la tabla Bioanalistas. Retorna True si tuvo éxito."""
+        try:
+            self.db.execute(
+                "CREATE TABLE [Bioanalistas] ("
+                "[BioanalistaID] COUNTER PRIMARY KEY, "
+                "[NombreCompleto] TEXT(200), "
+                "[Cedula] TEXT(20), "
+                "[NumeroRegistro] TEXT(50), "
+                "[AreaID] LONG, "
+                "[RutaFirma] TEXT(255), "
+                "[Activo] BIT)"
+            )
+            return True
+        except Exception as e:
+            print(f"No se pudo crear tabla Bioanalistas: {e}")
+            return False
+
     def _cargar_bioanalistas(self):
         """Carga los bioanalistas desde la BD al Treeview."""
         for item in self.tree_bioanalistas.get_children():
             self.tree_bioanalistas.delete(item)
+
+        # Asegurar que la tabla existe con todas las columnas
+        tabla_ok = self._asegurar_tabla_bioanalistas()
+
+        if not tabla_ok:
+            self.tree_bioanalistas.insert('', 'end', iid='placeholder', values=(
+                '', 'Tabla Bioanalistas no disponible. Contacte soporte técnico.', '', '', '', '', ''
+            ))
+            return
 
         try:
             bioanalistas = self.db.query(
@@ -1868,21 +2304,7 @@ class VentanaConfiguracionCompleta:
                 "ORDER BY b.NombreCompleto"
             )
         except Exception:
-            # Si la tabla no existe aún, intentar crearla
-            try:
-                self.db.execute(
-                    "CREATE TABLE Bioanalistas ("
-                    "BioanalistaID AUTOINCREMENT PRIMARY KEY, "
-                    "NombreCompleto TEXT(200), "
-                    "Cedula TEXT(20), "
-                    "NumeroRegistro TEXT(50), "
-                    "AreaID LONG, "
-                    "RutaFirma TEXT(500), "
-                    "Activo BIT DEFAULT TRUE)"
-                )
-                bioanalistas = []
-            except Exception:
-                bioanalistas = []
+            bioanalistas = []
 
         if not bioanalistas:
             self.tree_bioanalistas.insert('', 'end', iid='placeholder', values=(
@@ -2155,20 +2577,40 @@ class VentanaConfiguracionCompleta:
                                           f"No se pudo copiar la firma:\n{e}\n\nEl bioanalista se guardará sin firma.",
                                           parent=win)
 
+            datos_bio = {
+                'NombreCompleto': nombre,
+                'Cedula': cedula,
+                'NumeroRegistro': registro,
+                'AreaID': area_id,
+                'RutaFirma': ruta_firma_rel,
+                'Activo': activo
+            }
             try:
-                self.db.insert('Bioanalistas', {
-                    'NombreCompleto': nombre,
-                    'Cedula': cedula,
-                    'NumeroRegistro': registro,
-                    'AreaID': area_id,
-                    'RutaFirma': ruta_firma_rel,
-                    'Activo': activo
-                })
+                self.db.insert('Bioanalistas', datos_bio)
                 messagebox.showinfo("Éxito", f"Bioanalista '{nombre}' registrado correctamente.", parent=win)
                 win.destroy()
                 self._cargar_bioanalistas()
             except Exception as e:
-                messagebox.showerror("Error", f"No se pudo guardar el bioanalista:\n{e}", parent=win)
+                # Si la tabla no existe, intentar crearla y reintentar
+                if 'no se encontr' in str(e).lower() or 'not found' in str(e).lower() or 'cannot find' in str(e).lower():
+                    if self._crear_tabla_bioanalistas():
+                        try:
+                            self.db.insert('Bioanalistas', datos_bio)
+                            messagebox.showinfo("Éxito", f"Bioanalista '{nombre}' registrado correctamente.", parent=win)
+                            win.destroy()
+                            self._cargar_bioanalistas()
+                            return
+                        except Exception as e2:
+                            messagebox.showerror("Error", f"No se pudo guardar el bioanalista:\n{e2}", parent=win)
+                            return
+                    else:
+                        messagebox.showerror("Error",
+                            f"No se pudo crear la tabla Bioanalistas en la base de datos.\n\n"
+                            f"Error original: {e}\n\n"
+                            f"Verifique que el archivo .accdb no esté abierto en Access "
+                            f"y que tenga permisos de escritura.", parent=win)
+                else:
+                    messagebox.showerror("Error", f"No se pudo guardar el bioanalista:\n{e}", parent=win)
 
         ttk.Button(btn_frame, text="💾 Guardar", command=guardar, width=20).pack(side='left', padx=5)
         ttk.Button(btn_frame, text="Cancelar", command=win.destroy, width=15).pack(side='right', padx=5)

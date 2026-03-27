@@ -15,6 +15,7 @@ Autor: Sistema ANgesLAB
 """
 
 import re
+import logging
 import os
 from datetime import datetime, date
 from decimal import Decimal
@@ -733,13 +734,13 @@ class ProtectorCredenciales:
 # ============================================================================
 
 if __name__ == "__main__":
-    print("Modulo de Seguridad - ANgesLAB")
+    logging.getLogger("angeslab.seguridad").debug("Modulo de Seguridad - ANgesLAB")
     print("=" * 50)
 
     # Pruebas de sanitizacion
     db_segura = DatabaseSegura(None)
 
-    print("\n--- Pruebas de Sanitizacion ---")
+    logging.getLogger("angeslab.seguridad").debug("\n--- Pruebas de Sanitizacion ---")
     print(f"Texto normal: {db_segura.sanitizar_valor('Juan Perez')}")
     print(f"Con comillas: {db_segura.sanitizar_valor('O' + chr(39) + 'Brien')}")
     print(f"Numero: {db_segura.sanitizar_valor(123.45)}")
@@ -747,14 +748,14 @@ if __name__ == "__main__":
     print(f"Booleano: {db_segura.sanitizar_valor(True)}")
 
     # Pruebas de validacion
-    print("\n--- Pruebas de Validacion ---")
+    logging.getLogger("angeslab.seguridad").debug("\n--- Pruebas de Validacion ---")
     print(f"Email valido: {Validadores.es_email_valido('test@email.com')}")
     print(f"Email invalido: {Validadores.es_email_valido('test@')}")
     print(f"Cedula valida: {Validadores.es_cedula_valida('V-12345678')}")
     print(f"RIF valido: {Validadores.es_rif_valido('J-12345678-9')}")
 
     # Pruebas de contrasenas PBKDF2
-    print("\n--- Pruebas de Contrasenas (PBKDF2) ---")
+    logging.getLogger("angeslab.seguridad").debug("\n--- Pruebas de Contrasenas (PBKDF2) ---")
     password = "MiPassword123"
     hash_pass, salt = SeguridadContrasenas.hash_password(password)
     print(f"Hash generado: {hash_pass[:40]}...")
@@ -763,38 +764,38 @@ if __name__ == "__main__":
     print(f"Verificacion incorrecta: {SeguridadContrasenas.verificar_password('otro', hash_pass, salt)}")
 
     # Prueba retrocompatibilidad SHA-256 legacy
-    print("\n--- Retrocompat SHA-256 legacy ---")
+    logging.getLogger("angeslab.seguridad").debug("\n--- Retrocompat SHA-256 legacy ---")
     legacy_salt = secrets.token_hex(32)
     legacy_hash = hashlib.sha256(f"{legacy_salt}{password}".encode()).hexdigest()
     print(f"Verificacion legacy: {SeguridadContrasenas.verificar_password(password, legacy_hash, legacy_salt)}")
     print(f"Necesita rehash: {SeguridadContrasenas.necesita_rehash(legacy_hash)}")
 
     # Prueba control de intentos
-    print("\n--- Control de Intentos ---")
+    logging.getLogger("angeslab.seguridad").debug("\n--- Control de Intentos ---")
     ci = ControlIntentos()
     for i in range(6):
         ci.registrar_intento('test_user', False)
         bloq, mins = ci.esta_bloqueado('test_user')
-        print(f"  Intento {i+1}: bloqueado={bloq}, restantes={ci.intentos_restantes('test_user')}")
+        logging.getLogger("angeslab.seguridad").debug("  Intento {i+1}: bloqueado=%s, restantes={ci.intentos_restantes('test_user')}", bloq)
 
     # Prueba proteccion de credenciales
-    print("\n--- Proteccion de Credenciales ---")
+    logging.getLogger("angeslab.seguridad").debug("\n--- Proteccion de Credenciales ---")
     pc = ProtectorCredenciales()
     original = "sk-ant-api-key-12345"
     cifrado = pc.cifrar(original)
     descifrado = pc.descifrar(cifrado)
-    print(f"Original: {original}")
+    logging.getLogger("angeslab.seguridad").debug("Original: %s", original)
     print(f"Cifrado: {cifrado[:50]}...")
     print(f"Descifrado correcto: {descifrado == original}")
 
     # Prueba de deteccion de SQL Injection
-    print("\n--- Pruebas de SQL Injection ---")
+    logging.getLogger("angeslab.seguridad").debug("\n--- Pruebas de SQL Injection ---")
     try:
         db_segura.sanitizar_valor("'; DROP TABLE Usuarios; --")
     except ValueError as e:
-        print(f"Detectado intento de injection: {e}")
+        logging.getLogger("angeslab.seguridad").debug("Detectado intento de injection: %s", e)
 
     try:
         db_segura.sanitizar_valor("' OR '1'='1")
     except ValueError as e:
-        print(f"Detectado intento de injection: {e}")
+        logging.getLogger("angeslab.seguridad").debug("Detectado intento de injection: %s", e)

@@ -77,7 +77,7 @@ IF %ERRORLEVEL% EQU 0 (
     echo  [EXITO] Instalador generado correctamente!
     echo  ============================================================
     echo.
-    echo  Archivo: output\ANgesLAB_Setup_v2.1.exe
+    echo  Archivo: output\ANgesLAB_Setup_v2.0.exe
     echo.
     echo  Este archivo es el instalador listo para distribuir
     echo  a los clientes. Contiene todo lo necesario para

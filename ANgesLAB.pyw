@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
 """
 ANgesLAB - Sistema de Gestión para Laboratorios Clínicos
-Versión 1.0.0 - Aplicación Completa
+=========================================================
+Versión  : 2.0.0
+Autor    : ANgesLAB Solutions
+Copyright: (c) 2024-2026 ANgesLAB Solutions. Todos los derechos reservados.
+Licencia : Propietaria — consulte LICENSE para los términos de uso.
 """
 
 import tkinter as tk
@@ -9,6 +13,14 @@ from tkinter import ttk, messagebox, filedialog
 from datetime import datetime, date
 import os
 import sys
+
+# Identificador de aplicación Windows — permite icono propio en barra de tareas
+try:
+    import ctypes
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('ANgesLAB.Solutions.LIS.2')
+except Exception:
+    pass
+import logging
 import webbrowser
 import smtplib
 import tempfile
@@ -17,6 +29,14 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 from pathlib import Path
+
+# --- Logger centralizado ---
+try:
+    from modulos.logging_config import obtener_logger
+    _log = obtener_logger('angeslab.app')
+except Exception:
+    _log = logging.getLogger('angeslab.app')
+    _log.addHandler(logging.NullHandler())
 
 # Importar reportlab para generar PDFs
 try:
@@ -50,8 +70,7 @@ try:
     from modulos.config_numeracion import ConfiguradorNumeracion, TipoNumeracion
     from modulos.ventana_config_numeracion import abrir_ventana_config_numeracion
     CONFIG_NUMERACION_DISPONIBLE = True
-except ImportError as e:
-    print(f"Advertencia: No se pudo importar configuración de numeración: {e}")
+except ImportError:
     CONFIG_NUMERACION_DISPONIBLE = False
 
 # Importar módulos de configuración administrativa
@@ -59,16 +78,21 @@ try:
     from modulos.config_administrativa import ConfiguradorAdministrativo
     from modulos.ventana_config_administrativa import abrir_ventana_config_administrativa
     CONFIG_ADMINISTRATIVA_DISPONIBLE = True
-except ImportError as e:
-    print(f"Advertencia: No se pudo importar configuración administrativa: {e}")
+except ImportError:
     CONFIG_ADMINISTRATIVA_DISPONIBLE = False
+
+# Importar módulo de valores de referencia por edad/sexo
+try:
+    from modulos.valores_referencia import obtener_gestor as obtener_gestor_ref
+    VALORES_REF_DISPONIBLE = True
+except ImportError:
+    VALORES_REF_DISPONIBLE = False
 
 # Importar módulo de cálculos automáticos
 try:
     from modulos.calculos_automaticos import CalculadorLaboratorio, obtener_calculador
     CALCULOS_AUTOMATICOS_DISPONIBLE = True
-except ImportError as e:
-    print(f"Advertencia: No se pudo importar cálculos automáticos: {e}")
+except ImportError:
     CALCULOS_AUTOMATICOS_DISPONIBLE = False
 
 # Importar módulo de gestión de solicitudes
@@ -81,50 +105,42 @@ try:
         crear_gestor_solicitudes
     )
     GESTOR_SOLICITUDES_DISPONIBLE = True
-except ImportError as e:
-    print(f"Advertencia: No se pudo importar gestor de solicitudes: {e}")
+except ImportError:
     GESTOR_SOLICITUDES_DISPONIBLE = False
 
 # Importar módulo veterinario
 try:
     from modulos.veterinario import GestorVeterinario, crear_gestor_veterinario, ESPECIES, RAZAS, VALORES_REFERENCIA
     VETERINARIO_DISPONIBLE = True
-except ImportError as e:
-    print(f"Advertencia: No se pudo importar módulo veterinario: {e}")
+except ImportError:
     VETERINARIO_DISPONIBLE = False
 
 # Importar módulo de historial clínico
 try:
     from modulos.historial_clinico import GestorHistorialClinico, crear_gestor_historial
     HISTORIAL_CLINICO_DISPONIBLE = True
-except ImportError as e:
-    print(f"Advertencia: No se pudo importar historial clínico: {e}")
+except ImportError:
     HISTORIAL_CLINICO_DISPONIBLE = False
 
 # Importar módulo de cotizaciones
 try:
     from modulos.cotizaciones import GestorCotizaciones
     COTIZACIONES_DISPONIBLE = True
-except ImportError as e:
-    print(f"Advertencia: No se pudo importar módulo de cotizaciones: {e}")
+except ImportError:
     COTIZACIONES_DISPONIBLE = False
 
 # Importar módulo de interpretación IA clínica
 try:
     from modulos.ia_interpretacion import InterpretadorClinico, ConfigIA, crear_interpretador
     IA_INTERPRETACION_DISPONIBLE = True
-except ImportError as e:
-    print(f"Advertencia: No se pudo importar IA interpretación: {e}")
+except ImportError:
     IA_INTERPRETACION_DISPONIBLE = False
 
 # Importar módulo de gráficas de historial
 try:
     from modulos.graficas_historial import GraficasHistorial, MATPLOTLIB_DISPONIBLE, crear_gestor_graficas
     GRAFICAS_HISTORIAL_DISPONIBLE = MATPLOTLIB_DISPONIBLE
-    if not MATPLOTLIB_DISPONIBLE:
-        print("Advertencia: matplotlib no instalado. Gráficas deshabilitadas.")
-except ImportError as e:
-    print(f"Advertencia: No se pudo importar gráficas de historial: {e}")
+except ImportError:
     GRAFICAS_HISTORIAL_DISPONIBLE = False
     MATPLOTLIB_DISPONIBLE = False
 
@@ -140,16 +156,14 @@ except ImportError:
 try:
     from modulos.ventana_administrativa import crear_ventana_administrativa
     VENTANA_ADMIN_DISPONIBLE = True
-except ImportError as e:
-    print(f"Advertencia: No se pudo importar ventana administrativa: {e}")
+except ImportError:
     VENTANA_ADMIN_DISPONIBLE = False
 
 # Importar módulo de auditoría activa
 try:
     from modulos.auditoria import AuditoriaActiva
     AUDITORIA_DISPONIBLE = True
-except ImportError as e:
-    print(f"Advertencia: No se pudo importar auditoría: {e}")
+except ImportError:
     AUDITORIA_DISPONIBLE = False
 
 # Importar logging estructurado
@@ -181,7 +195,14 @@ class Database:
             try:
                 with open(_cfg_path, 'r', encoding='utf-8') as _f:
                     _cfg = _json.load(_f)
-                self.db_path = _cfg.get('db_path', _default) or _default
+                _db = _cfg.get('db_path', '') or ''
+                if _db:
+                    _db_resolved = Path(_db)
+                    if not _db_resolved.is_absolute():
+                        _db_resolved = Path(__file__).parent / _db
+                    self.db_path = str(_db_resolved) if _db_resolved.exists() else _default
+                else:
+                    self.db_path = _default
             except Exception:
                 self.db_path = _default
         else:
@@ -199,9 +220,27 @@ class Database:
     def connect(self):
         import win32com.client
         if self.conn is None:
-            conn_str = f"Provider=Microsoft.ACE.OLEDB.12.0;Data Source={self.db_path};"
-            self.conn = win32com.client.Dispatch("ADODB.Connection")
-            self.conn.Open(conn_str)
+            if not Path(self.db_path).exists():
+                raise FileNotFoundError(
+                    f"No se encontro la base de datos:\n{self.db_path}\n\n"
+                    "Verifique que ANgesLAB.accdb este en la carpeta de instalacion."
+                )
+            try:
+                conn_str = f"Provider=Microsoft.ACE.OLEDB.12.0;Data Source={self.db_path};"
+                self.conn = win32com.client.Dispatch("ADODB.Connection")
+                self.conn.Open(conn_str)
+            except Exception as e:
+                self.conn = None
+                err_msg = str(e)
+                if "ACE.OLEDB" in err_msg or "Provider" in err_msg or "not registered" in err_msg.lower():
+                    raise ConnectionError(
+                        "No se encontro el driver de Microsoft Access.\n\n"
+                        "Debe instalar 'Microsoft Access Database Engine 2016'.\n"
+                        "Descargue desde:\n"
+                        "microsoft.com/en-us/download/details.aspx?id=54920\n\n"
+                        "IMPORTANTE: Instale la version de 64 bits si su Python es 64 bits."
+                    ) from e
+                raise
         return self.conn
 
     def close(self):
@@ -286,6 +325,26 @@ COLORS = {
 }
 
 # ============================================================
+# ICONO GLOBAL — Se aplica automáticamente a toda ventana Tk/Toplevel
+# ============================================================
+_ICON_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          'assets', 'angeslab_icon.ico')
+
+if os.path.exists(_ICON_PATH):
+    _OriginalToplevel = tk.Toplevel
+
+    class _ToplevelConIcono(_OriginalToplevel):
+        """Toplevel que hereda automáticamente el icono ANgesLAB."""
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            try:
+                self.iconbitmap(_ICON_PATH)
+            except Exception:
+                pass
+
+    tk.Toplevel = _ToplevelConIcono
+
+# ============================================================
 # VENTANA DE LOGIN
 # ============================================================
 
@@ -296,44 +355,57 @@ class LoginWindow:
         self.root.geometry("450x650")
         self.root.resizable(False, False)
         self.root.configure(bg=COLORS['sidebar'])
+        self._aplicar_icono(self.root)
         self.center_window(450, 650)
 
         self.user_data = None
         self.setup_ui()
+
+    @staticmethod
+    def _aplicar_icono(ventana):
+        """Aplica el icono oficial ANgesLAB a cualquier ventana."""
+        try:
+            ico = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               'assets', 'angeslab_icon.ico')
+            if os.path.exists(ico):
+                ventana.iconbitmap(ico)
+        except Exception:
+            pass
 
     def center_window(self, w, h):
         x = (self.root.winfo_screenwidth() - w) // 2
         y = (self.root.winfo_screenheight() - h) // 2
         self.root.geometry(f'{w}x{h}+{x}+{y}')
 
-    def _cargar_logo_microscopio(self, size=160):
-        """Carga la imagen del microscopio para el login."""
+    @staticmethod
+    def _cargar_icono_angeslab(size=140):
+        """Carga el icono oficial ANgesLAB para la interfaz."""
         if not PIL_AVAILABLE:
             return None
         try:
-            logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'microscopio_logo.png')
-            if os.path.exists(logo_path):
-                img = PILImage.open(logo_path)
+            ico_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    'assets', 'angeslab_icon_256.png')
+            if os.path.exists(ico_path):
+                img = PILImage.open(ico_path)
                 img = img.resize((size, size), PILImage.Resampling.LANCZOS)
                 return ImageTk.PhotoImage(img)
-        except Exception as e:
-            print(f"Error cargando logo: {e}")
+        except Exception:
+            pass
         return None
 
     def setup_ui(self):
         bg_color = COLORS['sidebar']
 
-        # Frame para el logo
+        # Frame para el icono oficial ANgesLAB
         logo_frame = tk.Frame(self.root, bg=bg_color)
         logo_frame.pack(pady=(25, 8))
 
-        # Cargar imagen del microscopio
-        self._logo_image = self._cargar_logo_microscopio(size=140)
+        self._logo_image = self._cargar_icono_angeslab(size=140)
         if self._logo_image:
             logo_label = tk.Label(logo_frame, image=self._logo_image, bg=bg_color)
             logo_label.pack()
         else:
-            tk.Label(logo_frame, text="🔬", font=('Segoe UI Emoji', 64),
+            tk.Label(logo_frame, text="🧪", font=('Segoe UI Emoji', 64),
                     bg=bg_color, fg=COLORS['primary']).pack()
 
         # Título
@@ -525,8 +597,16 @@ class LoginWindow:
                 if LOGGING_DISPONIBLE:
                     log_auditoria(result.get('UsuarioID'), 'LOGIN_FALLIDO',
                                   f"Login fallido para '{user}'", modulo='login')
+        except (FileNotFoundError, ConnectionError) as e:
+            messagebox.showerror("Error de configuracion", str(e))
         except Exception as e:
-            messagebox.showerror("Error de conexion", str(e))
+            messagebox.showerror("Error de conexion",
+                f"No se pudo conectar a la base de datos.\n\n"
+                f"Detalles: {e}\n\n"
+                f"Verifique que:\n"
+                f"1. ANgesLAB.accdb este en la carpeta de instalacion\n"
+                f"2. Microsoft Access Database Engine este instalado\n"
+                f"3. La base de datos no este abierta en otro programa")
 
     def run(self):
         self.root.mainloop()
@@ -588,22 +668,26 @@ class MainApplication:
         self.root = tk.Tk()
         self.root.state('zoomed')
         self.root.configure(bg=COLORS['bg'])
+        LoginWindow._aplicar_icono(self.root)
 
         # Asegurar campo Nivel en tabla Usuarios
         try:
             db.execute("ALTER TABLE Usuarios ADD COLUMN Nivel TEXT(20) DEFAULT 'Administrador'")
-        except:
+        except Exception:
             pass  # Ya existe
         try:
             db.execute("UPDATE Usuarios SET Nivel = 'Administrador' WHERE Nivel IS NULL")
-        except:
+        except Exception:
             pass
 
         # Asegurar campo WhatsApp en ConfiguracionLaboratorio
         try:
             db.execute("ALTER TABLE ConfiguracionLaboratorio ADD COLUMN WhatsApp TEXT(50)")
-        except:
+        except Exception:
             pass
+
+        # Asegurar unidades de medida especiales (hematología)
+        self._asegurar_unidades_especiales()
 
         # Asegurar tabla Bioanalistas para firma digital por area
         self._asegurar_tabla_bioanalistas()
@@ -613,7 +697,7 @@ class MainApplication:
             user_fresh = db.query_one(f"SELECT * FROM Usuarios WHERE UsuarioID={self.user['UsuarioID']}")
             if user_fresh:
                 self.user = user_fresh
-        except:
+        except Exception:
             pass
 
         # Mapear nivel 'Operador' antiguo a 'Recepcion' para compatibilidad
@@ -631,8 +715,8 @@ class MainApplication:
                         nivel='info', modulo='sesion',
                         usuario_id=self.user.get('UsuarioID'), accion='SESION_INICIO'
                     )
-        except Exception as e:
-            print(f"Advertencia: No se pudo inicializar auditoría: {e}")
+        except Exception:
+            pass
 
         # Configurar timeout de sesión por inactividad (20 minutos)
         self._SESSION_TIMEOUT_MS = 20 * 60 * 1000  # 20 minutos en milisegundos
@@ -645,8 +729,8 @@ class MainApplication:
                 self.config_numeracion = ConfiguradorNumeracion(db)
             else:
                 self.config_numeracion = None
-        except Exception as e:
-            print(f"Advertencia: No se pudo inicializar configurador de numeración: {e}")
+        except Exception:
+            pass
             self.config_numeracion = None
 
         # Inicializar configurador administrativo
@@ -655,8 +739,8 @@ class MainApplication:
                 self.config_administrativa = ConfiguradorAdministrativo(db)
             else:
                 self.config_administrativa = None
-        except Exception as e:
-            print(f"Advertencia: No se pudo inicializar configurador administrativo: {e}")
+        except Exception:
+            pass
             self.config_administrativa = None
 
         # Cargar configuración administrativa
@@ -666,7 +750,7 @@ class MainApplication:
             try:
                 self.config_lab = self.config_administrativa.obtener_configuracion()
                 self.logo_path = self.config_administrativa.obtener_ruta_logo()
-            except:
+            except Exception:
                 pass
 
         # Inicializar gestor de solicitudes
@@ -674,8 +758,8 @@ class MainApplication:
         try:
             if GESTOR_SOLICITUDES_DISPONIBLE:
                 self.gestor_solicitudes = GestorSolicitudes(db, self.user)
-        except Exception as e:
-            print(f"Advertencia: No se pudo inicializar gestor de solicitudes: {e}")
+        except Exception:
+            pass
             self.gestor_solicitudes = None
 
         # Inicializar gestor veterinario
@@ -683,8 +767,8 @@ class MainApplication:
         try:
             if VETERINARIO_DISPONIBLE:
                 self.gestor_vet = crear_gestor_veterinario(db, self.user)
-        except Exception as e:
-            print(f"Advertencia: No se pudo inicializar gestor veterinario: {e}")
+        except Exception:
+            pass
             self.gestor_vet = None
 
         # Inicializar gestor de historial clínico
@@ -692,8 +776,8 @@ class MainApplication:
         try:
             if HISTORIAL_CLINICO_DISPONIBLE:
                 self.gestor_historial = crear_gestor_historial(db, self.user)
-        except Exception as e:
-            print(f"Advertencia: No se pudo inicializar historial clínico: {e}")
+        except Exception:
+            pass
             self.gestor_historial = None
 
         # Inicializar ventana administrativa
@@ -701,17 +785,32 @@ class MainApplication:
         try:
             if VENTANA_ADMIN_DISPONIBLE:
                 self.ventana_admin = crear_ventana_administrativa(db, self.user)
-        except Exception as e:
-            print(f"Advertencia: No se pudo inicializar ventana administrativa: {e}")
+        except Exception:
+            pass
             self.ventana_admin = None
+
+        # Inicializar gestor de valores de referencia por edad/sexo
+        self.gestor_ref = None
+        try:
+            if VALORES_REF_DISPONIBLE:
+                self.gestor_ref = obtener_gestor_ref(db)
+                # Cargar valores predeterminados si la tabla está vacía
+                try:
+                    from modulos.valores_referencia import cargar_valores_predeterminados
+                    cargar_valores_predeterminados(db)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+            self.gestor_ref = None
 
         # Inicializar gestor de cotizaciones
         self.gestor_cotizaciones = None
         try:
             if COTIZACIONES_DISPONIBLE:
                 self.gestor_cotizaciones = GestorCotizaciones(db, self.user)
-        except Exception as e:
-            print(f"Advertencia: No se pudo inicializar cotizaciones: {e}")
+        except Exception:
+            pass
             self.gestor_cotizaciones = None
 
         # Variables para el modo de solicitud (nueva o agregar a existente)
@@ -775,9 +874,9 @@ class MainApplication:
                     util.limpiar_backups_antiguos(cfg.get('retener_dias', 30))
                     cfg['ultima_backup'] = datetime.now().isoformat()
                     self._guardar_config_backup(cfg)
-                    print(f"[Backup automático] realizado a las {datetime.now():%H:%M:%S}")
+                    _log.info("Backup automatico realizado a las %s", datetime.now().strftime('%H:%M:%S'))
             except Exception as e:
-                print(f"[Backup automático] error: {e}")
+                _log.warning("Backup automatico fallo: %s", e)
             # Reprogramar en la UI thread cada hora
             self.root.after(3600 * 1000, self._verificar_backup_automatico)
         threading.Thread(target=_hacer_backup, daemon=True).start()
@@ -915,18 +1014,19 @@ class MainApplication:
             section['header'].config(text=f"  ▼  {title}")
             section['expanded'] = True
 
-    def _cargar_logo_sidebar(self, size=70):
-        """Carga la imagen del microscopio para el sidebar."""
+    def _cargar_logo_sidebar(self, size=55):
+        """Carga el icono oficial ANgesLAB para el sidebar."""
         if not PIL_AVAILABLE:
             return None
         try:
-            logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'microscopio_logo.png')
-            if os.path.exists(logo_path):
-                img = PILImage.open(logo_path)
+            ico_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    'assets', 'angeslab_icon_256.png')
+            if os.path.exists(ico_path):
+                img = PILImage.open(ico_path)
                 img = img.resize((size, size), PILImage.Resampling.LANCZOS)
                 return ImageTk.PhotoImage(img)
-        except Exception as e:
-            print(f"Error cargando logo sidebar: {e}")
+        except Exception:
+            pass
         return None
 
     def es_admin(self):
@@ -990,25 +1090,26 @@ class MainApplication:
         logo_frame = tk.Frame(self.sidebar, bg=COLORS['sidebar'])
         logo_frame.pack(fill='x', pady=(18, 8))
 
-        # Cargar imagen del microscopio para sidebar (tamaño visible)
-        self._sidebar_logo_image = self._cargar_logo_sidebar(size=70)
+        # Icono oficial ANgesLAB en sidebar
+        self._sidebar_logo_image = self._cargar_logo_sidebar(size=55)
         if self._sidebar_logo_image:
             logo_label = tk.Label(logo_frame, image=self._sidebar_logo_image, bg=COLORS['sidebar'])
             logo_label.pack()
         else:
-            # Fallback: usar emoji si no se puede cargar la imagen
-            tk.Label(logo_frame, text="🔬", font=('Segoe UI Emoji', 36),
+            tk.Label(logo_frame, text="🧪", font=('Segoe UI Emoji', 28),
                     bg=COLORS['sidebar'], fg=COLORS['primary']).pack()
 
-        # Nombre del laboratorio
-        nombre_lab = "ANgesLAB"
+        # Nombre ANgesLAB (identidad fija del software)
+        tk.Label(logo_frame, text="ANgesLAB", font=('Segoe UI', 14, 'bold'),
+                bg=COLORS['sidebar'], fg='white').pack(pady=(5, 0))
+
+        # Nombre del laboratorio cliente (debajo, más discreto)
         if self.config_lab and self.config_lab.get('NombreLaboratorio'):
             nombre_lab = self.config_lab['NombreLaboratorio']
-            if len(nombre_lab) > 20:
-                nombre_lab = nombre_lab[:17] + "..."
-
-        tk.Label(logo_frame, text=nombre_lab, font=('Segoe UI', 13, 'bold'),
-                bg=COLORS['sidebar'], fg='white', wraplength=200).pack(pady=(5, 2))
+            if len(nombre_lab) > 25:
+                nombre_lab = nombre_lab[:22] + "..."
+            tk.Label(logo_frame, text=nombre_lab, font=('Segoe UI', 8),
+                    bg=COLORS['sidebar'], fg='#94a3b8', wraplength=200).pack(pady=(1, 0))
 
         # Línea decorativa con gradiente
         line_canvas = tk.Canvas(logo_frame, width=120, height=3,
@@ -1017,7 +1118,7 @@ class MainApplication:
         line_canvas.create_line(0, 1, 60, 1, fill=COLORS['primary'], width=2)
         line_canvas.create_line(60, 1, 120, 1, fill=COLORS['accent'], width=2)
 
-        tk.Label(logo_frame, text="v1.0", font=('Segoe UI', 8),
+        tk.Label(logo_frame, text="v2.0", font=('Segoe UI', 8),
                 bg=COLORS['sidebar'], fg=COLORS['primary']).pack()
 
         tk.Frame(self.sidebar, bg=COLORS['sidebar_hover'], height=1).pack(fill='x', padx=15, pady=10)
@@ -1286,15 +1387,16 @@ class MainApplication:
                         # Buscar labels dentro del frame
                         for child in widget.winfo_children():
                             if isinstance(child, tk.Label):
-                                # Si el texto no es el microscopio ni la versión, es el nombre
+                                # Si no es ANgesLAB, la versión ni emoji, es el nombre del lab
                                 texto = child.cget('text')
-                                if texto != "🔬" and texto != "v1.0":
-                                    # Actualizar nombre del laboratorio
-                                    nombre_truncado = nombre_lab
-                                    if len(nombre_truncado) > 20:
-                                        nombre_truncado = nombre_truncado[:17] + "..."
-                                    child.config(text=nombre_truncado)
-                                    break
+                                if texto not in ("🧪", "ANgesLAB", "v2.0") and not hasattr(child, '_is_icon'):
+                                    font_info = child.cget('font')
+                                    if '8' in str(font_info) and 'bold' not in str(font_info):
+                                        nombre_truncado = nombre_lab
+                                        if len(nombre_truncado) > 25:
+                                            nombre_truncado = nombre_truncado[:22] + "..."
+                                        child.config(text=nombre_truncado)
+                                        break
                         break
 
                 # Actualizar información en el header si existe
@@ -1303,7 +1405,7 @@ class MainApplication:
                     if isinstance(widget, tk.Frame) and widget != self.header_title.master:
                         # Actualizar labels de RIF y Razón Social
                         for child in widget.winfo_children():
-                            widget.destroy()
+                            child.destroy()
 
                         # Recrear labels con nueva información
                         if self.config_lab:
@@ -1322,7 +1424,7 @@ class MainApplication:
 
                 messagebox.showinfo("Éxito", "Configuración actualizada correctamente.\nLos cambios se han aplicado.")
             except Exception as e:
-                print(f"Error al recargar configuración: {e}")
+                _log.error("Error al recargar configuración: %s", e)
                 messagebox.showerror("Error", f"No se pudo recargar la configuración:\n{e}")
 
     # ============================================================
@@ -1336,28 +1438,46 @@ class MainApplication:
         # Configurar contenido scrollable
         scrollable = self.setup_scrollable_content()
 
-        # Stats
-        stats_frame = tk.Frame(scrollable, bg=COLORS['bg'])
-        stats_frame.pack(fill='x', pady=(0, 20))
+        # Accesos directos
+        shortcuts_frame = tk.Frame(scrollable, bg=COLORS['bg'])
+        shortcuts_frame.pack(fill='x', pady=(0, 20))
 
-        stats = [
-            ("👥", "Pacientes", db.count('Pacientes'), COLORS['primary']),
-            ("📋", "Solicitudes", db.count('Solicitudes'), COLORS['success']),
-            ("🧪", "Pruebas", db.count('Pruebas'), COLORS['warning']),
-            ("🩺", "Médicos", db.count('Medicos'), COLORS['danger']),
+        shortcuts = [
+            ("📋", "Nueva Solicitud", COLORS['primary'], self.form_solicitud),
+            ("💰", "Caja", COLORS['success'], self.show_caja),
+            ("🧾", "Cotizaciones", COLORS['warning'], self.show_cotizaciones),
+            ("📝", "Resultados", COLORS['info'], self.show_resultados),
         ]
 
-        for icon, label, value, color in stats:
-            card = tk.Frame(stats_frame, bg='white')
+        for icon, label, color, command in shortcuts:
+            card = tk.Frame(shortcuts_frame, bg='white', cursor='hand2')
             card.pack(side='left', expand=True, fill='both', padx=8, pady=5)
 
-            inner = tk.Frame(card, bg='white')
-            inner.pack(padx=20, pady=15, fill='both', expand=True)
+            inner = tk.Frame(card, bg='white', cursor='hand2')
+            inner.pack(padx=20, pady=18, fill='both', expand=True)
 
-            tk.Label(inner, text=icon, font=('Segoe UI', 28), bg='white', fg=color).pack(anchor='w')
-            tk.Label(inner, text=f"{value:,}", font=('Segoe UI', 32, 'bold'), bg='white', fg=COLORS['text']).pack(anchor='w')
-            tk.Label(inner, text=label, font=('Segoe UI', 11), bg='white', fg=COLORS['text_light']).pack(anchor='w')
+            lbl_icon = tk.Label(inner, text=icon, font=('Segoe UI', 38), bg='white', fg=color, cursor='hand2')
+            lbl_icon.pack(anchor='center')
+            lbl_text = tk.Label(inner, text=label, font=('Segoe UI', 13, 'bold'), bg='white', fg=COLORS['text'], cursor='hand2')
+            lbl_text.pack(anchor='center', pady=(8, 0))
             tk.Frame(card, bg=color, height=4).pack(fill='x', side='bottom')
+
+            def _hover_enter(e, c=card, inn=inner, li=lbl_icon, lt=lbl_text, clr=color):
+                for w in (c, inn, li, lt):
+                    w.configure(bg=clr)
+                li.configure(fg='white')
+                lt.configure(fg='white')
+
+            def _hover_leave(e, c=card, inn=inner, li=lbl_icon, lt=lbl_text, clr=color):
+                for w in (c, inn, li, lt):
+                    w.configure(bg='white')
+                li.configure(fg=clr)
+                lt.configure(fg=COLORS['text'])
+
+            for widget in (card, inner, lbl_icon, lbl_text):
+                widget.bind('<Enter>', _hover_enter)
+                widget.bind('<Leave>', _hover_leave)
+                widget.bind('<Button-1>', lambda e, cmd=command: cmd())
 
         # Solicitudes recientes
         recent = tk.LabelFrame(scrollable, text=" 📋 Últimas Solicitudes ", font=('Segoe UI', 11, 'bold'),
@@ -1388,7 +1508,7 @@ class MainApplication:
                     f"${r['MontoTotal']:,.2f}" if r['MontoTotal'] else '$0.00'
                 ))
         except Exception as e:
-            print(f"Error: {e}")
+            _log.error("Error: %s", e)
 
         # ============================================================
         # AGENDA DE PENDIENTES
@@ -1462,6 +1582,70 @@ class MainApplication:
 
         self._cargar_pendientes()
 
+    def _asegurar_unidades_especiales(self):
+        """Asegura que existan unidades de medida especiales en la tabla Unidades."""
+        unidades_requeridas = [
+            '10^6/mm3',
+            '10^3/mm3',
+            'mill/mm3',
+            'x10^3/uL',
+            'x10^6/uL',
+            'mm3',
+            'fL',
+            'pg',
+            'g/dL',
+            'mg/dL',
+            'seg',
+            '%',
+        ]
+        try:
+            for simbolo in unidades_requeridas:
+                _s = simbolo.replace("'", "''")
+                existe = db.query_one(
+                    f"SELECT UnidadID FROM Unidades WHERE Simbolo = '{_s}'")
+                if not existe:
+                    db.execute(
+                        f"INSERT INTO Unidades (Simbolo) VALUES ('{_s}')")
+        except Exception:
+            pass
+
+    @staticmethod
+    def _formato_superindice(texto, para_pdf=False):
+        """Convierte notación ^N a formato legible.
+        - para_pdf=False (UI/Tkinter): usa superíndices Unicode  (10⁶/mm³)
+        - para_pdf=True  (ReportLab):  usa texto plano legible   (x10⁶/uL → x10^6/uL)
+          porque Helvetica no soporta caracteres Unicode extendidos.
+        """
+        if not texto:
+            return texto
+        import re
+        if para_pdf:
+            # Para PDF: dejar ^N tal cual (legible), limpiar caracteres Unicode
+            # que ya estén en el texto y Helvetica no puede renderizar
+            _unicode_to_ascii = {
+                '⁰': '^0', '¹': '^1', '²': '^2', '³': '^3', '⁴': '^4',
+                '⁵': '^5', '⁶': '^6', '⁷': '^7', '⁸': '^8', '⁹': '^9',
+                'µ': 'u', 'μ': 'u',
+            }
+            for uc, asc in _unicode_to_ascii.items():
+                texto = texto.replace(uc, asc)
+            # Limpiar doble ^: x10^^6 → x10^6
+            texto = re.sub(r'\^{2,}', '^', texto)
+            # mm3 sin ^ → mm^3 para claridad
+            texto = re.sub(r'(?<!\^)(?<=mm)3(?!\d)', '^3', texto)
+            return texto
+        else:
+            # Para UI (Tkinter): usar superíndices Unicode
+            _super = {'0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
+                      '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹'}
+            def _repl_caret(m):
+                return ''.join(_super.get(c, c) for c in m.group(1))
+            texto = re.sub(r'\^(\d+)', _repl_caret, texto)
+            # Reemplazar mm3 → mm³, uL → µL
+            texto = texto.replace('mm3', 'mm³')
+            texto = texto.replace('uL', 'µL')
+            return texto
+
     def _asegurar_tabla_bioanalistas(self):
         """Crea la tabla Bioanalistas en la BD si no existe."""
         try:
@@ -1479,7 +1663,7 @@ class MainApplication:
                     "Activo BIT DEFAULT TRUE)"
                 )
             except Exception as e:
-                print(f"Error creando tabla Bioanalistas: {e}")
+                _log.error("Error creando tabla Bioanalistas: %s", e)
 
         # Asegurar areas clinicas requeridas con IDs fijos y nomenclatura uniforme
         # Los AreaID 1,2,5,6,7,8,9,10 estan hardcodeados en plantillas y formularios
@@ -1581,7 +1765,7 @@ class MainApplication:
                 )
 
         except Exception as e:
-            print(f"Error asegurando areas clinicas: {e}")
+            _log.error("Error asegurando areas clinicas: %s", e)
 
     def _crear_catalogo_microbiologia(self):
         """
@@ -2297,13 +2481,10 @@ class MainApplication:
                         params_agregados += 1
 
                 if params_agregados > 0:
-                    estado = 'creada' if es_nueva else 'actualizada'
-                    print(f"  Prueba '{def_prueba['nombre']}' ({codigo_prueba}) {estado}: {params_agregados} parametros agregados.")
+                    pass  # Prueba creada/actualizada correctamente
 
-            print("Catalogo de Microbiologia/Bacteriologia creado exitosamente.")
-
-        except Exception as e:
-            print(f"Error creando catalogo de Microbiologia: {e}")
+        except Exception:
+            pass
 
     def _asegurar_tabla_pendientes(self):
         """Crea la tabla Pendientes en la BD si no existe."""
@@ -2547,7 +2728,30 @@ class MainApplication:
         entries['fecha_nac'] = tk.Entry(row5, font=('Segoe UI', 11), width=12, relief='flat', bg='#f8f9fa',
                                        highlightthickness=1, highlightbackground=COLORS['border'])
         entries['fecha_nac'].pack(side='left', ipady=5, padx=(0, 5))
-        tk.Label(row5, text="(DD/MM/AAAA)", font=('Segoe UI', 8), bg='white', fg='gray').pack(side='left', padx=(0, 15))
+        lbl_edad_pac = tk.Label(row5, text="", font=('Segoe UI', 9, 'bold'), bg='white', fg='#1565c0')
+        lbl_edad_pac.pack(side='left', padx=(0, 10))
+
+        def _calc_edad_pac(*args):
+            fs = entries['fecha_nac'].get().strip()
+            if len(fs) >= 10:
+                try:
+                    fn = datetime.strptime(fs[:10], '%d/%m/%Y')
+                    hoy = datetime.now()
+                    a = hoy.year - fn.year - ((hoy.month, hoy.day) < (fn.month, fn.day))
+                    if a < 2:
+                        d = (hoy - fn).days
+                        m = d // 30
+                        lbl_edad_pac.config(text=f"{d}d" if m < 1 else f"{m}m")
+                    else:
+                        lbl_edad_pac.config(text=f"{a} años")
+                except ValueError:
+                    lbl_edad_pac.config(text="")
+            else:
+                lbl_edad_pac.config(text="")
+
+        entries['fecha_nac'].bind('<KeyRelease>', _calc_edad_pac)
+        entries['fecha_nac'].bind('<FocusOut>', _calc_edad_pac)
+
         tk.Label(row5, text="Sexo:", font=('Segoe UI', 10), bg='white', width=6, anchor='w').pack(side='left')
         entries['sexo'] = ttk.Combobox(row5, font=('Segoe UI', 10), width=10, values=['M - Masculino', 'F - Femenino'])
         entries['sexo'].pack(side='left', ipady=3)
@@ -2612,13 +2816,14 @@ class MainApplication:
                     entries['apellidos'].insert(0, pac.get('Apellidos') or '')
                     if pac.get('FechaNacimiento'):
                         entries['fecha_nac'].insert(0, pac['FechaNacimiento'].strftime('%d/%m/%Y'))
+                        _calc_edad_pac()  # Mostrar edad al cargar paciente
                     if pac.get('Sexo'):
                         s = pac.get('Sexo')
                         entries['sexo'].set('M - Masculino' if s == 'M' else 'F - Femenino')
                     entries['telefono'].insert(0, pac.get('Telefono1') or '')
                     entries['email'].insert(0, pac.get('Email') or '')
                     entries['direccion'].insert(0, pac.get('DireccionCompleta') or '')
-            except:
+            except Exception:
                 pass
 
         def guardar():
@@ -2646,7 +2851,7 @@ class MainApplication:
             if fecha_str:
                 try:
                     fecha_nac = datetime.strptime(fecha_str, '%d/%m/%Y')
-                except:
+                except Exception:
                     messagebox.showerror("Error", "Formato de fecha inválido. Use DD/MM/AAAA")
                     return
 
@@ -2685,7 +2890,7 @@ class MainApplication:
                 # Refrescar lista si existe
                 try:
                     self.cargar_pacientes()
-                except:
+                except Exception:
                     pass
             except Exception as e:
                 messagebox.showerror("Error", f"Error al guardar: {e}")
@@ -3039,13 +3244,18 @@ class MainApplication:
         self._cot_search.pack(side='left', padx=5, ipady=6)
 
         estado_var = tk.StringVar(value='Todos')
+        self._cot_estado_var = estado_var
         ttk.Combobox(toolbar, textvariable=estado_var, width=12,
-                     values=['Todos', 'Pendiente', 'Convertida', 'Anulada'],
+                     values=['Todos', 'Pendiente', 'Convertida', 'Anulada', 'Vencida'],
                      state='readonly', font=('Segoe UI', 10)).pack(side='left', padx=5)
 
         tk.Button(toolbar, text="Buscar", font=('Segoe UI', 10),
                   bg=COLORS['success'], fg='white', relief='flat', padx=12,
                   command=lambda: self._cargar_cotizaciones(estado_var.get())).pack(side='left', padx=5)
+
+        # Enter para buscar
+        self._cot_search.bind('<Return>',
+                              lambda e: self._cargar_cotizaciones(estado_var.get()))
 
         # Treeview
         cols = ('ID', 'N° Cotización', 'Paciente', 'Cédula', 'Fecha', 'Vence', 'Total', 'Estado')
@@ -3053,8 +3263,8 @@ class MainApplication:
         tree_f.pack(fill='both', expand=True, padx=20, pady=10)
 
         self._tree_cot = ttk.Treeview(tree_f, columns=cols, show='headings', height=18)
-        widths = {'ID': 40, 'N° Cotización': 130, 'Paciente': 190, 'Cédula': 100,
-                  'Fecha': 90, 'Vence': 90, 'Total': 100, 'Estado': 90}
+        widths = {'ID': 40, 'N° Cotización': 140, 'Paciente': 190, 'Cédula': 100,
+                  'Fecha': 90, 'Vence': 90, 'Total': 100, 'Estado': 95}
         for c in cols:
             self._tree_cot.heading(c, text=c)
             self._tree_cot.column(c, width=widths.get(c, 100), anchor='center')
@@ -3064,6 +3274,9 @@ class MainApplication:
         self._tree_cot.configure(yscrollcommand=vsb.set)
         self._tree_cot.pack(side='left', fill='both', expand=True)
         vsb.pack(side='right', fill='y')
+
+        # Doble clic para ver PDF
+        self._tree_cot.bind('<Double-1>', lambda e: self._ver_cotizacion_pdf())
 
         # Botones de acción
         acc_f = tk.Frame(scrollable, bg=COLORS['bg'])
@@ -3080,9 +3293,11 @@ class MainApplication:
                   command=self._convertir_cotizacion).pack(side='left', padx=(0, 8))
         tk.Button(acc_f, text="🚫 Anular", font=('Segoe UI', 9),
                   bg=COLORS['danger'], fg='white', relief='flat', padx=12,
-                  command=self._anular_cotizacion).pack(side='left')
+                  command=self._anular_cotizacion).pack(side='left', padx=(0, 8))
+        tk.Button(acc_f, text="🗑️ Eliminar", font=('Segoe UI', 9),
+                  bg='#424242', fg='white', relief='flat', padx=12,
+                  command=self._eliminar_cotizacion).pack(side='left')
 
-        self._cot_estado_var = estado_var
         self._cargar_cotizaciones('Todos')
 
     def _cargar_cotizaciones(self, estado='Todos'):
@@ -3093,6 +3308,7 @@ class MainApplication:
         filtro = self._cot_search.get().strip() if hasattr(self, '_cot_search') else ''
         rows = self.gestor_cotizaciones.listar_cotizaciones(filtro, estado)
         simbolo = (self.config_lab or {}).get('SimboloMoneda', '$')
+        hoy = date.today()
         for r in rows:
             fecha = r.get('FechaCotizacion')
             vence = r.get('FechaVencimiento')
@@ -3100,14 +3316,33 @@ class MainApplication:
             vence_s = vence.strftime('%d/%m/%Y') if hasattr(vence, 'strftime') else str(vence or '')[:10]
             total   = float(r.get('Total') or 0)
             estado_r = r.get('Estado', '')
-            tag = {'Convertida': 'verde', 'Anulada': 'rojo', 'Pendiente': ''}.get(estado_r, '')
+
+            # Detección inteligente de vencimiento
+            esta_vencida = False
+            if estado_r == 'Pendiente' and vence:
+                fecha_vence = vence.date() if hasattr(vence, 'date') else vence
+                if hasattr(fecha_vence, 'year') and fecha_vence < hoy:
+                    esta_vencida = True
+
+            if estado == 'Vencida' and not esta_vencida:
+                continue  # Filtrar solo vencidas
+
+            if esta_vencida:
+                tag = 'vencida'
+                estado_mostrar = 'Vencida'
+            else:
+                tag = {'Convertida': 'verde', 'Anulada': 'rojo', 'Pendiente': 'pendiente'}.get(estado_r, '')
+                estado_mostrar = estado_r
+
             self._tree_cot.insert('', 'end', tags=(tag,), values=(
                 r.get('CotizacionID'), r.get('NumeroCotizacion', ''),
                 r.get('Paciente', ''), r.get('NumeroDocumento', '') or '',
-                fecha_s, vence_s, f"{simbolo} {total:,.2f}", estado_r
+                fecha_s, vence_s, f"{simbolo} {total:,.2f}", estado_mostrar
             ))
-        self._tree_cot.tag_configure('verde', foreground='#2e7d32')
-        self._tree_cot.tag_configure('rojo',  foreground='#c62828')
+        self._tree_cot.tag_configure('verde',    foreground='#2e7d32')
+        self._tree_cot.tag_configure('rojo',     foreground='#c62828')
+        self._tree_cot.tag_configure('vencida',  foreground='#e65100', font=('Segoe UI', 9, 'italic'))
+        self._tree_cot.tag_configure('pendiente', foreground='#1565c0')
 
     def _cot_seleccionada(self):
         sel = self._tree_cot.selection() if hasattr(self, '_tree_cot') else []
@@ -3115,6 +3350,14 @@ class MainApplication:
             messagebox.showwarning("Aviso", "Seleccione una cotización")
             return None
         return self._tree_cot.item(sel[0])['values'][0]
+
+    def _cot_estado_seleccionado(self):
+        """Retorna el estado de la cotización seleccionada en el treeview."""
+        sel = self._tree_cot.selection() if hasattr(self, '_tree_cot') else []
+        if not sel:
+            return None
+        vals = self._tree_cot.item(sel[0])['values']
+        return vals[7] if len(vals) > 7 else None
 
     def _ver_cotizacion_pdf(self):
         cid = self._cot_seleccionada()
@@ -3150,6 +3393,13 @@ class MainApplication:
         cid = self._cot_seleccionada()
         if not cid:
             return
+        estado = self._cot_estado_seleccionado()
+        if estado in ('Convertida',):
+            messagebox.showinfo("Info", "Esta cotización ya fue convertida en solicitud.")
+            return
+        if estado in ('Anulada',):
+            messagebox.showinfo("Info", "No se puede convertir una cotización anulada.")
+            return
         if not messagebox.askyesno("Confirmar",
                                    "¿Convertir esta cotización en una solicitud?\n"
                                    "Se creará la solicitud con los mismos ítems."):
@@ -3167,9 +3417,42 @@ class MainApplication:
         cid = self._cot_seleccionada()
         if not cid:
             return
-        if messagebox.askyesno("Confirmar", "¿Anular esta cotización?"):
-            self.gestor_cotizaciones.anular_cotizacion(cid)
-            self._cargar_cotizaciones(getattr(self, '_cot_estado_var', tk.StringVar()).get())
+        estado = self._cot_estado_seleccionado()
+        if estado in ('Convertida',):
+            messagebox.showinfo("Info", "No se puede anular una cotización ya convertida en solicitud.")
+            return
+        if estado in ('Anulada',):
+            messagebox.showinfo("Info", "Esta cotización ya está anulada.")
+            return
+        if messagebox.askyesno("Confirmar", "¿Anular esta cotización?\nEsta acción no se puede deshacer."):
+            r = self.gestor_cotizaciones.anular_cotizacion(cid)
+            if isinstance(r, dict) and not r.get('exito'):
+                messagebox.showerror("Error", r.get('mensaje', 'Error al anular'))
+            else:
+                self._cargar_cotizaciones(getattr(self, '_cot_estado_var', tk.StringVar()).get())
+
+    def _eliminar_cotizacion(self):
+        """Elimina permanentemente una cotización anulada."""
+        cid = self._cot_seleccionada()
+        if not cid:
+            return
+        estado = self._cot_estado_seleccionado()
+        if estado not in ('Anulada',):
+            messagebox.showinfo("Info",
+                                "Solo se pueden eliminar cotizaciones anuladas.\n"
+                                "Primero anule la cotización y luego elimínela.")
+            return
+        if messagebox.askyesno("Eliminar permanentemente",
+                               "¿Eliminar esta cotización de forma permanente?\n\n"
+                               "Se borrarán todos los datos asociados.\n"
+                               "Esta acción NO se puede deshacer."):
+            try:
+                db = self.gestor_cotizaciones.db
+                db.execute(f"DELETE FROM DetalleCotizaciones WHERE CotizacionID={cid}")
+                db.execute(f"DELETE FROM Cotizaciones WHERE CotizacionID={cid}")
+                self._cargar_cotizaciones(getattr(self, '_cot_estado_var', tk.StringVar()).get())
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo eliminar: {e}")
 
     def form_cotizacion(self):
         """Formulario para crear una nueva cotización."""
@@ -3181,7 +3464,7 @@ class MainApplication:
         win.title("Nueva Cotización")
         win.grab_set()
         win.configure(bg='white')
-        hacer_ventana_responsiva(win, 720, 700, min_ancho=640, min_alto=580)
+        hacer_ventana_responsiva(win, 750, 720, min_ancho=660, min_alto=600)
 
         header = tk.Frame(win, bg='#1565c0', height=50)
         header.pack(fill='x')
@@ -3196,34 +3479,80 @@ class MainApplication:
         main_f = tk.Frame(win, bg='white')
         main_f.pack(fill='both', expand=True, padx=20, pady=10)
 
-        # ── Paciente ──────────────────────────────────────────────────────────
-        pac_lf = tk.LabelFrame(main_f, text=" Paciente ", bg='white',
+        db = self.gestor_cotizaciones.db
+
+        # ── Solicitante ───────────────────────────────────────────────────────
+        sol_lf = tk.LabelFrame(main_f, text=" Solicitante ", bg='white',
                                font=('Segoe UI', 9, 'bold'))
-        pac_lf.pack(fill='x', pady=(0, 8))
+        sol_lf.pack(fill='x', pady=(0, 8))
 
-        pac_row = tk.Frame(pac_lf, bg='white')
-        pac_row.pack(fill='x', padx=10, pady=6)
+        pac_id_var = tk.IntVar(value=0)
 
-        tk.Label(pac_row, text="Buscar:", font=('Segoe UI', 9), bg='white').pack(side='left')
-        pac_search = tk.Entry(pac_row, font=('Segoe UI', 10), width=28,
+        # Fila 1: Nombre, Cédula
+        sol_row1 = tk.Frame(sol_lf, bg='white')
+        sol_row1.pack(fill='x', padx=10, pady=(6, 3))
+
+        tk.Label(sol_row1, text="Nombre:", font=('Segoe UI', 9), bg='white').pack(side='left')
+        sol_nombre_e = tk.Entry(sol_row1, font=('Segoe UI', 10), width=30,
+                                relief='flat', bg='#f8f9fa',
+                                highlightthickness=1, highlightbackground='#bbb')
+        sol_nombre_e.pack(side='left', padx=5, ipady=4)
+
+        tk.Label(sol_row1, text="Cédula:", font=('Segoe UI', 9), bg='white').pack(side='left', padx=(10, 0))
+        sol_cedula_e = tk.Entry(sol_row1, font=('Segoe UI', 10), width=15,
+                                relief='flat', bg='#f8f9fa',
+                                highlightthickness=1, highlightbackground='#bbb')
+        sol_cedula_e.pack(side='left', padx=5, ipady=4)
+
+        # Fila 2: Teléfono, Médico y Paciente registrado
+        sol_row2 = tk.Frame(sol_lf, bg='white')
+        sol_row2.pack(fill='x', padx=10, pady=(3, 6))
+
+        tk.Label(sol_row2, text="Teléfono:", font=('Segoe UI', 9), bg='white').pack(side='left')
+        sol_tel_e = tk.Entry(sol_row2, font=('Segoe UI', 10), width=14,
+                             relief='flat', bg='#f8f9fa',
+                             highlightthickness=1, highlightbackground='#bbb')
+        sol_tel_e.pack(side='left', padx=5, ipady=4)
+
+        # Médico referente
+        tk.Label(sol_row2, text="Médico:", font=('Segoe UI', 9), bg='white').pack(side='left', padx=(8, 0))
+        medico_var = tk.StringVar(value='')
+        medicos_rows = db.query(
+            "SELECT MedicoID, Nombres & ' ' & Apellidos AS Nombre "
+            "FROM Medicos WHERE Activo=True ORDER BY Nombres"
+        ) or []
+        med_map = {}
+        med_nombres = ['(Ninguno)']
+        for m in medicos_rows:
+            nombre = m.get('Nombre', '').strip()
+            med_nombres.append(nombre)
+            med_map[nombre] = m['MedicoID']
+        combo_med = ttk.Combobox(sol_row2, textvariable=medico_var, width=22,
+                                 values=med_nombres, state='readonly', font=('Segoe UI', 9))
+        combo_med.current(0)
+        combo_med.pack(side='left', padx=5)
+
+        # Separador y búsqueda paciente
+        tk.Label(sol_row2, text="│", font=('Segoe UI', 9), bg='white',
+                 fg='#ccc').pack(side='left', padx=4)
+
+        tk.Label(sol_row2, text="Paciente:", font=('Segoe UI', 9),
+                 bg='white', fg='#666').pack(side='left')
+        pac_search = tk.Entry(sol_row2, font=('Segoe UI', 10), width=14,
                               relief='flat', bg='#f8f9fa',
                               highlightthickness=1, highlightbackground='#bbb')
         pac_search.pack(side='left', padx=5, ipady=4)
-
-        pac_var      = tk.StringVar(value='')  # almacena "ID|Nombre"
-        pac_id_var   = tk.IntVar(value=0)
-        lbl_pac_sel  = tk.Label(pac_lf, text="Ningún paciente seleccionado",
-                                font=('Segoe UI', 9, 'italic'), bg='white', fg='#666')
-        lbl_pac_sel.pack(anchor='w', padx=10, pady=(0, 6))
 
         def buscar_pac(event=None):
             q = pac_search.get().strip()
             if not q:
                 return
+            safe_q = q.replace("'", "''")
             rows = db.query(
-                f"SELECT PacienteID, Nombres, Apellidos, NumeroDocumento FROM Pacientes "
-                f"WHERE Nombres LIKE '%{q}%' OR Apellidos LIKE '%{q}%' "
-                f"   OR NumeroDocumento LIKE '%{q}%' "
+                f"SELECT PacienteID, Nombres, Apellidos, NumeroDocumento, Telefono1 "
+                f"FROM Pacientes "
+                f"WHERE Nombres LIKE '%{safe_q}%' OR Apellidos LIKE '%{safe_q}%' "
+                f"   OR NumeroDocumento LIKE '%{safe_q}%' "
                 f"ORDER BY Apellidos"
             ) or []
             if not rows:
@@ -3233,20 +3562,25 @@ class MainApplication:
             def _seleccionar(r):
                 nombre = f"{r.get('Nombres','')} {r.get('Apellidos','')}".strip()
                 pac_id_var.set(r['PacienteID'])
-                lbl_pac_sel.config(
-                    text=f"✅ {nombre} | C.I. {r.get('NumeroDocumento','')}",
-                    fg='#2e7d32'
-                )
+                sol_nombre_e.delete(0, 'end')
+                sol_nombre_e.insert(0, nombre)
+                sol_cedula_e.delete(0, 'end')
+                sol_cedula_e.insert(0, r.get('NumeroDocumento', ''))
+                sol_tel_e.delete(0, 'end')
+                sol_tel_e.insert(0, r.get('Telefono1', '') or '')
+                pac_search.delete(0, 'end')
+                # Indicador visual
+                sol_nombre_e.config(bg='#e8f5e9')
 
             if len(rows) == 1:
                 _seleccionar(rows[0])
                 return
-            # múltiples → mini-listado
             sel_win = tk.Toplevel(win)
             sel_win.title("Seleccionar paciente")
             sel_win.grab_set()
+            hacer_ventana_responsiva(sel_win, 500, 350)
             lst = tk.Listbox(sel_win, font=('Segoe UI', 10), width=55, height=min(len(rows), 12))
-            lst.pack(padx=10, pady=10)
+            lst.pack(padx=10, pady=10, fill='both', expand=True)
             for r in rows:
                 nombre = f"{r.get('Nombres','')} {r.get('Apellidos','')}".strip()
                 lst.insert('end', f"{nombre} | {r.get('NumeroDocumento','')}")
@@ -3256,10 +3590,12 @@ class MainApplication:
                     _seleccionar(rows[idx[0]])
                 sel_win.destroy()
             lst.bind('<Double-1>', elegir)
-            tk.Button(sel_win, text="Seleccionar", command=elegir).pack(pady=(0, 8))
+            tk.Button(sel_win, text="Seleccionar", command=elegir,
+                      font=('Segoe UI', 10), bg=COLORS['primary'], fg='white',
+                      relief='flat', padx=12).pack(pady=(0, 8))
 
         pac_search.bind('<Return>', buscar_pac)
-        tk.Button(pac_row, text="🔍", font=('Segoe UI', 9),
+        tk.Button(sol_row2, text="🔍", font=('Segoe UI', 9),
                   bg=COLORS['primary'], fg='white', relief='flat',
                   command=buscar_pac).pack(side='left')
 
@@ -3272,7 +3608,7 @@ class MainApplication:
         pru_row.pack(fill='x', padx=10, pady=6)
 
         tk.Label(pru_row, text="Buscar prueba:", font=('Segoe UI', 9), bg='white').pack(side='left')
-        pru_search = tk.Entry(pru_row, font=('Segoe UI', 10), width=30,
+        pru_search = tk.Entry(pru_row, font=('Segoe UI', 10), width=28,
                               relief='flat', bg='#f8f9fa',
                               highlightthickness=1, highlightbackground='#bbb')
         pru_search.pack(side='left', padx=5, ipady=4)
@@ -3296,46 +3632,61 @@ class MainApplication:
             st = sum(p['precio'] for p in pruebas_sel)
             lbl_subtotal.config(text=f"Sub-Total: {simbolo} {st:,.2f}")
 
+        def _agregar_prueba_a_lista(r):
+            """Agrega una prueba validando duplicados."""
+            pid = r['PruebaID']
+            # Verificar duplicado
+            if any(p['id'] == pid for p in pruebas_sel):
+                messagebox.showwarning("Duplicada",
+                                       f"La prueba '{r['NombrePrueba']}' ya está en la lista.",
+                                       parent=win)
+                return
+            precio = float(r.get('Precio') or r.get('PrecioBase') or 0)
+            pruebas_sel.append({'id': pid, 'nombre': r['NombrePrueba'], 'precio': precio})
+            tree_p.insert('', 'end', values=(r['NombrePrueba'], f"{simbolo} {precio:,.2f}"))
+            actualizar_subtotal()
+            pru_search.delete(0, 'end')
+            pru_search.focus_set()
+
         def agregar_prueba(event=None):
             q = pru_search.get().strip()
             if not q:
                 return
+            safe_q = q.replace("'", "''")
             rows = db.query(
                 f"SELECT PruebaID, NombrePrueba, Precio FROM Pruebas "
-                f"WHERE (NombrePrueba LIKE '%{q}%' OR CodigoPrueba LIKE '%{q}%') "
+                f"WHERE (NombrePrueba LIKE '%{safe_q}%' OR CodigoPrueba LIKE '%{safe_q}%') "
                 f"AND Activo=True ORDER BY NombrePrueba"
             ) or []
             if not rows:
                 messagebox.showinfo("Sin resultados", "No se encontraron pruebas.", parent=win)
                 return
             if len(rows) == 1:
-                r = rows[0]
-                precio = float(r.get('Precio') or 0)
-                pruebas_sel.append({'id': r['PruebaID'], 'nombre': r['NombrePrueba'], 'precio': precio})
-                tree_p.insert('', 'end', values=(r['NombrePrueba'], f"{simbolo} {precio:,.2f}"))
-                actualizar_subtotal()
-                pru_search.delete(0, 'end')
+                _agregar_prueba_a_lista(rows[0])
                 return
-            # múltiples
+            # Múltiples resultados — ventana con multi-selección
             sel_win = tk.Toplevel(win)
-            sel_win.title("Seleccionar prueba")
+            sel_win.title("Seleccionar pruebas")
             sel_win.grab_set()
-            lst = tk.Listbox(sel_win, font=('Segoe UI', 10), width=55, height=min(len(rows), 12))
-            lst.pack(padx=10, pady=10)
+            hacer_ventana_responsiva(sel_win, 520, 400)
+
+            tk.Label(sel_win, text=f"{len(rows)} pruebas encontradas — seleccione una o varias:",
+                     font=('Segoe UI', 9), bg='white', fg='#666').pack(padx=10, pady=(10, 4), anchor='w')
+
+            lst = tk.Listbox(sel_win, font=('Segoe UI', 10), width=55,
+                             height=min(len(rows), 14), selectmode='extended')
+            lst.pack(padx=10, pady=(0, 8), fill='both', expand=True)
             for r in rows:
-                lst.insert('end', f"{r['NombrePrueba']} — {simbolo} {float(r.get('Precio') or 0):,.2f}")
+                lst.insert('end', f"{r['NombrePrueba']}  —  {simbolo} {float(r.get('Precio') or 0):,.2f}")
             def elegir(event=None):
-                idx = lst.curselection()
-                if idx:
-                    r = rows[idx[0]]
-                    precio = float(r.get('Precio') or 0)
-                    pruebas_sel.append({'id': r['PruebaID'], 'nombre': r['NombrePrueba'], 'precio': precio})
-                    tree_p.insert('', 'end', values=(r['NombrePrueba'], f"{simbolo} {precio:,.2f}"))
-                    actualizar_subtotal()
-                    pru_search.delete(0, 'end')
+                indices = lst.curselection()
+                for idx in indices:
+                    _agregar_prueba_a_lista(rows[idx])
                 sel_win.destroy()
             lst.bind('<Double-1>', elegir)
-            tk.Button(sel_win, text="Agregar", command=elegir).pack(pady=(0, 8))
+            tk.Button(sel_win, text="➕ Agregar seleccionadas", command=elegir,
+                      font=('Segoe UI', 10), bg=COLORS['primary'], fg='white',
+                      relief='flat', padx=12).pack(pady=(0, 10))
 
         pru_search.bind('<Return>', agregar_prueba)
         tk.Button(pru_row, text="➕ Agregar", font=('Segoe UI', 9),
@@ -3346,15 +3697,21 @@ class MainApplication:
             sel = tree_p.selection()
             if not sel:
                 return
-            idx = tree_p.index(sel[0])
-            if 0 <= idx < len(pruebas_sel):
-                pruebas_sel.pop(idx)
-            tree_p.delete(sel[0])
+            # Soportar multi-selección para eliminar
+            indices = sorted([tree_p.index(s) for s in sel], reverse=True)
+            for idx in indices:
+                if 0 <= idx < len(pruebas_sel):
+                    pruebas_sel.pop(idx)
+            for s in sel:
+                tree_p.delete(s)
             actualizar_subtotal()
 
         tk.Button(pru_row, text="🗑️ Quitar", font=('Segoe UI', 9),
                   bg=COLORS['danger'], fg='white', relief='flat',
                   command=quitar_prueba).pack(side='left', padx=4)
+
+        # Tecla Delete para quitar pruebas
+        tree_p.bind('<Delete>', lambda e: quitar_prueba())
 
         # ── Extra ─────────────────────────────────────────────────────────────
         extra_f = tk.Frame(main_f, bg='white')
@@ -3379,8 +3736,9 @@ class MainApplication:
 
         # ── Guardar ───────────────────────────────────────────────────────────
         def guardar():
-            if not pac_id_var.get():
-                messagebox.showerror("Error", "Seleccione un paciente.", parent=win)
+            nombre_sol = sol_nombre_e.get().strip()
+            if not nombre_sol and not pac_id_var.get():
+                messagebox.showerror("Error", "Ingrese el nombre del solicitante o seleccione un paciente.", parent=win)
                 return
             if not pruebas_sel:
                 messagebox.showerror("Error", "Agregue al menos una prueba.", parent=win)
@@ -3389,16 +3747,32 @@ class MainApplication:
                 desc = float(desc_e.get().strip().replace(',', '.') or '0')
             except Exception:
                 desc = 0.0
+            # Validar descuento no mayor que subtotal
+            subtotal = sum(p['precio'] for p in pruebas_sel)
+            if desc > subtotal:
+                messagebox.showerror("Error",
+                                     f"El descuento ({simbolo} {desc:,.2f}) no puede ser mayor "
+                                     f"que el subtotal ({simbolo} {subtotal:,.2f}).", parent=win)
+                return
             try:
                 dias = int(dias_e.get().strip() or '15')
+                if dias < 1:
+                    dias = 1
             except Exception:
                 dias = 15
+
+            medico_id = med_map.get(medico_var.get())
+
             r = self.gestor_cotizaciones.crear_cotizacion(
-                paciente_id=pac_id_var.get(),
+                paciente_id=pac_id_var.get() or None,
                 pruebas=pruebas_sel,
+                medico_id=medico_id,
                 descuento=desc,
                 observaciones=obs_e.get().strip(),
                 dias_vigencia=dias,
+                nombre_solicitante=nombre_sol,
+                telefono_solicitante=sol_tel_e.get().strip(),
+                cedula_solicitante=sol_cedula_e.get().strip(),
             )
             if r['exito']:
                 if messagebox.askyesno("Éxito",
@@ -3423,6 +3797,9 @@ class MainApplication:
         tk.Button(btn_frame, text="💾 Guardar Cotización", font=('Segoe UI', 11, 'bold'),
                   bg='#1565c0', fg='white', relief='flat', padx=18, pady=8,
                   command=guardar).pack(side='right')
+
+        # Atajo Ctrl+S
+        win.bind('<Control-s>', lambda e: guardar())
 
     # ── Reporte de Comisiones por Médico ─────────────────────────────────────
 
@@ -3671,7 +4048,7 @@ class MainApplication:
                     if pru.get('NombreArea'):
                         combo_area.set(pru['NombreArea'])
                     var_activo.set(bool(pru.get('Activo')))
-            except:
+            except Exception:
                 pass
 
         def guardar():
@@ -3859,6 +4236,8 @@ class MainApplication:
         self.cargar_solicitudes()
 
     def cargar_solicitudes(self, filtro=""):
+        if not hasattr(self, 'tree_sol'):
+            return
         for item in self.tree_sol.get_children():
             self.tree_sol.delete(item)
 
@@ -4024,38 +4403,114 @@ class MainApplication:
         self.combo_tipo.pack(side='left')
 
         # ============================================================
-        # SECCIÓN 2: INFORMACIÓN DEL PACIENTE
+        # SECCIÓN 2: INFORMACIÓN DEL PACIENTE (inline)
         # ============================================================
         sec_paciente = tk.LabelFrame(left_col, text=" 👤 Información del Paciente ", font=('Segoe UI', 11, 'bold'),
                                      bg='white', fg=COLORS['text'])
         sec_paciente.pack(fill='x', pady=(0, 10))
 
         pac_frame = tk.Frame(sec_paciente, bg='white')
-        pac_frame.pack(fill='x', padx=15, pady=10)
+        pac_frame.pack(fill='x', padx=15, pady=8)
 
-        # Búsqueda de paciente
-        search_pac = tk.Frame(pac_frame, bg='white')
-        search_pac.pack(fill='x', pady=(0, 10))
-
-        tk.Label(search_pac, text="Buscar Paciente:", font=('Segoe UI', 10, 'bold'), bg='white').pack(side='left')
-        self.entry_buscar_pac = tk.Entry(search_pac, font=('Segoe UI', 11), width=40, relief='flat', bg='#f8f9fa',
-                                        highlightthickness=1, highlightbackground=COLORS['border'])
-        self.entry_buscar_pac.pack(side='left', padx=10, ipady=5)
-
-        tk.Button(search_pac, text="🔍 Buscar", font=('Segoe UI', 9), bg=COLORS['primary'], fg='white',
-                 relief='flat', padx=10, cursor='hand2', command=self.buscar_paciente_sol).pack(side='left', padx=5)
-        tk.Button(search_pac, text="➕ Nuevo", font=('Segoe UI', 9), bg=COLORS['success'], fg='white',
-                 relief='flat', padx=10, cursor='hand2', command=self.form_paciente).pack(side='left')
-
-        # Datos del paciente seleccionado
-        self.pac_info_frame = tk.Frame(pac_frame, bg='#f8f9fa')
-        self.pac_info_frame.pack(fill='x')
-
-        self.lbl_pac_nombre = tk.Label(self.pac_info_frame, text="No se ha seleccionado paciente",
-                                       font=('Segoe UI', 11), bg='#f8f9fa', fg=COLORS['text_light'])
-        self.lbl_pac_nombre.pack(anchor='w', padx=10, pady=5)
+        # Indicador de estado del paciente
+        self.pac_status_frame = tk.Frame(pac_frame, bg='#e8f5e9', height=28)
+        self.pac_status_frame.pack(fill='x', pady=(0, 8))
+        self.pac_status_frame.pack_propagate(False)
+        self.lbl_pac_status = tk.Label(self.pac_status_frame, text="Ingrese la cédula para buscar o registrar paciente",
+                                        font=('Segoe UI', 9), bg='#e8f5e9', fg='#555')
+        self.lbl_pac_status.pack(anchor='w', padx=10, pady=4)
 
         self.pac_id_seleccionado = None
+        self._pac_auto_filled = False  # True si los campos se llenaron desde BD
+
+        # Fila 1: Cédula (campo principal con auto-búsqueda)
+        row_ced = tk.Frame(pac_frame, bg='white')
+        row_ced.pack(fill='x', pady=2)
+
+        tk.Label(row_ced, text="Tipo Doc:", font=('Segoe UI', 10), bg='white', width=10, anchor='w').pack(side='left')
+        self.pac_tipo_doc = ttk.Combobox(row_ced, font=('Segoe UI', 10), width=4, values=['V', 'E', 'P', 'J', 'G'])
+        self.pac_tipo_doc.set('V')
+        self.pac_tipo_doc.pack(side='left', ipady=3, padx=(0, 10))
+
+        tk.Label(row_ced, text="Cédula / Doc*:", font=('Segoe UI', 10, 'bold'), bg='white', anchor='w').pack(side='left')
+        self.pac_cedula = tk.Entry(row_ced, font=('Segoe UI', 12, 'bold'), width=18, relief='flat', bg='#fffde7',
+                                   highlightthickness=2, highlightbackground='#f9a825', highlightcolor='#f57f17')
+        self.pac_cedula.pack(side='left', ipady=5, padx=(5, 10))
+        # Auto-búsqueda al salir del campo o presionar Enter
+        self.pac_cedula.bind('<Return>', lambda e: self._buscar_paciente_por_cedula())
+        self.pac_cedula.bind('<FocusOut>', lambda e: self._buscar_paciente_por_cedula())
+
+        self.btn_buscar_pac = tk.Button(row_ced, text="🔍", font=('Segoe UI', 10),
+                                        bg=COLORS['primary'], fg='white', relief='flat', padx=6,
+                                        cursor='hand2', command=self._buscar_paciente_por_cedula)
+        self.btn_buscar_pac.pack(side='left', padx=(0, 5))
+
+        # Botón limpiar para ingresar otro paciente
+        tk.Button(row_ced, text="🔄 Limpiar", font=('Segoe UI', 9), bg='#ef5350', fg='white',
+                 relief='flat', padx=6, cursor='hand2',
+                 command=self._limpiar_campos_paciente).pack(side='left')
+
+        # Fila 2: Nombres y Apellidos
+        row_nom = tk.Frame(pac_frame, bg='white')
+        row_nom.pack(fill='x', pady=2)
+
+        tk.Label(row_nom, text="Nombres*:", font=('Segoe UI', 10), bg='white', width=10, anchor='w').pack(side='left')
+        self.pac_nombres = tk.Entry(row_nom, font=('Segoe UI', 10), relief='flat', bg='#f8f9fa',
+                                    highlightthickness=1, highlightbackground=COLORS['border'])
+        self.pac_nombres.pack(side='left', fill='x', expand=True, ipady=4, padx=(0, 10))
+
+        tk.Label(row_nom, text="Apellidos*:", font=('Segoe UI', 10), bg='white', anchor='w').pack(side='left')
+        self.pac_apellidos = tk.Entry(row_nom, font=('Segoe UI', 10), relief='flat', bg='#f8f9fa',
+                                      highlightthickness=1, highlightbackground=COLORS['border'])
+        self.pac_apellidos.pack(side='left', fill='x', expand=True, ipady=4)
+
+        # Fila 3: Fecha Nac, Sexo, Teléfono
+        row_extra = tk.Frame(pac_frame, bg='white')
+        row_extra.pack(fill='x', pady=2)
+
+        tk.Label(row_extra, text="Fecha Nac:", font=('Segoe UI', 10), bg='white', width=10, anchor='w').pack(side='left')
+        self.pac_fecha_nac = tk.Entry(row_extra, font=('Segoe UI', 10), width=12, relief='flat', bg='#f8f9fa',
+                                      highlightthickness=1, highlightbackground=COLORS['border'])
+        self.pac_fecha_nac.pack(side='left', ipady=4, padx=(0, 3))
+        self.lbl_edad_calc = tk.Label(row_extra, text="", font=('Segoe UI', 9, 'bold'),
+                                       bg='white', fg='#1565c0')
+        self.lbl_edad_calc.pack(side='left', padx=(0, 10))
+
+        def _actualizar_edad_desde_fecha(*args):
+            fecha_str = self.pac_fecha_nac.get().strip()
+            if len(fecha_str) >= 10:
+                try:
+                    fn = datetime.strptime(fecha_str[:10], '%d/%m/%Y')
+                    hoy = datetime.now()
+                    anios = hoy.year - fn.year - ((hoy.month, hoy.day) < (fn.month, fn.day))
+                    if anios < 2:
+                        dias = (hoy - fn).days
+                        meses = dias // 30
+                        if meses < 1:
+                            self.lbl_edad_calc.config(text=f"{dias}d")
+                        else:
+                            self.lbl_edad_calc.config(text=f"{meses}m")
+                    else:
+                        self.lbl_edad_calc.config(text=f"{anios} años")
+                except ValueError:
+                    self.lbl_edad_calc.config(text="")
+            else:
+                self.lbl_edad_calc.config(text="")
+
+        self.pac_fecha_nac.bind('<KeyRelease>', _actualizar_edad_desde_fecha)
+        self.pac_fecha_nac.bind('<FocusOut>', _actualizar_edad_desde_fecha)
+
+        tk.Label(row_extra, text="Sexo:", font=('Segoe UI', 10), bg='white', anchor='w').pack(side='left')
+        self.pac_sexo = ttk.Combobox(row_extra, font=('Segoe UI', 10), width=13, values=['M - Masculino', 'F - Femenino'])
+        self.pac_sexo.pack(side='left', ipady=3, padx=(3, 10))
+
+        tk.Label(row_extra, text="Tel/WhatsApp:", font=('Segoe UI', 10), bg='white', anchor='w').pack(side='left')
+        self.pac_telefono = tk.Entry(row_extra, font=('Segoe UI', 10), width=16, relief='flat', bg='#f8f9fa',
+                                     highlightthickness=1, highlightbackground=COLORS['border'])
+        self.pac_telefono.pack(side='left', ipady=4, padx=(3, 0))
+
+        # Focus inicial en la cédula
+        self.pac_cedula.focus_set()
 
         # ============================================================
         # SECCIÓN 3: MÉDICO TRATANTE
@@ -4406,7 +4861,7 @@ class MainApplication:
                 self.pruebas_data[iid] = {'id': p['PruebaID'], 'codigo': p['CodigoPrueba'],
                                           'nombre': p['NombrePrueba'], 'precio': precio}
         except Exception as e:
-            print(f"Error cargando pruebas: {e}")
+            _log.error("Error cargando pruebas: %s", e)
 
     def filtrar_pruebas_disponibles(self):
         """Filtra las pruebas según el texto de búsqueda"""
@@ -4466,7 +4921,7 @@ class MainApplication:
         # Descuento
         try:
             desc_pct = float(self.entry_descuento.get() or 0)
-        except:
+        except Exception:
             desc_pct = 0
         desc_monto = subtotal * (desc_pct / 100)
         self.lbl_descuento.config(text=f"-${desc_monto:,.2f}")
@@ -4477,7 +4932,7 @@ class MainApplication:
         # IVA
         try:
             iva_pct = float(self.entry_iva.get() or 0)
-        except:
+        except Exception:
             iva_pct = 0
         iva_monto = base * (iva_pct / 100)
         self.lbl_iva.config(text=f"+${iva_monto:,.2f}")
@@ -4488,11 +4943,11 @@ class MainApplication:
         # Obtener tasas de cambio
         try:
             tasa_bs = float(self.entry_tasa_bs.get() or 1)
-        except:
+        except Exception:
             tasa_bs = 1
         try:
             tasa_cop = float(self.entry_tasa_cop.get() or 1)
-        except:
+        except Exception:
             tasa_cop = 1
 
         # Calcular totales en cada moneda
@@ -4514,7 +4969,7 @@ class MainApplication:
         # Abonado y Saldo (en USD)
         try:
             abonado = float(self.entry_abonado.get() or 0)
-        except:
+        except Exception:
             abonado = 0
         saldo = total_usd - abonado
         self.lbl_saldo.config(text=f"${saldo:,.2f}")
@@ -4553,190 +5008,268 @@ class MainApplication:
             for widget in self.frame_total_pagar.winfo_children():
                 if isinstance(widget, tk.Label) and 'TOTAL' in widget.cget('text'):
                     widget.config(bg=self.frame_total_pagar.cget('bg'))
-        except:
+        except Exception:
             pass
 
-    def buscar_paciente_sol(self):
-        """Busca pacientes y muestra resultados para seleccionar"""
-        filtro = self.entry_buscar_pac.get().strip()
-        if not filtro:
+    # ── Paciente inline: auto-búsqueda y llenado ──────────────────
+
+    def _buscar_paciente_por_cedula(self):
+        """Busca paciente por cédula y auto-llena los campos si existe."""
+        cedula = self.pac_cedula.get().strip()
+        if not cedula:
+            return
+
+        # Evitar re-buscar si ya está cargado el mismo paciente
+        if self._pac_auto_filled and self.pac_id_seleccionado:
             return
 
         try:
-            pacientes = db.query(f"""
-                SELECT TOP 10 PacienteID, NumeroDocumento, Nombres, Apellidos,
-                       FechaNacimiento, Sexo, Telefono1
+            pac = db.query_one(f"""
+                SELECT PacienteID, TipoDocumento, NumeroDocumento, Nombres, Apellidos,
+                       FechaNacimiento, Sexo, Telefono1, Email, DireccionCompleta
                 FROM Pacientes
-                WHERE Nombres LIKE '%{filtro}%' OR Apellidos LIKE '%{filtro}%'
-                      OR NumeroDocumento LIKE '%{filtro}%'
-                ORDER BY Apellidos, Nombres
+                WHERE NumeroDocumento = '{cedula.replace("'", "''")}'
             """)
 
-            if not pacientes:
-                messagebox.showinfo("Búsqueda", "No se encontraron pacientes")
-                return
-
-            if len(pacientes) == 1:
-                self.seleccionar_paciente_sol(pacientes[0])
+            if pac:
+                self._llenar_campos_paciente(pac)
+                self._verificar_solicitudes_existentes(pac)
             else:
-                # Mostrar ventana de selección
-                self.mostrar_seleccion_paciente(pacientes)
+                # Paciente nuevo — dejar campos editables para llenar
+                self.pac_id_seleccionado = None
+                self._pac_auto_filled = False
+                self._set_pac_status("🆕 Paciente nuevo — complete los datos y se registrará al guardar",
+                                     '#fff3e0', '#e65100')
+                # Mover foco al campo Nombres
+                self.pac_nombres.focus_set()
 
         except Exception as e:
-            messagebox.showerror("Error", str(e))
+            _log.error("Error buscando paciente: %s", e)
 
-    def mostrar_seleccion_paciente(self, pacientes):
-        """Muestra ventana para seleccionar paciente de los resultados"""
-        win = tk.Toplevel(self.sol_win)
-        win.title("Seleccionar Paciente")
-        win.grab_set()
-        win.focus_set()
+    def _llenar_campos_paciente(self, pac):
+        """Llena los campos inline con datos del paciente encontrado."""
+        self.pac_id_seleccionado = pac['PacienteID']
+        self._pac_auto_filled = True
 
-        # Hacer ventana responsiva
-        hacer_ventana_responsiva(win, 700, 400, min_ancho=600, min_alto=350)
+        # Tipo documento
+        if pac.get('TipoDocumento'):
+            self.pac_tipo_doc.set(pac['TipoDocumento'])
 
-        tk.Label(win, text="Seleccione un paciente:", font=('Segoe UI', 12, 'bold')).pack(pady=10)
+        # Nombres
+        self.pac_nombres.delete(0, 'end')
+        self.pac_nombres.insert(0, pac.get('Nombres') or '')
 
-        frame = tk.Frame(win)
-        frame.pack(fill='both', expand=True, padx=10, pady=5)
+        # Apellidos
+        self.pac_apellidos.delete(0, 'end')
+        self.pac_apellidos.insert(0, pac.get('Apellidos') or '')
 
-        cols = ('Documento', 'Nombres', 'Apellidos', 'Teléfono')
-        tree = ttk.Treeview(frame, columns=cols, show='headings')
-        for c in cols:
-            tree.heading(c, text=c)
-            tree.column(c, width=150)
-
-        vsb = ttk.Scrollbar(frame, orient='vertical', command=tree.yview)
-        tree.configure(yscrollcommand=vsb.set)
-        tree.pack(side='left', fill='both', expand=True)
-        vsb.pack(side='right', fill='y')
-
-        pac_map = {}
-        for p in pacientes:
-            iid = tree.insert('', 'end', values=(
-                p['NumeroDocumento'] or '',
-                p['Nombres'] or '', p['Apellidos'] or '', p['Telefono1'] or ''
-            ))
-            pac_map[iid] = p
-
-        def seleccionar():
-            sel = tree.selection()
-            if sel:
-                self.seleccionar_paciente_sol(pac_map[sel[0]])
-                win.destroy()
-
-        tree.bind('<Double-1>', lambda e: seleccionar())
-
-        tk.Button(win, text="Seleccionar", font=('Segoe UI', 10), bg=COLORS['primary'], fg='white',
-                 relief='flat', padx=20, command=seleccionar).pack(pady=10)
-
-    def seleccionar_paciente_sol(self, paciente):
-        """Establece el paciente seleccionado en la solicitud"""
-        self.pac_id_seleccionado = paciente['PacienteID']
-
-        # Actualizar la información mostrada
-        nombre = f"{paciente['Nombres'] or ''} {paciente['Apellidos'] or ''}".strip()
-        doc = paciente['NumeroDocumento'] or 'S/D'
-        tel = paciente['Telefono1'] or 'S/T'
-
-        edad = ""
-        if paciente.get('FechaNacimiento'):
+        # Fecha nacimiento
+        self.pac_fecha_nac.delete(0, 'end')
+        if pac.get('FechaNacimiento'):
             try:
-                fn = paciente['FechaNacimiento']
+                self.pac_fecha_nac.insert(0, pac['FechaNacimiento'].strftime('%d/%m/%Y'))
+            except Exception:
+                pass
+            # Actualizar label de edad
+            self.pac_fecha_nac.event_generate('<KeyRelease>')
+
+        # Sexo
+        if pac.get('Sexo'):
+            s = pac['Sexo']
+            self.pac_sexo.set('M - Masculino' if s == 'M' else 'F - Femenino')
+
+        # Teléfono
+        self.pac_telefono.delete(0, 'end')
+        self.pac_telefono.insert(0, pac.get('Telefono1') or '')
+
+        # Calcular edad para el status
+        edad_str = ""
+        if pac.get('FechaNacimiento'):
+            try:
+                fn = pac['FechaNacimiento']
                 hoy = datetime.now()
                 edad = hoy.year - fn.year - ((hoy.month, hoy.day) < (fn.month, fn.day))
-                edad = f" | {edad} años"
-            except:
+                edad_str = f" | {edad} años"
+            except Exception:
                 pass
 
-        sexo = paciente.get('Sexo') or ''
-        if sexo:
-            sexo = f" | {'Masculino' if sexo == 'M' else 'Femenino'}"
+        nombre = f"{pac.get('Nombres', '')} {pac.get('Apellidos', '')}".strip()
+        self._set_pac_status(f"✅ Paciente encontrado: {nombre}{edad_str}",
+                             '#e8f5e9', '#2e7d32')
 
-        info_text = f"👤 {nombre}  |  Doc: {doc}  |  Tel: {tel}{edad}{sexo}"
-
-        self.lbl_pac_nombre.config(text=info_text, fg=COLORS['text'])
-        self.entry_buscar_pac.delete(0, 'end')
-        self.entry_buscar_pac.insert(0, nombre)
-
-        # Verificar si el paciente tiene solicitudes del MISMO DÍA primero,
-        # luego activas (últimas 48h) como fallback
+    def _limpiar_campos_paciente(self):
+        """Limpia todos los campos del paciente para ingresar uno nuevo."""
+        self.pac_id_seleccionado = None
+        self._pac_auto_filled = False
         self.modo_solicitud = 'nueva'
         self.solicitud_existente_id = None
 
-        if self.gestor_solicitudes and GESTOR_SOLICITUDES_DISPONIBLE:
-            try:
-                # PRIORIDAD 1: Buscar solicitudes del MISMO DÍA
-                solicitudes_hoy = self.gestor_solicitudes.buscar_solicitudes_mismo_dia(
-                    self.pac_id_seleccionado
+        self.pac_cedula.delete(0, 'end')
+        self.pac_tipo_doc.set('V')
+        self.pac_nombres.delete(0, 'end')
+        self.pac_apellidos.delete(0, 'end')
+        self.pac_fecha_nac.delete(0, 'end')
+        self.lbl_edad_calc.config(text="")
+        self.pac_sexo.set('')
+        self.pac_telefono.delete(0, 'end')
+
+        self.lbl_numero.config(text="(Se generará al guardar)", fg='#7f8c8d')
+        self._set_pac_status("Ingrese la cédula para buscar o registrar paciente",
+                             '#e8f5e9', '#555')
+        self.pac_cedula.focus_set()
+
+    def _set_pac_status(self, texto, bg_color, fg_color):
+        """Actualiza el indicador de estado del paciente."""
+        self.pac_status_frame.config(bg=bg_color)
+        self.lbl_pac_status.config(text=texto, bg=bg_color, fg=fg_color)
+
+    def _verificar_solicitudes_existentes(self, paciente):
+        """Verifica si el paciente tiene solicitudes activas del mismo día."""
+        self.modo_solicitud = 'nueva'
+        self.solicitud_existente_id = None
+
+        if not (self.gestor_solicitudes and GESTOR_SOLICITUDES_DISPONIBLE):
+            return
+
+        try:
+            nombre = f"{paciente.get('Nombres', '')} {paciente.get('Apellidos', '')}".strip()
+
+            # PRIORIDAD 1: Buscar solicitudes del MISMO DÍA
+            solicitudes_hoy = self.gestor_solicitudes.buscar_solicitudes_mismo_dia(
+                self.pac_id_seleccionado
+            )
+
+            # PRIORIDAD 2: Buscar solicitudes activas (48h) si no hay del mismo día
+            if not solicitudes_hoy:
+                solicitudes_hoy = self.gestor_solicitudes.buscar_solicitudes_paciente(
+                    self.pac_id_seleccionado, solo_activas=True
                 )
 
-                # PRIORIDAD 2: Buscar solicitudes activas (48h) si no hay del mismo día
-                if not solicitudes_hoy:
-                    solicitudes_hoy = self.gestor_solicitudes.buscar_solicitudes_paciente(
-                        self.pac_id_seleccionado, solo_activas=True
-                    )
+            if not solicitudes_hoy:
+                return
 
-                if solicitudes_hoy:
-                    # Determinar si son del mismo día para el mensaje
-                    from datetime import date
-                    hoy = date.today()
-                    son_de_hoy = False
-                    for s in solicitudes_hoy:
-                        f = s.get('FechaSolicitud')
-                        if f and hasattr(f, 'date') and f.date() == hoy:
-                            son_de_hoy = True
-                            break
+            # Determinar si son del mismo día para el mensaje
+            from datetime import date
+            hoy = date.today()
+            son_de_hoy = False
+            for s in solicitudes_hoy:
+                f = s.get('FechaSolicitud')
+                if f and hasattr(f, 'date') and f.date() == hoy:
+                    son_de_hoy = True
+                    break
 
-                    # Mostrar diálogo para elegir entre agregar a existente o crear nueva
-                    dialogo = DialogoSolicitudExistente(
-                        self.sol_win,
-                        solicitudes_hoy,
-                        nombre,
-                        es_mismo_dia=son_de_hoy
-                    )
+            # Mostrar diálogo para elegir entre agregar a existente o crear nueva
+            dialogo = DialogoSolicitudExistente(
+                self.sol_win,
+                solicitudes_hoy,
+                nombre,
+                es_mismo_dia=son_de_hoy
+            )
 
-                    if dialogo.resultado == 'agregar':
-                        # Modo: agregar pruebas a solicitud existente
-                        self.modo_solicitud = 'agregar'
-                        self.solicitud_existente_id = dialogo.solicitud_seleccionada.get('SolicitudID')
+            if dialogo.resultado == 'agregar':
+                self.modo_solicitud = 'agregar'
+                self.solicitud_existente_id = dialogo.solicitud_seleccionada.get('SolicitudID')
+                num_sol = dialogo.solicitud_seleccionada.get('NumeroSolicitud', '')
+                self.lbl_numero.config(text=f"Agregando a: {num_sol}", fg='#f39c12')
 
-                        # Actualizar UI para indicar modo agregar
-                        num_sol = dialogo.solicitud_seleccionada.get('NumeroSolicitud', '')
-                        self.lbl_numero.config(text=f"Agregando a: {num_sol}", fg='#f39c12')
+                # Mostrar pruebas existentes en el status
+                pruebas_existentes = self.gestor_solicitudes.obtener_pruebas_solicitud(
+                    self.solicitud_existente_id
+                )
+                if pruebas_existentes:
+                    info = f"📋 Agregando pruebas a {num_sol} ({len(pruebas_existentes)} pruebas existentes)"
+                    self._set_pac_status(f"✅ {nombre} — {info}", '#fff3e0', '#e65100')
 
-                        # Cargar pruebas existentes de la solicitud para mostrar
-                        pruebas_existentes = self.gestor_solicitudes.obtener_pruebas_solicitud(
-                            self.solicitud_existente_id
-                        )
-                        if pruebas_existentes:
-                            info_existentes = f"\n📋 Pruebas existentes ({len(pruebas_existentes)}): "
-                            info_existentes += ", ".join([p.get('NombrePrueba', '')[:20] for p in pruebas_existentes[:3]])
-                            if len(pruebas_existentes) > 3:
-                                info_existentes += f"... y {len(pruebas_existentes) - 3} más"
-                            self.lbl_pac_nombre.config(text=info_text + info_existentes)
+            elif dialogo.resultado == 'nueva':
+                self.modo_solicitud = 'nueva'
+                self.solicitud_existente_id = None
+                self.lbl_numero.config(text="(Se generará al guardar)", fg='#7f8c8d')
+            else:
+                # Canceló — limpiar
+                self._limpiar_campos_paciente()
 
-                    elif dialogo.resultado == 'nueva':
-                        # Modo: crear nueva solicitud
-                        self.modo_solicitud = 'nueva'
-                        self.solicitud_existente_id = None
-                        self.lbl_numero.config(text="(Se generará al guardar)", fg='#7f8c8d')
-                    else:
-                        # Canceló el diálogo - limpiar selección
-                        self.pac_id_seleccionado = None
-                        self.lbl_pac_nombre.config(text="👤 Seleccione un paciente", fg='#7f8c8d')
-                        self.entry_buscar_pac.delete(0, 'end')
-                        return
-            except Exception as e:
-                print(f"Error verificando solicitudes activas: {e}")
-                # En caso de error, continuar con modo nueva
+        except Exception as e:
+            _log.error("Error verificando solicitudes activas: %s", e)
+
+    def _crear_paciente_desde_inline(self):
+        """Crea un paciente nuevo a partir de los campos inline del formulario.
+        Retorna el PacienteID creado o None si falla validación."""
+        cedula = self.pac_cedula.get().strip()
+        nombres = self.pac_nombres.get().strip()
+        apellidos = self.pac_apellidos.get().strip()
+
+        if not cedula:
+            messagebox.showerror("Error", "Debe ingresar el N° de Documento / Cédula del paciente")
+            return None
+        if not nombres:
+            messagebox.showerror("Error", "Debe ingresar los nombres del paciente")
+            return None
+        if not apellidos:
+            messagebox.showerror("Error", "Debe ingresar los apellidos del paciente")
+            return None
+
+        # Parsear fecha nacimiento
+        fecha_nac = None
+        fecha_str = self.pac_fecha_nac.get().strip()
+        if fecha_str:
+            try:
+                fecha_nac = datetime.strptime(fecha_str, '%d/%m/%Y')
+            except Exception:
+                messagebox.showerror("Error", "Formato de fecha inválido. Use DD/MM/AAAA")
+                return None
+
+        # Sexo
+        sexo_val = self.pac_sexo.get()
+        sexo = sexo_val[0] if sexo_val else None
+
+        # Teléfono
+        telefono = self.pac_telefono.get().strip()
+
+        data = {
+            'TipoDocumento': self.pac_tipo_doc.get().strip() or 'V',
+            'NumeroDocumento': cedula,
+            'Nombres': nombres,
+            'Apellidos': apellidos,
+            'FechaNacimiento': fecha_nac,
+            'Sexo': sexo,
+            'Telefono1': telefono,
+            'Activo': True,
+            'FechaRegistro': datetime.now(),
+        }
+
+        try:
+            db.insert('Pacientes', data)
+            # Obtener el ID recién creado
+            pac = db.query_one(f"""
+                SELECT TOP 1 PacienteID FROM Pacientes
+                WHERE NumeroDocumento = '{cedula.replace("'", "''")}'
+                ORDER BY PacienteID DESC
+            """)
+            if pac:
+                self.pac_id_seleccionado = pac['PacienteID']
+                self._pac_auto_filled = True
+                self._set_pac_status(f"✅ Paciente {nombres} {apellidos} registrado exitosamente",
+                                     '#e8f5e9', '#2e7d32')
+                return pac['PacienteID']
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al registrar paciente:\n{e}")
+            return None
+
+        return None
 
     def guardar_solicitud_completa(self, win):
         """Guarda la solicitud completa con todos sus detalles"""
-        # Validaciones
+        # Si no hay paciente seleccionado, intentar crear uno nuevo desde los campos inline
         if not self.pac_id_seleccionado:
-            messagebox.showerror("Error", "Debe seleccionar un paciente")
-            return
+            cedula = self.pac_cedula.get().strip()
+            if not cedula:
+                messagebox.showerror("Error", "Debe ingresar la cédula del paciente")
+                self.pac_cedula.focus_set()
+                return
+            # Crear paciente nuevo
+            nuevo_id = self._crear_paciente_desde_inline()
+            if not nuevo_id:
+                return
 
         if not self.sol_pruebas_seleccionadas:
             messagebox.showerror("Error", "Debe agregar al menos una prueba")
@@ -5093,7 +5626,7 @@ class MainApplication:
             try:
                 dialogo = DialogoTipoDocumento(parent, total, puede_facturar=True)
                 return dialogo.resultado
-            except:
+            except Exception:
                 pass  # Si falla, usar diálogo simple
 
         # Diálogo simple como fallback
@@ -5176,7 +5709,7 @@ class MainApplication:
             if result and result.get('Ultimo'):
                 try:
                     numero = int(result['Ultimo'].split('-')[-1]) + 1
-                except:
+                except Exception:
                     numero = 1
             else:
                 numero = 1
@@ -5206,7 +5739,7 @@ class MainApplication:
             db.insert('Recibos', recibo_data)
             return numero_recibo
         except Exception as e:
-            print(f"Error generando recibo: {e}")
+            _log.error("Error generando recibo: %s", e)
             return None
 
     def _generar_pdf_recibo(self, numero_recibo, solicitud_id, total, pruebas_lista=None):
@@ -5434,8 +5967,7 @@ class MainApplication:
             os.startfile(ruta_pdf)
 
         except Exception as e:
-            print(f"Error generando PDF recibo: {e}")
-            import traceback; traceback.print_exc()
+            _log.error("Error generando PDF recibo: %s", e, exc_info=True)
 
     def _generar_factura_legacy(self, solicitud_id, total, pruebas):
         """Genera una factura para la solicitud (método legacy)"""
@@ -5446,7 +5978,7 @@ class MainApplication:
             if result and result.get('Ultimo'):
                 try:
                     numero = int(result['Ultimo'].split('-')[-1]) + 1
-                except:
+                except Exception:
                     numero = 1
             else:
                 numero = 1
@@ -5493,7 +6025,7 @@ class MainApplication:
 
             return numero_factura
         except Exception as e:
-            print(f"Error generando factura: {e}")
+            _log.error("Error generando factura: %s", e)
             return None
 
     def _verificar_tabla_recibos(self):
@@ -5501,7 +6033,7 @@ class MainApplication:
         try:
             # Intentar consultar la tabla
             db.query("SELECT TOP 1 ReciboID FROM Recibos")
-        except:
+        except Exception:
             # La tabla no existe, crearla
             try:
                 db.execute("""
@@ -5525,9 +6057,8 @@ class MainApplication:
                         UsuarioAnula INTEGER
                     )
                 """)
-                print("Tabla Recibos creada exitosamente")
-            except Exception as e:
-                print(f"No se pudo crear tabla Recibos: {e}")
+            except Exception:
+                pass
 
     def imprimir_comprobante(self):
         """Genera un comprobante simple de la solicitud"""
@@ -5562,7 +6093,7 @@ class MainApplication:
 Comprobante N°: {numero}
 Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}
 
-Paciente: {self.entry_buscar_pac.get()}
+Paciente: {self.pac_nombres.get()} {self.pac_apellidos.get()} | Doc: {self.pac_cedula.get()}
 {'='*50}
 
 ESTUDIOS SOLICITADOS:
@@ -5601,7 +6132,7 @@ Forma de Pago: {self.combo_forma_pago.get()}
             filename = filedialog.asksaveasfilename(
                 defaultextension=".txt",
                 filetypes=[("Text files", "*.txt")],
-                initialfilename=f"Comprobante_{numero}.txt"
+                initialfile=f"Comprobante_{numero}.txt"
             )
             if filename:
                 with open(filename, 'w', encoding='utf-8') as f:
@@ -6126,7 +6657,7 @@ Forma de Pago: {self.combo_forma_pago.get()}
             recibos = []
             try:
                 recibos = db.query(f"SELECT ReciboID FROM Recibos WHERE SolicitudID = {solicitud_id}")
-            except:
+            except Exception:
                 pass  # Tabla puede no existir
 
             advertencia = ""
@@ -6170,12 +6701,12 @@ Forma de Pago: {self.combo_forma_pago.get()}
             try:
                 db.execute(f"DELETE FROM DetalleFacturas WHERE FacturaID IN (SELECT FacturaID FROM Facturas WHERE SolicitudID = {solicitud_id})")
                 db.execute(f"DELETE FROM Facturas WHERE SolicitudID = {solicitud_id}")
-            except:
+            except Exception:
                 pass
 
             try:
                 db.execute(f"DELETE FROM Recibos WHERE SolicitudID = {solicitud_id}")
-            except:
+            except Exception:
                 pass
 
             # Eliminar la solicitud
@@ -6215,10 +6746,43 @@ Forma de Pago: {self.combo_forma_pago.get()}
         entry_frame.pack(fill='x')
 
         self.entry_buscar_res = tk.Entry(entry_frame, font=('Segoe UI', 11), relief='flat',
-                                        bg='#f8f9fa', highlightthickness=1, highlightbackground=COLORS['border'])
+                                        bg='#f8f9fa', fg=COLORS['text_light'],
+                                        highlightthickness=1, highlightbackground=COLORS['border'])
         self.entry_buscar_res.pack(side='left', fill='x', expand=True, ipady=6)
-        self.entry_buscar_res.bind('<Return>', lambda e: self.buscar_solicitudes_resultado())
-        self.entry_buscar_res.bind('<KeyRelease>', lambda e: self.buscar_solicitudes_resultado())
+        self.entry_buscar_res.insert(0, "N° solicitud o nombre paciente...")
+        self._buscar_res_placeholder = True
+        self._buscar_res_timer = None
+
+        def _on_focus_in_buscar(e):
+            if self._buscar_res_placeholder:
+                self.entry_buscar_res.delete(0, 'end')
+                self.entry_buscar_res.config(fg=COLORS['text'])
+                self._buscar_res_placeholder = False
+
+        def _on_focus_out_buscar(e):
+            if not self.entry_buscar_res.get().strip():
+                self.entry_buscar_res.insert(0, "N° solicitud o nombre paciente...")
+                self.entry_buscar_res.config(fg=COLORS['text_light'])
+                self._buscar_res_placeholder = True
+
+        self.entry_buscar_res.bind('<FocusIn>', _on_focus_in_buscar)
+        self.entry_buscar_res.bind('<FocusOut>', _on_focus_out_buscar)
+        self.entry_buscar_res.bind('<Return>', lambda e: self._buscar_res_ahora())
+        self.entry_buscar_res.bind('<KeyRelease>', lambda e: self._buscar_res_debounce())
+
+        # Botón buscar
+        btn_buscar = tk.Button(entry_frame, text="🔍", font=('Segoe UI', 11),
+                               bg=COLORS['primary'], fg='white', relief='flat',
+                               cursor='hand2', activebackground=COLORS['accent'],
+                               command=self._buscar_res_ahora, width=3)
+        btn_buscar.pack(side='left', padx=(4, 0), ipady=4)
+
+        # Botón limpiar
+        btn_limpiar = tk.Button(entry_frame, text="✕", font=('Segoe UI', 10),
+                                bg='#e2e8f0', fg=COLORS['text_light'], relief='flat',
+                                cursor='hand2', activebackground='#cbd5e1',
+                                command=self._limpiar_busqueda_res, width=2)
+        btn_limpiar.pack(side='left', padx=(2, 0), ipady=4)
 
         # Lista de solicitudes pendientes
         tk.Label(left_frame, text="📋 Solicitudes Pendientes:", font=('Segoe UI', 10, 'bold'),
@@ -6291,18 +6855,54 @@ Forma de Pago: {self.combo_forma_pago.get()}
                 ))
                 self.sol_res_map[iid] = s['SolicitudID']
         except Exception as e:
-            print(f"Error cargando solicitudes: {e}")
+            _log.error("Error cargando solicitudes: %s", e)
+
+    def _buscar_res_debounce(self):
+        """Debounce: espera 350ms después de la última tecla antes de buscar"""
+        if self._buscar_res_timer:
+            self.root.after_cancel(self._buscar_res_timer)
+        self._buscar_res_timer = self.root.after(350, self._buscar_res_ahora)
+
+    def _buscar_res_ahora(self):
+        """Ejecuta la búsqueda inmediatamente"""
+        if self._buscar_res_timer:
+            self.root.after_cancel(self._buscar_res_timer)
+            self._buscar_res_timer = None
+        self.buscar_solicitudes_resultado()
+
+    def _limpiar_busqueda_res(self):
+        """Limpia la búsqueda y vuelve a mostrar solicitudes pendientes"""
+        self.entry_buscar_res.delete(0, 'end')
+        self.entry_buscar_res.config(fg=COLORS['text_light'])
+        self.entry_buscar_res.insert(0, "N° solicitud o nombre paciente...")
+        self._buscar_res_placeholder = True
+        # Ocultar autocomplete si existe
+        if hasattr(self, '_autocomplete_listbox') and self._autocomplete_listbox:
+            self._autocomplete_listbox.place_forget()
+        self.cargar_solicitudes_pendientes()
 
     def buscar_solicitudes_resultado(self):
         """Filtra solicitudes por número o paciente"""
+        if self._buscar_res_placeholder:
+            return
+
         filtro = self.entry_buscar_res.get().strip()
 
         for item in self.tree_sol_res.get_children():
             self.tree_sol_res.delete(item)
 
-        where = "WHERE 1=1"
-        if filtro:
-            where = f"WHERE (s.NumeroSolicitud LIKE '%{filtro}%' OR p.Nombres LIKE '%{filtro}%' OR p.Apellidos LIKE '%{filtro}%')"
+        # Si el filtro está vacío, mostrar solo pendientes
+        if not filtro:
+            self.cargar_solicitudes_pendientes()
+            return
+
+        # Sanitizar entrada para evitar inyección SQL
+        filtro_safe = filtro.replace("'", "''").replace("%", "[%]").replace("_", "[_]")
+
+        where = (f"WHERE (s.NumeroSolicitud LIKE '%{filtro_safe}%' "
+                 f"OR p.Nombres LIKE '%{filtro_safe}%' "
+                 f"OR p.Apellidos LIKE '%{filtro_safe}%' "
+                 f"OR p.NumeroDocumento LIKE '%{filtro_safe}%')")
 
         try:
             solicitudes = db.query(f"""
@@ -6319,12 +6919,86 @@ Forma de Pago: {self.combo_forma_pago.get()}
             for s in solicitudes:
                 iid = self.tree_sol_res.insert('', 'end', values=(
                     s['NumeroSolicitud'] or '',
-                    (s['Paciente'] or 'N/A')[:20],
+                    (s['Paciente'] or 'N/A')[:25],
                     s['EstadoSolicitud'] or 'Pendiente'
                 ))
                 self.sol_res_map[iid] = s['SolicitudID']
+
+            # Mostrar autocomplete si hay resultados y el filtro tiene al menos 2 chars
+            self._mostrar_autocomplete_res(solicitudes, filtro)
+
         except Exception as e:
-            print(f"Error buscando: {e}")
+            _log.error("Error buscando: %s", e)
+
+    def _mostrar_autocomplete_res(self, solicitudes, filtro):
+        """Muestra sugerencias de autocompletado debajo del campo de búsqueda"""
+        # Limpiar autocomplete previo
+        if hasattr(self, '_autocomplete_listbox') and self._autocomplete_listbox:
+            self._autocomplete_listbox.place_forget()
+            self._autocomplete_listbox = None
+
+        if not solicitudes or len(filtro) < 2:
+            return
+
+        # Crear listbox de sugerencias
+        sugerencias = []
+        for s in solicitudes[:8]:  # Máximo 8 sugerencias
+            num = s['NumeroSolicitud'] or ''
+            pac = s['Paciente'] or 'N/A'
+            estado = s['EstadoSolicitud'] or ''
+            sugerencias.append(f"{num}  —  {pac}  [{estado}]")
+
+        if not sugerencias:
+            return
+
+        listbox = tk.Listbox(self.entry_buscar_res.master.master,
+                             font=('Segoe UI', 10), bg='white', fg=COLORS['text'],
+                             selectbackground=COLORS['primary'], selectforeground='white',
+                             relief='solid', borderwidth=1, highlightthickness=0,
+                             height=min(len(sugerencias), 8))
+
+        for sg in sugerencias:
+            listbox.insert('end', sg)
+
+        # Posicionar debajo del entry
+        listbox.place(x=0, y=self.entry_buscar_res.master.winfo_height() + 2,
+                      width=self.entry_buscar_res.master.winfo_width(),
+                      relx=0)
+
+        self._autocomplete_listbox = listbox
+        self._autocomplete_solicitudes = solicitudes[:8]
+
+        def _seleccionar_sugerencia(event):
+            idx = listbox.curselection()
+            if idx:
+                sol = self._autocomplete_solicitudes[idx[0]]
+                # Poner el número de solicitud en el entry
+                self.entry_buscar_res.delete(0, 'end')
+                self.entry_buscar_res.config(fg=COLORS['text'])
+                self._buscar_res_placeholder = False
+                self.entry_buscar_res.insert(0, sol['NumeroSolicitud'] or '')
+                listbox.place_forget()
+                self._autocomplete_listbox = None
+                # Buscar y seleccionar esa solicitud en el treeview
+                self.buscar_solicitudes_resultado()
+                # Seleccionar el primer item del treeview
+                children = self.tree_sol_res.get_children()
+                if children:
+                    self.tree_sol_res.selection_set(children[0])
+                    self.tree_sol_res.focus(children[0])
+                    self.cargar_pruebas_resultado()
+
+        listbox.bind('<<ListboxSelect>>', _seleccionar_sugerencia)
+
+        # Ocultar al hacer clic fuera
+        def _ocultar_autocomplete(event):
+            if hasattr(self, '_autocomplete_listbox') and self._autocomplete_listbox:
+                widget = event.widget
+                if widget != self._autocomplete_listbox and widget != self.entry_buscar_res:
+                    self._autocomplete_listbox.place_forget()
+                    self._autocomplete_listbox = None
+
+        self.root.bind('<Button-1>', _ocultar_autocomplete, add='+')
 
     def cargar_pruebas_resultado(self, event=None):
         """Carga las pruebas de la solicitud con sus parametros para capturar resultados"""
@@ -6344,7 +7018,7 @@ Forma de Pago: {self.combo_forma_pago.get()}
             # Obtener info de la solicitud
             sol = db.query_one(f"""
                 SELECT s.*, p.Nombres & ' ' & p.Apellidos AS Paciente,
-                       p.FechaNacimiento, p.Sexo
+                       p.FechaNacimiento, p.Sexo, p.Peso, p.Talla
                 FROM Solicitudes s
                 LEFT JOIN Pacientes p ON s.PacienteID = p.PacienteID
                 WHERE s.SolicitudID = {sol_id}
@@ -6356,19 +7030,120 @@ Forma de Pago: {self.combo_forma_pago.get()}
             # Actualizar header
             edad = ""
             edad_valor = 0
-            sexo_valor = sol.get('Sexo') or 'M'
-            if sol.get('FechaNacimiento'):
+            edad_dias = None  # None = no calculado (no confundir con 0 dias)
+            sexo_valor = sol.get('Sexo') or ''
+
+            # Obtener FechaNacimiento del paciente (via JOIN con Pacientes)
+            fn_paciente = sol.get('FechaNacimiento')
+
+            if fn_paciente:
                 try:
-                    fn = sol['FechaNacimiento']
-                    hoy = datetime.now()
-                    edad_valor = hoy.year - fn.year - ((hoy.month, hoy.day) < (fn.month, fn.day))
-                    edad = f" | {edad_valor} anos"
-                except:
-                    pass
+                    fn = fn_paciente
+                    # Convertir a datetime si es necesario (pywintypes, string, etc.)
+                    if hasattr(fn, 'year') and hasattr(fn, 'month'):
+                        # Es un datetime o compatible
+                        hoy = datetime.now()
+                        edad_dias = max(0, (hoy - datetime(fn.year, fn.month, fn.day)).days)
+                        edad_valor = hoy.year - fn.year - ((hoy.month, hoy.day) < (fn.month, fn.day))
+                    elif isinstance(fn, str):
+                        for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y'):
+                            try:
+                                fn_dt = datetime.strptime(fn[:10], fmt)
+                                hoy = datetime.now()
+                                edad_dias = max(0, (hoy - fn_dt).days)
+                                edad_valor = hoy.year - fn_dt.year - ((hoy.month, hoy.day) < (fn_dt.month, fn_dt.day))
+                                break
+                            except ValueError:
+                                continue
+
+                    if edad_dias is not None:
+                        if edad_dias <= 28:
+                            edad = f" | {edad_dias} dias"
+                        elif edad_dias <= 730:
+                            edad = f" | {edad_dias // 30} meses"
+                        else:
+                            edad = f" | {edad_valor} anos"
+                except Exception:
+                    edad_dias = None
 
             sexo = f" | {'M' if sexo_valor == 'M' else 'F'}" if sexo_valor else ""
 
             self.lbl_info_sol.config(text=f"Solicitud: {sol['NumeroSolicitud']} | Paciente: {sol['Paciente'] or 'N/A'}{edad}{sexo}")
+
+            # ── Banner inteligente de clasificacion demografica ────────────
+            # Determinar grupo etario y mostrar indicador visual
+            _grupo_etario = None
+            _grupo_color = '#78909c'  # gris por defecto
+            _grupo_icono = ''
+            _datos_faltantes = []
+
+            if edad_dias is None:
+                _datos_faltantes.append('Fecha de Nacimiento')
+            if not sexo_valor:
+                _datos_faltantes.append('Sexo')
+
+            if edad_dias is not None and VALORES_REF_DISPONIBLE:
+                try:
+                    from modulos.valores_referencia import GestorValoresReferencia
+                    _grupo_etario = GestorValoresReferencia.clasificar_grupo_etario(
+                        edad_dias, sexo_valor)
+                except Exception:
+                    pass
+
+            # Colores y iconos por grupo
+            _grupo_config = {
+                'RN':          ('#e91e63', '👶', 'Recien Nacido'),
+                'RN M':        ('#e91e63', '👶', 'Recien Nacido'),
+                'RN F':        ('#e91e63', '👶', 'Recien Nacida'),
+                'Lactante':    ('#ff5722', '🍼', 'Lactante'),
+                'Lactante M':  ('#ff5722', '🍼', 'Lactante'),
+                'Lactante F':  ('#ff5722', '🍼', 'Lactante'),
+                'Pediatrico':  ('#ff9800', '🧒', 'Pediatrico'),
+                'Pediatrico M':('#ff9800', '🧒', 'Pediatrico'),
+                'Pediatrico F':('#ff9800', '🧒', 'Pediatrica'),
+                'Adolescente': ('#8bc34a', '🧑', 'Adolescente'),
+                'Adolescente M':('#8bc34a', '🧑', 'Adolescente M'),
+                'Adolescente F':('#8bc34a', '🧑', 'Adolescente F'),
+                'Adulto M':    ('#1976d2', '🧔', 'Adulto Masculino'),
+                'Adulto F':    ('#9c27b0', '👩', 'Adulto Femenino'),
+                'Adulto':      ('#1976d2', '🧑', 'Adulto'),
+                'AdultoMayor M':('#5d4037', '👴', 'Adulto Mayor M'),
+                'AdultoMayor F':('#5d4037', '👵', 'Adulto Mayor F'),
+                'AdultoMayor': ('#5d4037', '🧓', 'Adulto Mayor'),
+            }
+
+            # Destruir banner anterior si existe
+            if hasattr(self, '_banner_demo_frame') and self._banner_demo_frame:
+                try:
+                    self._banner_demo_frame.destroy()
+                except Exception:
+                    pass
+
+            self._banner_demo_frame = tk.Frame(self.pruebas_res_frame, bg='white')
+            self._banner_demo_frame.pack(fill='x', padx=5, pady=(2, 5))
+
+            if _grupo_etario and _grupo_etario in _grupo_config:
+                _gc = _grupo_config[_grupo_etario]
+                _grupo_color, _grupo_icono, _grupo_nombre = _gc
+
+                banner = tk.Frame(self._banner_demo_frame, bg=_grupo_color)
+                banner.pack(fill='x')
+                tk.Label(banner,
+                         text=f"  {_grupo_icono}  Clasificacion: {_grupo_nombre.upper()}  —  "
+                              f"Los valores de referencia se ajustan automaticamente a este grupo",
+                         font=('Segoe UI', 9, 'bold'), bg=_grupo_color, fg='white',
+                         anchor='w').pack(fill='x', padx=10, pady=5)
+
+            elif _datos_faltantes:
+                # Advertencia de datos faltantes
+                banner = tk.Frame(self._banner_demo_frame, bg='#fff3e0')
+                banner.pack(fill='x')
+                faltantes = ' y '.join(_datos_faltantes)
+                tk.Label(banner,
+                         text=f"  ⚠  Faltan datos del paciente: {faltantes}  —  "
+                              f"Se usaran valores de referencia genericos",
+                         font=('Segoe UI', 9), bg='#fff3e0', fg='#e65100',
+                         anchor='w').pack(fill='x', padx=10, pady=5)
 
             # Guardar ID de solicitud actual
             self.sol_id_resultado = sol_id
@@ -6568,10 +7343,19 @@ Forma de Pago: {self.combo_forma_pago.get()}
                         if param.get('UnidadID'):
                             unidad = db.query_one(f"SELECT Simbolo FROM Unidades WHERE UnidadID = {param['UnidadID']}")
                             if unidad:
-                                unidad_texto = unidad.get('Simbolo') or ''
+                                unidad_texto = self._formato_superindice(unidad.get('Simbolo') or '')
 
-                        # Obtener valor de referencia
+                        # Obtener valor de referencia (con resolucion por edad/sexo)
                         valor_ref = param.get('ValorRef') or ''
+                        if VALORES_REF_DISPONIBLE and self.gestor_ref:
+                            try:
+                                ref_especifico = self.gestor_ref.resolver_valor_referencia(
+                                    param_id, sexo_valor, sol.get('FechaNacimiento')
+                                )
+                                if ref_especifico:
+                                    valor_ref = ref_especifico
+                            except Exception:
+                                pass  # Fallback silencioso al valor generico
 
                         # Obtener resultado guardado si existe
                         resultado_guardado = db.query_one(f"""
@@ -6606,7 +7390,7 @@ Forma de Pago: {self.combo_forma_pago.get()}
                                     ORDER BY Frecuencia DESC, Orden ASC
                                 """)
                                 opciones_param = [o['Valor'] for o in opts] if opts else []
-                            except:
+                            except Exception:
                                 pass
 
                             # Si no hay opciones, usar opciones genericas basadas en el nombre
@@ -6970,16 +7754,63 @@ Forma de Pago: {self.combo_forma_pago.get()}
                             entry_param.pack(side='left', padx=5, pady=2)
                             if resultado_guardado and resultado_guardado.get('Valor'):
                                 entry_param.insert(0, resultado_guardado['Valor'])
+                            else:
+                                # Auto-llenar EDAD y SEXO desde datos del paciente
+                                nombre_upper_param = (param['NombreParametro'] or '').upper().strip()
+                                if nombre_upper_param == 'EDAD' and edad_valor:
+                                    entry_param.insert(0, str(edad_valor))
+                                    entry_param.config(fg='#757575')
+                                elif nombre_upper_param == 'SEXO' and sexo_valor:
+                                    entry_param.insert(0, sexo_valor)
+                                    entry_param.config(fg='#757575')
+                                elif nombre_upper_param == 'PESO' and sol.get('Peso'):
+                                    entry_param.insert(0, str(sol['Peso']))
+                                    entry_param.config(fg='#757575')
+                                elif nombre_upper_param == 'TALLA' and sol.get('Talla'):
+                                    entry_param.insert(0, str(sol['Talla']))
+                                    entry_param.config(fg='#757575')
 
                         # Unidad
                         tk.Label(param_row, text=unidad_texto, font=('Segoe UI', 9),
                                 bg=bg_row, width=10, fg='#666').pack(side='left', padx=5, pady=2)
 
-                        # Valor de referencia - más visible y completo
+                        # Valor de referencia - con indicador de resolucion inteligente
+                        _es_ref_especifico = bool(
+                            VALORES_REF_DISPONIBLE and self.gestor_ref
+                            and valor_ref and valor_ref != (param.get('ValorRef') or ''))
+                        valor_ref = self._formato_superindice(valor_ref) if valor_ref else valor_ref
                         ref_display = valor_ref if valor_ref else '---'
-                        tk.Label(param_row, text=ref_display,
+                        if _es_ref_especifico:
+                            ref_display = f"● {ref_display}"
+
+                        lbl_ref = tk.Label(param_row, text=ref_display,
                                 font=('Segoe UI', 9, 'bold'), bg=bg_row, width=28, anchor='w',
-                                fg='#1565c0').pack(side='left', padx=5, pady=2)
+                                fg='#0d47a1' if _es_ref_especifico else '#1565c0',
+                                wraplength=220, justify='left')
+                        lbl_ref.pack(side='left', padx=5, pady=2)
+                        if _es_ref_especifico and _grupo_etario:
+                            lbl_ref.bind('<Enter>', lambda e, l=lbl_ref:
+                                l.config(cursor='arrow'))
+                            # Tooltip basico
+                            _tip_text = f"Valor ajustado para: {_grupo_etario}"
+                            def _show_tip(event, txt=_tip_text, w=lbl_ref):
+                                _tw = tk.Toplevel(w)
+                                _tw.wm_overrideredirect(True)
+                                _tw.wm_geometry(f"+{event.x_root+10}+{event.y_root+10}")
+                                tk.Label(_tw, text=txt, font=('Segoe UI', 8),
+                                         bg='#263238', fg='white', padx=8, pady=4).pack()
+                                w._tip_window = _tw
+                            def _hide_tip(event, w=lbl_ref):
+                                if hasattr(w, '_tip_window') and w._tip_window:
+                                    w._tip_window.destroy()
+                                    w._tip_window = None
+                            lbl_ref.bind('<Enter>', _show_tip)
+                            lbl_ref.bind('<Leave>', _hide_tip)
+
+                        # Indicador de alerta (fuera de rango) - label mutable
+                        lbl_alerta = tk.Label(param_row, text='', font=('Segoe UI', 9, 'bold'),
+                                              bg=bg_row, width=3, anchor='center')
+                        lbl_alerta.pack(side='left', padx=(0, 5), pady=2)
 
                         self.parametro_entries[detalle_id].append({
                             'param_id': param_id,
@@ -6987,20 +7818,31 @@ Forma de Pago: {self.combo_forma_pago.get()}
                             'nombre': param['NombreParametro'],
                             'formula': formula,
                             'es_calculado': es_calculado,
-                            'valor_ref': valor_ref or ''
+                            'valor_ref': valor_ref or '',
+                            'unidad_id': param.get('UnidadID'),
+                            'lbl_ref': lbl_ref,
+                            'lbl_alerta': lbl_alerta,
+                            'param_row': param_row,
+                            'bg_row': bg_row,
                         })
 
-                    # Bind auto-calculo: al salir de un campo no calculado, recalcular los calculados
+                    # Bind auto-calculo y deteccion de fuera de rango en tiempo real
                     tiene_calculados = any(p.get('es_calculado') for p in self.parametro_entries[detalle_id])
-                    if tiene_calculados:
-                        for param_data in self.parametro_entries[detalle_id]:
-                            if not param_data.get('es_calculado'):
-                                param_data['entry'].bind('<FocusOut>',
-                                    lambda e, d=detalle_id: self.calcular_parametros(d, silencioso=True))
-                                param_data['entry'].bind('<Return>',
-                                    lambda e, d=detalle_id: self.calcular_parametros(d, silencioso=True))
-                                param_data['entry'].bind('<Tab>',
-                                    lambda e, d=detalle_id: self.calcular_parametros(d, silencioso=True))
+
+                    def _on_valor_change(event, d_id=detalle_id):
+                        """Recalcula campos y actualiza indicadores de rango."""
+                        if any(p.get('es_calculado') for p in self.parametro_entries.get(d_id, [])):
+                            self.calcular_parametros(d_id, silencioso=True)
+                        self._actualizar_alertas_rango(d_id)
+
+                    for param_data in self.parametro_entries[detalle_id]:
+                        if not param_data.get('es_calculado'):
+                            param_data['entry'].bind('<FocusOut>',  _on_valor_change)
+                            param_data['entry'].bind('<Return>',    _on_valor_change)
+                            param_data['entry'].bind('<Tab>',       _on_valor_change)
+
+                    # Evaluar alertas iniciales (para resultados ya cargados)
+                    self._actualizar_alertas_rango(detalle_id)
 
                     # Separador
                     tk.Frame(prueba_frame, height=1, bg='#e0e0e0').pack(fill='x', pady=5)
@@ -7129,7 +7971,7 @@ Forma de Pago: {self.combo_forma_pago.get()}
                     font=('Segoe UI', 10), bg='white', fg=COLORS['danger']).pack(pady=50)
 
     def guardar_resultado_prueba(self, detalle_id, entry):
-        """Guarda el resultado de una prueba individual"""
+        """Guarda el resultado de una prueba individual (sin parametros)"""
         resultado = entry.get().strip()
         if not resultado:
             messagebox.showwarning("Aviso", "Ingrese un resultado")
@@ -7143,20 +7985,12 @@ Forma de Pago: {self.combo_forma_pago.get()}
                 'UsuarioResultado': self.user.get('UsuarioID', 1)
             }, f"DetalleID={detalle_id}")
 
-            # Actualizar visual
-            if detalle_id in self.resultado_entries:
-                self.resultado_entries[detalle_id]['row'].config(bg='#fff3e0')
-                self.resultado_entries[detalle_id]['lbl_estado'].config(text='Capturado', fg='orange')
-                for w in self.resultado_entries[detalle_id]['row'].winfo_children():
-                    if isinstance(w, tk.Label):
-                        w.config(bg='#fff3e0')
-
             messagebox.showinfo("Éxito", "Resultado guardado")
         except Exception as e:
             messagebox.showerror("Error", f"Error al guardar: {e}")
 
     def validar_resultado_prueba(self, detalle_id, entry):
-        """Valida el resultado de una prueba individual"""
+        """Valida el resultado de una prueba individual (sin parametros)"""
         resultado = entry.get().strip()
         if not resultado:
             messagebox.showwarning("Aviso", "Debe ingresar un resultado antes de validar")
@@ -7170,20 +8004,12 @@ Forma de Pago: {self.combo_forma_pago.get()}
                 'UsuarioResultado': self.user.get('UsuarioID', 1)
             }, f"DetalleID={detalle_id}")
 
-            # Actualizar visual
-            if detalle_id in self.resultado_entries:
-                self.resultado_entries[detalle_id]['row'].config(bg='#e8f5e9')
-                self.resultado_entries[detalle_id]['lbl_estado'].config(text='Validado', fg='green')
-                for w in self.resultado_entries[detalle_id]['row'].winfo_children():
-                    if isinstance(w, tk.Label):
-                        w.config(bg='#e8f5e9')
-
             messagebox.showinfo("Éxito", "Resultado validado")
         except Exception as e:
             messagebox.showerror("Error", f"Error al validar: {e}")
 
     def guardar_todos_resultados(self):
-        """Guarda todos los resultados ingresados"""
+        """Guarda todos los resultados simples ingresados (sin reconstruir UI)"""
         count = 0
         for detalle_id, data in self.resultado_entries.items():
             resultado = data['entry'].get().strip()
@@ -7196,18 +8022,16 @@ Forma de Pago: {self.combo_forma_pago.get()}
                         'UsuarioResultado': self.user.get('UsuarioID', 1)
                     }, f"DetalleID={detalle_id}")
                     count += 1
-                except:
+                except Exception:
                     pass
 
         if count > 0:
             messagebox.showinfo("Éxito", f"{count} resultados guardados")
-            # Recargar
-            self.cargar_pruebas_resultado()
         else:
             messagebox.showinfo("Info", "No hay resultados para guardar")
 
     def validar_todos_resultados(self):
-        """Valida todos los resultados que tienen valor"""
+        """Valida todos los resultados simples que tienen valor"""
         count = 0
         for detalle_id, data in self.resultado_entries.items():
             resultado = data['entry'].get().strip()
@@ -7220,20 +8044,21 @@ Forma de Pago: {self.combo_forma_pago.get()}
                         'UsuarioResultado': self.user.get('UsuarioID', 1)
                     }, f"DetalleID={detalle_id}")
                     count += 1
-                except:
+                except Exception:
                     pass
 
         if count > 0:
             # Actualizar estado de la solicitud
-            try:
-                db.update('Solicitudes', {'EstadoSolicitud': 'Completada'}, f"SolicitudID={self.sol_id_resultado}")
-            except:
-                pass
+            sol_id = getattr(self, 'sol_id_resultado', None)
+            if sol_id:
+                try:
+                    db.update('Solicitudes', {'EstadoSolicitud': 'Completada'},
+                              f"SolicitudID={sol_id}")
+                except Exception:
+                    pass
 
-            messagebox.showinfo("Éxito", f"{count} resultados validados\nSolicitud marcada como Completada")
-            # Recargar
-            self.cargar_solicitudes_pendientes()
-            self.cargar_pruebas_resultado()
+            messagebox.showinfo("Éxito",
+                                f"{count} resultados validados\nSolicitud marcada como Completada")
         else:
             messagebox.showinfo("Info", "No hay resultados para validar")
 
@@ -7258,7 +8083,7 @@ Forma de Pago: {self.combo_forma_pago.get()}
                 valores[nombre] = valor
                 if valor == 0 and not param_data.get('es_calculado'):
                     faltantes.append(param_data['nombre'])
-            except:
+            except Exception:
                 valores[nombre] = 0
 
         # Calcular cada parametro con formula
@@ -7417,9 +8242,7 @@ Forma de Pago: {self.combo_forma_pago.get()}
             return calculos_aplicados
 
         except Exception as e:
-            print(f"[CALC UI] Error: {e}")
-            import traceback
-            traceback.print_exc()
+            _log.error("[CALC UI] Error: %s", e, exc_info=True)
             return 0
 
     def registrar_uso_valor(self, param_id, valor):
@@ -7505,28 +8328,73 @@ Forma de Pago: {self.combo_forma_pago.get()}
                 pass
         return None, False
 
-    def guardar_resultados_parametros(self, detalle_id):
-        """Guarda los resultados de todos los parametros de una prueba"""
+    def _actualizar_alertas_rango(self, detalle_id):
+        """Actualiza los indicadores visuales de fuera-de-rango en tiempo real.
+        Colorea el campo de entrada y muestra flechas segun el resultado vs referencia."""
         if detalle_id not in self.parametro_entries:
             return
+        for pd in self.parametro_entries[detalle_id]:
+            valor_str = pd['entry'].get().strip()
+            valor_ref = pd.get('valor_ref', '')
+            lbl_alerta = pd.get('lbl_alerta')
+            entry = pd['entry']
+            bg_normal = pd.get('bg_row', 'white')
+            es_calc = pd.get('es_calculado', False)
+
+            if not valor_str or not valor_ref or not lbl_alerta:
+                if lbl_alerta:
+                    lbl_alerta.config(text='', bg=bg_normal)
+                continue
+
+            tipo_alerta, fuera = self._calcular_alerta(valor_str, valor_ref)
+
+            if fuera and tipo_alerta == 'alto':
+                lbl_alerta.config(text='▲', fg='#c62828', bg='#ffebee')
+                try:
+                    if not es_calc:
+                        entry.config(bg='#ffebee')
+                except Exception:
+                    pass
+            elif fuera and tipo_alerta == 'bajo':
+                lbl_alerta.config(text='▼', fg='#1565c0', bg='#e3f2fd')
+                try:
+                    if not es_calc:
+                        entry.config(bg='#e3f2fd')
+                except Exception:
+                    pass
+            else:
+                lbl_alerta.config(text='', bg=bg_normal)
+                try:
+                    if not es_calc:
+                        entry.config(bg='#fafafa')
+                except Exception:
+                    pass
+
+    def guardar_resultados_parametros(self, detalle_id, silencioso=False):
+        """Guarda los resultados de todos los parametros de una prueba"""
+        if detalle_id not in self.parametro_entries:
+            return 0
 
         count = 0
+        errores = []
         for param_data in self.parametro_entries[detalle_id]:
             param_id = param_data['param_id']
-            valor = param_data['entry'].get().strip()
+            try:
+                valor = param_data['entry'].get().strip()
+            except Exception:
+                continue
 
             if valor:
+                # ── 1. Operación CRÍTICA: guardar en BD ──
                 try:
-                    # Registrar uso del valor para mejorar sugerencias
-                    self.registrar_uso_valor(param_id, valor)
-
+                    # Calcular alerta (no bloquea si falla)
                     valor_ref = param_data.get('valor_ref', '')
-                    tipo_alerta, fuera_de_rango = self._calcular_alerta(valor, valor_ref)
-
-                    # Capturar estado anterior para auditoría
-                    estado_anterior = None
-                    if self.auditoria:
-                        estado_anterior = self.auditoria.antes_guardar_resultado(detalle_id, param_id)
+                    tipo_alerta = ''
+                    fuera_de_rango = False
+                    try:
+                        tipo_alerta, fuera_de_rango = self._calcular_alerta(valor, valor_ref)
+                    except Exception:
+                        pass
 
                     campos = {
                         'Valor': valor,
@@ -7552,18 +8420,28 @@ Forma de Pago: {self.combo_forma_pago.get()}
                         campos['ParametroID'] = param_id
                         db.insert('ResultadosParametros', campos)
 
-                    # Registrar en auditoría
-                    if self.auditoria:
-                        self.auditoria.despues_guardar_resultado(
-                            detalle_id, param_id, valor, 'Capturado',
-                            estado_anterior, 'GUARDAR'
-                        )
                     count += 1
                 except Exception as e:
-                    if LOGGING_DISPONIBLE:
-                        log_evento(f"Error guardando parametro: {e}", nivel='error', modulo='resultados')
-                    else:
-                        print(f"Error guardando parametro: {e}")
+                    errores.append(f"{param_data.get('nombre', param_id)}: {e}")
+                    _log.error("Error guardando parametro %s: %s", param_id, e, exc_info=True)
+
+                # ── 2. Operaciones secundarias (no bloquean) ──
+                try:
+                    self.registrar_uso_valor(param_id, valor)
+                except Exception:
+                    pass
+                try:
+                    if self.auditoria:
+                        self.auditoria.despues_guardar_resultado(
+                            detalle_id, param_id, valor, 'Capturado', None, 'GUARDAR')
+                except Exception:
+                    pass
+
+        # Mostrar errores si los hubo
+        if errores and not silencioso:
+            detalle_err = '\n'.join(errores[:5])
+            messagebox.showerror("Error al guardar",
+                                 f"Algunos parámetros no se pudieron guardar:\n\n{detalle_err}")
 
         # Actualizar estado del detalle
         if count > 0:
@@ -7572,18 +8450,43 @@ Forma de Pago: {self.combo_forma_pago.get()}
                     'Estado': 'Capturado',
                     'FechaResultado': datetime.now()
                 }, f"DetalleID={detalle_id}")
-            except:
+            except Exception:
                 pass
 
-            # Ejecutar cálculos automáticos
+            # Ejecutar cálculos automáticos (per-test)
             calculos_realizados = self.ejecutar_calculos_automaticos(detalle_id)
 
-            if calculos_realizados > 0:
-                messagebox.showinfo("Éxito", f"{count} parámetros guardados\n{calculos_realizados} valores calculados automáticamente")
-            else:
-                messagebox.showinfo("Éxito", f"{count} parámetros guardados")
+            # Ejecutar cálculos cross-test (HOMA, etc. cuando glucosa e insulina
+            # están en pruebas separadas dentro de la misma solicitud)
+            try:
+                det_info = db.query_one(f"SELECT SolicitudID FROM DetalleSolicitudes WHERE DetalleID = {detalle_id}")
+                if det_info:
+                    cross = self._ejecutar_calculos_cross_test(det_info['SolicitudID'])
+                    calculos_realizados += cross
+            except Exception:
+                pass
 
-            self.cargar_pruebas_resultado()
+            if not silencioso:
+                if calculos_realizados > 0:
+                    messagebox.showinfo("Éxito", f"{count} parámetros guardados\n{calculos_realizados} valores calculados automáticamente")
+                else:
+                    messagebox.showinfo("Éxito", f"{count} parámetros guardados")
+
+                self.cargar_pruebas_resultado()
+
+        elif not silencioso:
+            # count == 0: NADA se guardó — mostrar diagnóstico
+            n_params = len(self.parametro_entries.get(detalle_id, []))
+            n_con_valor = sum(1 for p in self.parametro_entries.get(detalle_id, [])
+                              if p['entry'].get().strip())
+            messagebox.showwarning(
+                "No se guardaron resultados",
+                f"Parámetros totales: {n_params}\n"
+                f"Con valor escrito: {n_con_valor}\n"
+                f"Errores: {len(errores)}\n\n"
+                f"{'Detalle: ' + errores[0] if errores else 'Ningún campo tiene valor escrito.'}")
+
+        return count
 
     def ejecutar_calculos_automaticos(self, detalle_id):
         """
@@ -7596,7 +8499,6 @@ Forma de Pago: {self.combo_forma_pago.get()}
             Número de cálculos realizados
         """
         if not CALCULOS_AUTOMATICOS_DISPONIBLE:
-            print("[CALC] Modulo de calculos no disponible")
             return 0
 
         # Asegurar que existe el diccionario de entries
@@ -7613,12 +8515,10 @@ Forma de Pago: {self.combo_forma_pago.get()}
             """)
 
             if not detalle:
-                print(f"[CALC] No se encontró detalle ID: {detalle_id}")
                 return 0
 
             prueba_id = detalle['PruebaID']
             solicitud_id = detalle['SolicitudID']
-            print(f"[CALC] Procesando prueba ID: {prueba_id}, solicitud ID: {solicitud_id}")
 
             # Obtener todos los parámetros de la prueba con sus valores actuales
             parametros = db.query(f"""
@@ -7632,10 +8532,7 @@ Forma de Pago: {self.combo_forma_pago.get()}
             """)
 
             if not parametros:
-                print(f"[CALC] No se encontraron parámetros para prueba ID: {prueba_id}")
                 return 0
-
-            print(f"[CALC] Encontrados {len(parametros)} parámetros")
 
             # Construir diccionario de valores
             valores = {}
@@ -7672,9 +8569,6 @@ Forma de Pago: {self.combo_forma_pago.get()}
                     valores[nombre_lower] = valor
                     if nombre_norm:
                         valores[nombre_norm] = valor
-                    print(f"[CALC]   - {nombre}: {valor} (norm: {nombre_norm})")
-
-            print(f"[CALC] Valores cargados: {len(valores)}")
 
             # También obtener datos del paciente para cálculos que lo requieran
             paciente = db.query_one(f"""
@@ -7685,43 +8579,41 @@ Forma de Pago: {self.combo_forma_pago.get()}
             """)
 
             if paciente:
-                if paciente.get('Sexo'):
+                # Solo complementar, no sobrescribir valores del formulario
+                if paciente.get('Sexo') and 'sexo' not in valores:
                     valores['sexo'] = paciente['Sexo']
-                if paciente.get('Peso'):
+                if paciente.get('Peso') and 'peso' not in valores:
                     valores['peso'] = paciente['Peso']
-                if paciente.get('Talla'):
+                if paciente.get('Talla') and 'talla' not in valores:
                     valores['talla'] = paciente['Talla']
-                if paciente.get('FechaNacimiento'):
+                if 'edad' not in valores and paciente.get('FechaNacimiento'):
                     try:
                         fn = paciente['FechaNacimiento']
                         hoy = datetime.now()
                         edad = hoy.year - fn.year - ((hoy.month, hoy.day) < (fn.month, fn.day))
                         valores['edad'] = edad
-                    except:
+                    except Exception:
                         pass
 
-            # Ejecutar cálculos
-            print(f"[CALC] Ejecutando cálculos con {len(valores)} valores...")
             resultados = calculador.ejecutar_calculos(valores)
 
-            print(f"[CALC] Resultados calculados: {resultados}")
-
             if not resultados:
-                print("[CALC] No hay resultados para guardar")
                 return 0
+
+            # Obtener sexo del paciente para referencias sex-specific
+            sexo_paciente = valores.get('sexo')
 
             # Guardar los resultados calculados
             # IMPORTANTE: Un cálculo puede aplicarse a MÚLTIPLES parámetros
             # (ej: indice_ct_hdl aplica a "REL COLESTEROL / HDL" e "INDICE ATEROGENICO")
             calculos_guardados = 0
 
-            print(f"[CALC] Guardando {len(resultados)} resultados calculados...")
-
             for nombre_calculo, valor_calculado in resultados.items():
                 if valor_calculado is None:
                     continue
 
-                print(f"[CALC] Buscando destino(s) para: {nombre_calculo} = {valor_calculado}")
+                # Obtener valor de referencia sex-specific para este cálculo
+                ref_calculo = calculador.obtener_referencia_calculo(nombre_calculo, sexo_paciente)
 
                 # Buscar TODOS los parámetros destino que coincidan (puede haber múltiples)
                 params_destino = []
@@ -7734,10 +8626,6 @@ Forma de Pago: {self.combo_forma_pago.get()}
                     nombre_norm = calculador.normalizar_nombre(nombre_param)
                     if nombre_norm == nombre_calculo:
                         params_destino.append(param['ParametroID'])
-                        print(f"[CALC]   Encontrado: {nombre_param} -> ID {param['ParametroID']}")
-
-                if not params_destino:
-                    print(f"[CALC]   NO encontrado destino para {nombre_calculo}")
 
                 # Guardar en TODOS los parámetros destino encontrados
                 for param_destino_id in params_destino:
@@ -7749,27 +8637,24 @@ Forma de Pago: {self.combo_forma_pago.get()}
                         """)
 
                         valor_str = str(valor_calculado)
+                        datos_guardar = {
+                            'Valor': valor_str,
+                            'Estado': 'Calculado',
+                            'FechaCaptura': datetime.now(),
+                            'UsuarioCaptura': self.user.get('UsuarioID', 1)
+                        }
+                        if ref_calculo:
+                            datos_guardar['ValorReferencia'] = ref_calculo
 
                         if existe:
-                            # Solo actualizar si el campo está marcado como calculado o vacío
-                            db.update('ResultadosParametros', {
-                                'Valor': valor_str,
-                                'Estado': 'Calculado',
-                                'FechaCaptura': datetime.now(),
-                                'UsuarioCaptura': self.user.get('UsuarioID', 1)
-                            }, f"DetalleID={detalle_id} AND ParametroID={param_destino_id}")
+                            db.update('ResultadosParametros', datos_guardar,
+                                f"DetalleID={detalle_id} AND ParametroID={param_destino_id}")
                         else:
-                            db.insert('ResultadosParametros', {
-                                'DetalleID': detalle_id,
-                                'ParametroID': param_destino_id,
-                                'Valor': valor_str,
-                                'Estado': 'Calculado',
-                                'FechaCaptura': datetime.now(),
-                                'UsuarioCaptura': self.user.get('UsuarioID', 1)
-                            })
+                            datos_guardar['DetalleID'] = detalle_id
+                            datos_guardar['ParametroID'] = param_destino_id
+                            db.insert('ResultadosParametros', datos_guardar)
 
                         calculos_guardados += 1
-                        print(f"[CALC]   GUARDADO: {nombre_calculo} = {valor_str}")
 
                         # Actualizar el Entry en la interfaz si existe
                         if detalle_id in self.parametro_entries:
@@ -7780,19 +8665,15 @@ Forma de Pago: {self.combo_forma_pago.get()}
                                     entry.insert(0, valor_str)
                                     try:
                                         entry.config(fg='#2196F3')  # Color azul para valores calculados
-                                    except:
+                                    except Exception:
                                         pass
                                     break
-                    except Exception as e:
-                        print(f"[CALC] Error guardando cálculo {nombre_calculo}: {e}")
+                    except Exception:
+                        pass
 
-            print(f"[CALC] Total cálculos guardados: {calculos_guardados}")
             return calculos_guardados
 
-        except Exception as e:
-            print(f"Error en cálculos automáticos: {e}")
-            import traceback
-            traceback.print_exc()
+        except Exception:
             return 0
 
     def ejecutar_calculos_solicitud_completa(self, solicitud_id):
@@ -7821,25 +8702,206 @@ Forma de Pago: {self.combo_forma_pago.get()}
                 calculos = self.ejecutar_calculos_automaticos(detalle['DetalleID'])
                 total_calculos += calculos
 
+            # Ejecutar cálculos cross-test (HOMA, etc.)
+            cross = self._ejecutar_calculos_cross_test(solicitud_id)
+            total_calculos += cross
+
             return total_calculos
 
         except Exception as e:
-            print(f"Error en cálculos de solicitud completa: {e}")
+            _log.error("Error en cálculos de solicitud completa: %s", e)
+            return 0
+
+    def _ejecutar_calculos_cross_test(self, solicitud_id):
+        """
+        Ejecuta cálculos que requieren valores de múltiples pruebas dentro
+        de la misma solicitud (ej: HOMA-IR requiere glucosa + insulina que
+        pueden estar en pruebas separadas).
+
+        Recopila TODOS los valores de la solicitud, ejecuta cálculos y
+        guarda resultados en los parámetros destino donde quiera que estén.
+        """
+        if not CALCULOS_AUTOMATICOS_DISPONIBLE:
+            return 0
+
+        try:
+            calculador = obtener_calculador()
+
+            # 1. Recopilar TODOS los parámetros con valores de TODAS las pruebas
+            todos_params = db.query(f"""
+                SELECT d.DetalleID, d.PruebaID, par.NombreParametro,
+                       par.ParametroID, rp.Valor, rp.ResultadoParamID
+                FROM (DetalleSolicitudes d
+                INNER JOIN ParametrosPrueba pp ON d.PruebaID = pp.PruebaID)
+                INNER JOIN Parametros par ON pp.ParametroID = par.ParametroID
+                LEFT JOIN ResultadosParametros rp
+                    ON rp.DetalleID = d.DetalleID AND rp.ParametroID = pp.ParametroID
+                WHERE d.SolicitudID = {solicitud_id}
+            """)
+
+            if not todos_params:
+                return 0
+
+            # Construir pool global de valores + mapeo de destinos
+            valores_global = {}
+            destinos = {}  # nombre_norm -> [(detalle_id, param_id), ...]
+
+            for param in todos_params:
+                nombre = param.get('NombreParametro')
+                if not nombre:
+                    continue
+                nombre_lower = nombre.lower().strip()
+                nombre_norm = calculador.normalizar_nombre(nombre)
+                param_id = param['ParametroID']
+                detalle_id = param['DetalleID']
+
+                # Registrar destinos para cada nombre normalizado
+                for n in [nombre_lower, nombre_norm]:
+                    if n:
+                        if n not in destinos:
+                            destinos[n] = []
+                        destinos[n].append((detalle_id, param_id))
+
+                # Obtener valor del Entry si existe (más actualizado que BD)
+                valor = None
+                if detalle_id in getattr(self, 'parametro_entries', {}):
+                    for param_data in self.parametro_entries[detalle_id]:
+                        if param_data['param_id'] == param_id:
+                            valor = param_data['entry'].get().strip()
+                            break
+
+                if not valor:
+                    valor = param.get('Valor')
+
+                if valor:
+                    valores_global[nombre_lower] = valor
+                    if nombre_norm:
+                        valores_global[nombre_norm] = valor
+
+            # Obtener datos del paciente
+            paciente = db.query_one(f"""
+                SELECT p.FechaNacimiento, p.Sexo, p.Peso, p.Talla
+                FROM Solicitudes s
+                LEFT JOIN Pacientes p ON s.PacienteID = p.PacienteID
+                WHERE s.SolicitudID = {solicitud_id}
+            """)
+
+            if paciente:
+                # Solo complementar, no sobrescribir valores del formulario
+                if paciente.get('Sexo') and 'sexo' not in valores_global:
+                    valores_global['sexo'] = paciente['Sexo']
+                if paciente.get('Peso') and 'peso' not in valores_global:
+                    valores_global['peso'] = paciente['Peso']
+                if paciente.get('Talla') and 'talla' not in valores_global:
+                    valores_global['talla'] = paciente['Talla']
+                if 'edad' not in valores_global and paciente.get('FechaNacimiento'):
+                    try:
+                        fn = paciente['FechaNacimiento']
+                        hoy = datetime.now()
+                        edad = hoy.year - fn.year - ((hoy.month, hoy.day) < (fn.month, fn.day))
+                        valores_global['edad'] = edad
+                    except Exception:
+                        pass
+
+            # 2. Ejecutar cálculos con el pool combinado
+            resultados = calculador.ejecutar_calculos(valores_global)
+
+            if not resultados:
+                return 0
+
+            # Sexo del paciente para referencias sex-specific
+            sexo_paciente = valores_global.get('sexo')
+
+            # 3. Guardar resultados en los parámetros destino
+            calculos_guardados = 0
+            for nombre_calculo, valor_calculado in resultados.items():
+                if valor_calculado is None:
+                    continue
+
+                ref_calculo = calculador.obtener_referencia_calculo(nombre_calculo, sexo_paciente)
+
+                # Buscar destinos que coincidan con este cálculo
+                params_destino = destinos.get(nombre_calculo, [])
+
+                for detalle_id, param_destino_id in params_destino:
+                    try:
+                        existe = db.query_one(f"""
+                            SELECT ResultadoParamID, Valor FROM ResultadosParametros
+                            WHERE DetalleID = {detalle_id} AND ParametroID = {param_destino_id}
+                        """)
+
+                        valor_str = str(valor_calculado)
+                        datos_guardar = {
+                            'Valor': valor_str,
+                            'Estado': 'Calculado',
+                            'FechaCaptura': datetime.now(),
+                            'UsuarioCaptura': self.user.get('UsuarioID', 1)
+                        }
+                        if ref_calculo:
+                            datos_guardar['ValorReferencia'] = ref_calculo
+
+                        # Solo escribir si está vacío o ya es calculado
+                        if existe:
+                            val_actual = str(existe.get('Valor') or '').strip()
+                            if val_actual and val_actual != valor_str:
+                                continue  # No sobreescribir valores manuales
+                            db.update('ResultadosParametros', datos_guardar,
+                                f"DetalleID={detalle_id} AND ParametroID={param_destino_id}")
+                        else:
+                            datos_guardar['DetalleID'] = detalle_id
+                            datos_guardar['ParametroID'] = param_destino_id
+                            db.insert('ResultadosParametros', datos_guardar)
+
+                        calculos_guardados += 1
+
+                        # Actualizar Entry en interfaz si existe
+                        if detalle_id in getattr(self, 'parametro_entries', {}):
+                            for param_data in self.parametro_entries[detalle_id]:
+                                if param_data['param_id'] == param_destino_id:
+                                    entry = param_data['entry']
+                                    entry.delete(0, tk.END)
+                                    entry.insert(0, valor_str)
+                                    try:
+                                        entry.config(fg='#2196F3')
+                                    except Exception:
+                                        pass
+                                    break
+
+                    except Exception:
+                        pass
+
+            return calculos_guardados
+
+        except Exception as e:
+            _log.error("Error en cálculos cross-test: %s", e)
             return 0
 
     def validar_resultados_parametros(self, detalle_id):
-        """Valida los resultados de todos los parametros de una prueba"""
+        """Valida los resultados de todos los parametros de una prueba.
+
+        Flujo: guardar (silencioso) → validar en BD → actualizar visual.
+        NO reconstruye el formulario para no perder datos de otras pruebas.
+        """
         if detalle_id not in self.parametro_entries:
             return
 
-        # Primero guardar
-        self.guardar_resultados_parametros(detalle_id)
+        # Verificar que hay al menos un resultado escrito
+        tiene_valores = any(
+            p['entry'].get().strip() for p in self.parametro_entries[detalle_id]
+        )
+        if not tiene_valores:
+            messagebox.showwarning("Aviso",
+                                   "Debe ingresar al menos un resultado antes de validar")
+            return
+
+        # Primero guardar (sin messagebox ni reconstrucción)
+        guardados = self.guardar_resultados_parametros(detalle_id, silencioso=True)
 
         # Registrar validación masiva en auditoría
         if self.auditoria:
             self.auditoria.registrar_validacion_masiva(detalle_id)
 
-        # Luego validar
+        # Luego validar en BD
         try:
             db.execute(f"""
                 UPDATE ResultadosParametros SET Estado = 'Validado'
@@ -7855,7 +8917,8 @@ Forma de Pago: {self.combo_forma_pago.get()}
                 log_auditoria(self.user.get('UsuarioID'), 'VALIDAR_RESULTADO',
                               f"DetalleID={detalle_id} validado", modulo='resultados')
 
-            messagebox.showinfo("Exito", "Resultados validados")
+            messagebox.showinfo("Éxito",
+                                f"{guardados} parámetros guardados y validados")
             self.cargar_pruebas_resultado()
         except Exception as e:
             messagebox.showerror("Error", f"Error al validar: {e}")
@@ -7866,39 +8929,53 @@ Forma de Pago: {self.combo_forma_pago.get()}
             silencioso: Si True, no muestra messageboxes (usado internamente por validar_todos)
         """
         total = 0
+        errores_total = []
 
         # Guardar parametros
         for detalle_id, params in self.parametro_entries.items():
             for param_data in params:
                 param_id = param_data['param_id']
-                valor = param_data['entry'].get().strip()
+                try:
+                    valor = param_data['entry'].get().strip()
+                except Exception:
+                    continue
 
                 if valor:
                     try:
+                        valor_ref = param_data.get('valor_ref', '')
+                        tipo_alerta = ''
+                        fuera_de_rango = False
+                        try:
+                            tipo_alerta, fuera_de_rango = self._calcular_alerta(valor, valor_ref)
+                        except Exception:
+                            pass
+
+                        campos = {
+                            'Valor': valor,
+                            'Estado': 'Capturado',
+                            'FechaCaptura': datetime.now(),
+                            'UsuarioCaptura': self.user.get('UsuarioID', 1),
+                            'ValorReferencia': valor_ref,
+                            'FueraDeRango': fuera_de_rango,
+                            'TipoAlerta': tipo_alerta or '',
+                        }
+
                         existe = db.query_one(f"""
                             SELECT ResultadoParamID FROM ResultadosParametros
                             WHERE DetalleID = {detalle_id} AND ParametroID = {param_id}
                         """)
 
                         if existe:
-                            db.update('ResultadosParametros', {
-                                'Valor': valor,
-                                'Estado': 'Capturado',
-                                'FechaCaptura': datetime.now(),
-                                'UsuarioCaptura': self.user.get('UsuarioID', 1)
-                            }, f"DetalleID={detalle_id} AND ParametroID={param_id}")
+                            db.update('ResultadosParametros', campos,
+                                      f"DetalleID={detalle_id} AND ParametroID={param_id}")
                         else:
-                            db.insert('ResultadosParametros', {
-                                'DetalleID': detalle_id,
-                                'ParametroID': param_id,
-                                'Valor': valor,
-                                'Estado': 'Capturado',
-                                'FechaCaptura': datetime.now(),
-                                'UsuarioCaptura': self.user.get('UsuarioID', 1)
-                            })
+                            campos['DetalleID'] = detalle_id
+                            campos['ParametroID'] = param_id
+                            db.insert('ResultadosParametros', campos)
                         total += 1
-                    except:
-                        pass
+                    except Exception as e:
+                        errores_total.append(f"{param_data.get('nombre','?')}: {e}")
+                        _log.error("Error guardando param %s: %s", param_id, e)
 
             # Actualizar estado del detalle
             if any(p['entry'].get().strip() for p in params):
@@ -7907,7 +8984,7 @@ Forma de Pago: {self.combo_forma_pago.get()}
                         'Estado': 'Capturado',
                         'FechaResultado': datetime.now()
                     }, f"DetalleID={detalle_id}")
-                except:
+                except Exception:
                     pass
 
         # Guardar resultados simples
@@ -7921,8 +8998,14 @@ Forma de Pago: {self.combo_forma_pago.get()}
                         'FechaResultado': datetime.now()
                     }, f"DetalleID={detalle_id}")
                     total += 1
-                except:
+                except Exception:
                     pass
+
+        # Mostrar errores si los hubo
+        if errores_total and not silencioso:
+            detalle_err = '\n'.join(errores_total[:5])
+            messagebox.showerror("Error al guardar",
+                                 f"Algunos parámetros fallaron:\n\n{detalle_err}")
 
         if total > 0:
             # Ejecutar cálculos automáticos para todos los detalles
@@ -7931,46 +9014,98 @@ Forma de Pago: {self.combo_forma_pago.get()}
                 calculos = self.ejecutar_calculos_automaticos(detalle_id)
                 total_calculos += calculos
 
+            # Ejecutar cálculos cross-test (HOMA, etc.)
+            try:
+                primer_detalle = list(self.parametro_entries.keys())[0]
+                det_info = db.query_one(f"SELECT SolicitudID FROM DetalleSolicitudes WHERE DetalleID = {primer_detalle}")
+                if det_info:
+                    cross = self._ejecutar_calculos_cross_test(det_info['SolicitudID'])
+                    total_calculos += cross
+            except Exception:
+                pass
+
             if not silencioso:
                 if total_calculos > 0:
                     messagebox.showinfo("Éxito", f"{total} resultados guardados\n{total_calculos} valores calculados automáticamente")
                 else:
                     messagebox.showinfo("Éxito", f"{total} resultados guardados")
 
-            self.cargar_pruebas_resultado()
+                self.cargar_pruebas_resultado()
         else:
             if not silencioso:
-                messagebox.showinfo("Info", "No hay resultados para guardar")
+                messagebox.showwarning("Sin resultados",
+                                       "No se guardó ningún resultado.\n"
+                                       f"Errores encontrados: {len(errores_total)}")
+
+        return total
 
     def validar_todos_parametros(self):
-        """Valida todos los resultados de parametros y pruebas"""
-        # Primero guardar todo (silencioso para evitar doble messagebox)
-        self.guardar_todos_parametros(silencioso=True)
+        """Valida todos los resultados de parametros y pruebas.
 
-        # Validar parametros
-        for detalle_id in self.parametro_entries.keys():
+        Flujo: guardar todo (silencioso) → validar en BD → marcar solicitud
+        completada → reconstruir UI una sola vez al final.
+        """
+        # Verificar que hay al menos algo para validar
+        tiene_params = any(
+            any(p['entry'].get().strip() for p in params)
+            for params in self.parametro_entries.values()
+        )
+        tiene_simples = any(
+            data['entry'].get().strip()
+            for data in self.resultado_entries.values()
+        )
+        if not tiene_params and not tiene_simples:
+            messagebox.showwarning("Aviso", "No hay resultados capturados para validar")
+            return
+
+        # Primero guardar todo (silencioso, sin reconstruir)
+        total_guardados = self.guardar_todos_parametros(silencioso=True)
+
+        # Validar parametros en BD
+        for detalle_id in list(self.parametro_entries.keys()):
             try:
                 db.execute(f"UPDATE ResultadosParametros SET Estado = 'Validado' WHERE DetalleID = {detalle_id}")
                 db.update('DetalleSolicitudes', {'Estado': 'Validado'}, f"DetalleID={detalle_id}")
-            except:
+            except Exception:
                 pass
 
         # Validar resultados simples
         for detalle_id, data in self.resultado_entries.items():
             if data['entry'].get().strip():
                 try:
-                    db.update('DetalleSolicitudes', {'Estado': 'Validado'}, f"DetalleID={detalle_id}")
-                except:
+                    db.update('DetalleSolicitudes', {
+                        'Resultado': data['entry'].get().strip(),
+                        'Estado': 'Validado',
+                        'FechaResultado': datetime.now()
+                    }, f"DetalleID={detalle_id}")
+                except Exception:
                     pass
 
         # Marcar solicitud como completada
-        try:
-            db.update('Solicitudes', {'EstadoSolicitud': 'Completada'}, f"SolicitudID={self.sol_id_resultado}")
-        except:
-            pass
+        sol_id = getattr(self, 'sol_id_resultado', None)
+        if sol_id:
+            try:
+                db.update('Solicitudes', {'EstadoSolicitud': 'Completada'},
+                          f"SolicitudID={sol_id}")
+            except Exception:
+                pass
 
-        messagebox.showinfo("Exito", "Todos los resultados validados\nSolicitud marcada como Completada")
+        messagebox.showinfo("Éxito",
+                            f"Todos los resultados validados\n"
+                            f"Solicitud marcada como Completada")
+
+        # Ahora sí reconstruir: primero actualizar lista de solicitudes,
+        # luego preservar la selección para recargar el panel de resultados
         self.cargar_solicitudes_pendientes()
+
+        # Intentar re-seleccionar la solicitud actual (puede haber salido
+        # de la lista si ya fue completada)
+        if hasattr(self, 'sol_res_map'):
+            for iid, sid in self.sol_res_map.items():
+                if sid == sol_id:
+                    self.tree_sol_res.selection_set(iid)
+                    self.tree_sol_res.focus(iid)
+                    break
         self.cargar_pruebas_resultado()
 
     def obtener_impresora_configurada(self, tipo='resultados'):
@@ -8290,7 +9425,7 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                 filename = filedialog.asksaveasfilename(
                     defaultextension=".txt",
                     filetypes=[("Text files", "*.txt")],
-                    initialfilename=f"Resultados_{sol['NumeroSolicitud']}.txt"
+                    initialfile=f"Resultados_{sol['NumeroSolicitud']}.txt"
                 )
                 if filename:
                     with open(filename, 'w', encoding='utf-8') as f:
@@ -8317,6 +9452,49 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                 config_lab = self.config_administrativa.obtener_configuracion()
                 ruta_logo = self.config_administrativa.obtener_ruta_logo()
 
+            # Colores configurables para tablas
+            usar_colores = config_lab.get('UsarColoresTabla', True) if config_lab else True
+            color_header_hex = config_lab.get('ColorEncabezadoTabla', '#1565c0') if config_lab else '#1565c0'
+            if not color_header_hex:
+                color_header_hex = '#1565c0'
+
+            def _color_claro(hex_color, factor=0.85):
+                """Genera versión clara de un color hex para fondos."""
+                r = int(hex_color[1:3], 16)
+                g = int(hex_color[3:5], 16)
+                b = int(hex_color[5:7], 16)
+                r = int(r + (255 - r) * factor)
+                g = int(g + (255 - g) * factor)
+                b = int(b + (255 - b) * factor)
+                return f'#{r:02x}{g:02x}{b:02x}'
+
+            def _color_oscuro(hex_color, factor=0.6):
+                """Genera versión oscura de un color hex."""
+                r = int(hex_color[1:3], 16)
+                g = int(hex_color[3:5], 16)
+                b = int(hex_color[5:7], 16)
+                r = int(r * factor)
+                g = int(g * factor)
+                b = int(b * factor)
+                return f'#{int(r):02x}{int(g):02x}{int(b):02x}'
+
+            if usar_colores:
+                PDF_COLOR_HEADER = colors.HexColor(color_header_hex)
+                PDF_COLOR_HEADER_DARK = colors.HexColor(_color_oscuro(color_header_hex))
+                PDF_COLOR_SECCION_BG = colors.HexColor(_color_claro(color_header_hex))
+                PDF_COLOR_SECCION_TEXT = colors.HexColor(color_header_hex)
+                PDF_COLOR_FILA_ALT = colors.HexColor('#fafafa')
+                PDF_COLOR_ACCENT = colors.HexColor(color_header_hex)
+                PDF_HEADER_TEXT = colors.white
+            else:
+                PDF_COLOR_HEADER = colors.HexColor('#f0f0f0')
+                PDF_COLOR_HEADER_DARK = colors.HexColor('#333333')
+                PDF_COLOR_SECCION_BG = colors.HexColor('#f5f5f5')
+                PDF_COLOR_SECCION_TEXT = colors.black
+                PDF_COLOR_FILA_ALT = colors.white
+                PDF_COLOR_ACCENT = colors.HexColor('#666666')
+                PDF_HEADER_TEXT = colors.black
+
             # Obtener datos de la solicitud
             sol = db.query_one(f"""
                 SELECT s.*, p.Nombres, p.Apellidos, p.NumeroDocumento,
@@ -8334,11 +9512,13 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
 
             # Obtener pruebas con sus parámetros (incluye AreaID para firma bioanalista)
             pruebas = db.query(f"""
-                SELECT d.DetalleID, d.PruebaID, d.Estado, p.CodigoPrueba, p.NombrePrueba, p.AreaID
-                FROM DetalleSolicitudes d
-                LEFT JOIN Pruebas p ON d.PruebaID = p.PruebaID
+                SELECT d.DetalleID, d.PruebaID, d.Estado, p.CodigoPrueba, p.NombrePrueba, p.AreaID,
+                       a.NombreArea
+                FROM (DetalleSolicitudes d
+                LEFT JOIN Pruebas p ON d.PruebaID = p.PruebaID)
+                LEFT JOIN Areas a ON p.AreaID = a.AreaID
                 WHERE d.SolicitudID = {self.sol_id_resultado}
-                ORDER BY p.NombrePrueba
+                ORDER BY a.NombreArea, p.NombrePrueba
             """)
 
             # Obtener bioanalistas activos por área para las firmas
@@ -8347,6 +9527,7 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                 areas_ids = list(set(pr.get('AreaID') for pr in pruebas if pr.get('AreaID')))
                 if areas_ids:
                     areas_str = ','.join(str(a) for a in areas_ids)
+                    # Buscar bioanalistas de las áreas de la solicitud
                     bios = db.query(
                         f"SELECT b.BioanalistaID, b.NombreCompleto, b.Cedula, b.NumeroRegistro, "
                         f"b.AreaID, b.RutaFirma, a.NombreArea "
@@ -8355,6 +9536,18 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                     )
                     for bio in bios:
                         bioanalistas_por_area[bio['AreaID']] = bio
+
+                # Fallback: si no se encontraron bioanalistas por área específica,
+                # buscar cualquier bioanalista activo (incluye AreaID=29 "General")
+                if not bioanalistas_por_area:
+                    bios_todos = db.query(
+                        "SELECT b.BioanalistaID, b.NombreCompleto, b.Cedula, b.NumeroRegistro, "
+                        "b.AreaID, b.RutaFirma, a.NombreArea "
+                        "FROM Bioanalistas b LEFT JOIN Areas a ON b.AreaID = a.AreaID "
+                        "WHERE b.Activo = True"
+                    )
+                    for bio in (bios_todos or []):
+                        bioanalistas_por_area[bio.get('AreaID') or 0] = bio
             except Exception:
                 pass  # Si falla, usa fallback (NombreDirector)
 
@@ -8421,6 +9614,10 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
             sexo = 'Masculino' if sol.get('Sexo') == 'M' else 'Femenino' if sol.get('Sexo') == 'F' else 'N/A'
             telefono_pac = sol.get('Telefono1') or ''
             medico = sol.get('Medico') or 'N/A'
+            estado_solicitud = sol.get('EstadoSolicitud') or 'Pendiente'
+            # Datos para resolución de valores de referencia por edad/sexo
+            _pdf_sexo = sol.get('Sexo')  # 'M' o 'F'
+            _pdf_fn = sol.get('FechaNacimiento')  # datetime o None
 
             # Calcular edad
             edad_texto = '0 Años'
@@ -8430,7 +9627,7 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                     hoy = datetime.now()
                     edad = hoy.year - fn.year - ((hoy.month, hoy.day) < (fn.month, fn.day))
                     edad_texto = f"{edad} Años"
-                except:
+                except Exception:
                     pass
 
             # Información del laboratorio
@@ -8444,151 +9641,175 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
             header_height = layout.header_height if layout else 2.0 * inch
 
             # Función para dibujar el encabezado en cada página
+            # Estilo moderno inspirado en reportes profesionales de laboratorio
             def draw_header(canvas, doc):
                 canvas.saveState()
 
-                # ===== PARTE SUPERIOR: Logo + Info del Laboratorio =====
                 y_top = page_height - top_margin
+                content_w = page_width - left_margin - right_margin
 
-                # Logo (izquierda) - dimensiones proporcionales
-                logo_width = layout.logo_width if layout else 1.2 * inch
-                logo_height = layout.logo_height if layout else 1.0 * inch
+                # Color principal del encabezado (usa el color configurado)
+                _accent = PDF_COLOR_ACCENT
+                _accent_hex = color_header_hex
+
+                # ── LOGO AL FONDO (grande, no afecta layout del contenido) ──
+                logo_width = layout.logo_width if layout else 2.2 * inch
+                logo_height = layout.logo_height if layout else 2.2 * inch
+                # Altura de referencia para posicionar contenido (independiente del logo)
+                _info_h = layout.info_section_height if layout else 0.85 * inch
                 logo_x = left_margin
-                logo_y = y_top - logo_height - 0.1*inch
+                logo_y = y_top - logo_height + 57  # subido 2.0cm (~57pt) para alinear con info
 
                 if ruta_logo and os.path.exists(ruta_logo) and config_lab and config_lab.get('MostrarLogo'):
                     try:
-                        canvas.drawImage(ruta_logo, logo_x, logo_y, width=logo_width, height=logo_height, preserveAspectRatio=True, mask='auto')
-                    except:
+                        canvas.drawImage(ruta_logo, logo_x, logo_y,
+                                         width=logo_width, height=logo_height,
+                                         preserveAspectRatio=True, mask='auto')
+                    except Exception:
                         pass
 
-                # Información del laboratorio (derecha del logo)
-                _info_offset = layout.info_lab_x_offset if layout else (logo_width + 0.3*inch)
-                info_x = left_margin + _info_offset
-                info_y = y_top - 0.15*inch
+                # Info del laboratorio alineada a la derecha
+                right_edge = page_width - right_margin
+                # Reservar espacio para QR si está disponible
+                _qr_reserva = (layout.qr_size + 0.15*inch) if (layout and QRGenerator.disponible()) else 0
+                _info_right = right_edge - _qr_reserva
+                _fln = layout.font_lab_nombre if layout else 11
+                _fld = layout.font_lab_detalle if layout else 7.5
+                _lh = layout.info_line_height if layout else 10
 
-                # Limitar el ancho de texto si hay QR (reservar espacio derecho)
-                _qr_reserva = (layout.qr_size + 0.2*inch) if (layout and QRGenerator.disponible()) else 0
+                info_y = y_top - 0.05*inch
+                canvas.setFont('Helvetica-Bold', _fln)
+                canvas.setFillColor(colors.HexColor('#1a237e'))
+                canvas.drawRightString(_info_right, info_y, nombre_lab.upper())
 
-                canvas.setFont('Helvetica-Bold', layout.font_lab_nombre if layout else 10)
-                canvas.drawString(info_x, info_y, nombre_lab.upper())
-
-                canvas.setFont('Helvetica', layout.font_lab_detalle if layout else 8)
-                line_height = layout.info_line_height if layout else 11
-                current_y = info_y - line_height
-
+                canvas.setFont('Helvetica', _fld)
+                canvas.setFillColor(colors.HexColor('#455a64'))
+                info_y -= _lh + 2
                 if direccion_lab:
-                    # Dividir dirección si es muy larga
-                    max_chars = layout.max_chars_direccion if layout else 70
-                    if len(direccion_lab) > max_chars:
-                        canvas.drawString(info_x, current_y, direccion_lab[:max_chars])
-                        current_y -= line_height
-                        canvas.drawString(info_x, current_y, direccion_lab[max_chars:])
+                    # Partir dirección en 2 líneas por la ÚLTIMA coma
+                    _dir_parts = None
+                    _last_comma = direccion_lab.rfind(', ')
+                    if _last_comma == -1:
+                        _last_comma = direccion_lab.rfind(' - ')
+                    if _last_comma > 0:
+                        _dir_parts = (direccion_lab[:_last_comma].strip(),
+                                      direccion_lab[_last_comma:].lstrip(', -').strip())
+                    if _dir_parts and _dir_parts[1]:
+                        canvas.drawRightString(_info_right, info_y, _dir_parts[0])
+                        info_y -= _lh
+                        canvas.drawRightString(_info_right, info_y, _dir_parts[1])
                     else:
-                        canvas.drawString(info_x, current_y, direccion_lab)
-                    current_y -= line_height
+                        canvas.drawRightString(_info_right, info_y, direccion_lab[:80])
+                    info_y -= _lh
+
+                if telefono_lab:
+                    canvas.drawRightString(_info_right, info_y, f"Telf.: {telefono_lab}")
+                    info_y -= _lh
+                if telefono2_lab:
+                    canvas.drawRightString(_info_right, info_y, f"WhatsApp: {telefono2_lab}")
+                    info_y -= _lh
 
                 if email_lab:
-                    canvas.drawString(info_x, current_y, f"Correo: {email_lab}")
-                    current_y -= line_height
+                    canvas.setFillColor(colors.HexColor('#1565c0'))
+                    canvas.drawRightString(_info_right, info_y, email_lab)
+                    info_y -= _lh
 
-                telefono_texto = ""
-                if telefono_lab:
-                    telefono_texto = f"Teléfono: {telefono_lab}"
-                if telefono2_lab:
-                    telefono_texto += f"  WhatsApp: {telefono2_lab}"
-                if telefono_texto:
-                    canvas.drawString(info_x, current_y, telefono_texto)
-                    current_y -= line_height
-
-                canvas.setFont('Helvetica-Oblique', layout.font_lab_pie if layout else 7)
-                canvas.drawString(info_x, current_y, "Impreso por ANgesLAB - Sistema de Gestión de Laboratorio")
-
-                # ===== QR DE VERIFICACIÓN (esquina superior derecha) =====
+                # ── QR DE VERIFICACIÓN (esquina superior derecha, debajo de info lab) ──
                 if layout and FORMATO_PDF_DISPONIBLE:
-                    dibujar_qr_en_header(canvas, layout, num_orden, fecha_sol, nombre_paciente)
+                    dibujar_qr_en_header(canvas, layout, num_orden, fecha_sol, nombre_paciente,
+                                         cedula=cedula, nombre_lab=nombre_lab,
+                                         estado=estado_solicitud)
 
-                # ===== CUADRO DE DATOS DEL PACIENTE =====
-                _box_y_off = layout.box_y_offset if layout else (logo_height + 0.35*inch)
-                box_y = y_top - _box_y_off
-                box_height = layout.box_height if layout else 0.7 * inch
-                box_width = page_width - left_margin - right_margin
+                # ── LÍNEA SEPARADORA FINA bajo info lab (no depende del logo) ──
+                _sep1_y = y_top - _info_h - 0.08*inch
+                canvas.setStrokeColor(colors.HexColor('#e0e0e0'))
+                canvas.setLineWidth(0.5)
+                canvas.line(left_margin, _sep1_y, right_edge, _sep1_y)
 
-                # Dibujar el cuadro
-                canvas.setStrokeColor(colors.black)
-                canvas.setLineWidth(1)
-                canvas.rect(left_margin, box_y - box_height, box_width, box_height)
+                # ── NÚMERO DE ORDEN (prominente, coloreado) ──
+                _orden_y = _sep1_y - 0.17*inch
+                _fo_label = layout.font_orden_label if layout else 10
+                _fo_valor = layout.font_orden_valor if layout else 12
 
-                # Posiciones de columnas (proporcionales)
-                col1_x = left_margin + (layout.box_col1_x if layout else 0.1*inch)
-                col2_x = left_margin + (layout.box_col2_x if layout else 2.5*inch)
-                col3_x = left_margin + (layout.box_col3_x if layout else 5.0*inch)
-                _row_sp = layout.box_row_spacing if layout else 0.22*inch
-                val_offset = layout.box_val_offset if layout else 0.55*inch
-                _max_nom = layout.max_nombre_chars if layout else 35
-                _max_med = layout.max_medico_chars if layout else 25
-                _font_lbl = layout.font_pac_label if layout else 8
-                _font_val = layout.font_pac_valor if layout else 8
+                canvas.setFillColor(colors.HexColor('#37474f'))
+                canvas.setFont('Helvetica-Bold', _fo_label)
+                canvas.drawString(left_margin, _orden_y, "ORDEN NO.")
 
-                row1_y = box_y - 0.18*inch
-                row2_y = row1_y - _row_sp
-                row3_y = row2_y - _row_sp
+                # Número en color accent, grande y bold
+                _orden_label_w = canvas.stringWidth("ORDEN NO.  ", 'Helvetica-Bold', _fo_label)
+                canvas.setFillColor(colors.HexColor('#1a237e'))
+                canvas.setFont('Helvetica-Bold', _fo_valor)
+                canvas.drawString(left_margin + _orden_label_w, _orden_y,
+                                  str(num_orden))
 
-                # Verificar si usamos 2 o 3 columnas
-                _n_cols = layout.box_cols if layout else 3
+                # ── NOMBRE COMPLETO DEL PACIENTE (grande, bold, negro) ──
+                _nombre_y = _orden_y - 0.20*inch
+                _fn_pac = layout.font_pac_nombre if layout else 11
+                canvas.setFillColor(colors.black)
+                canvas.setFont('Helvetica-Bold', _fn_pac)
+                _max_nom = layout.max_nombre_chars if layout else 50
+                canvas.drawString(left_margin, _nombre_y, nombre_paciente[:_max_nom])
 
-                canvas.setFont('Helvetica-Bold', _font_lbl)
+                # ── BARRA DE COLOR SEPARADORA (estilo moderno, gruesa) ──
+                _bar_y = _nombre_y - 0.10*inch
+                canvas.setStrokeColor(_accent)
+                canvas.setLineWidth(3.0)
+                canvas.line(left_margin, _bar_y, right_edge, _bar_y)
 
-                if _n_cols == 3:
-                    # ── Layout 3 columnas (Carta, A4, Oficio) ──
-                    # Columna 1
-                    canvas.drawString(col1_x, row1_y, "NOMBRE:")
-                    canvas.drawString(col1_x, row2_y, "CÉDULA:")
-                    canvas.drawString(col1_x, row3_y, "EDAD:")
-                    # Columna 2
-                    canvas.drawString(col2_x, row1_y, "GÉNERO:")
-                    canvas.drawString(col2_x, row2_y, "MÉDICO:")
-                    # Columna 3
-                    canvas.drawString(col3_x, row1_y, "FECHA:")
-                    canvas.drawString(col3_x, row2_y, "N° ORDEN:")
-                    canvas.drawString(col3_x, row3_y, "TELÉFONO:")
+                # ── BLOQUE DE DATOS DEL PACIENTE (2 columnas, compacto) ──
+                _row_sp = layout.pac_row_spacing if layout else 0.14*inch
+                _col2_x = left_margin + (layout.pac_col2_x if layout else content_w * 0.52)
+                _vo1 = layout.pac_val_offset_col1 if layout else 1.35*inch
+                _vo2 = layout.pac_val_offset_col2 if layout else 1.25*inch
+                _flbl = layout.font_pac_label if layout else 7.5
+                _fval = layout.font_pac_valor if layout else 7.5
+                _lbl_color = colors.HexColor('#607d8b')  # gris-azulado medio
+                _val_color = colors.HexColor('#212121')   # casi negro
+                _max_med = layout.max_medico_chars if layout else 35
 
-                    # Valores
-                    canvas.setFont('Helvetica', _font_val)
-                    canvas.drawString(col1_x + val_offset, row1_y, nombre_paciente[:_max_nom])
-                    canvas.drawString(col1_x + val_offset, row2_y, cedula)
-                    canvas.drawString(col1_x + val_offset, row3_y, edad_texto)
-                    canvas.drawString(col2_x + val_offset, row1_y, sexo)
-                    canvas.drawString(col2_x + val_offset, row2_y, medico[:_max_med] if medico else '')
-                    canvas.drawString(col3_x + val_offset, row1_y, fecha_sol)
-                    canvas.drawString(col3_x + val_offset, row2_y, str(num_orden)[:20])
-                    canvas.drawString(col3_x + val_offset, row3_y, telefono_pac[:15] if telefono_pac else '')
+                _dy = _bar_y - 0.16*inch  # primera fila bajo la barra
 
-                else:
-                    # ── Layout 2 columnas (Media Carta) ──
-                    row4_y = row3_y - _row_sp
-                    row5_y = row4_y - _row_sp
-                    # Columna 1
-                    canvas.drawString(col1_x, row1_y, "NOMBRE:")
-                    canvas.drawString(col1_x, row2_y, "CÉDULA:")
-                    canvas.drawString(col1_x, row3_y, "EDAD:")
-                    canvas.drawString(col1_x, row4_y, "MÉDICO:")
-                    # Columna 2
-                    canvas.drawString(col2_x, row1_y, "FECHA:")
-                    canvas.drawString(col2_x, row2_y, "N° ORDEN:")
-                    canvas.drawString(col2_x, row3_y, "GÉNERO:")
-                    canvas.drawString(col2_x, row4_y, "TELÉFONO:")
+                def _draw_field(x, y, label, value):
+                    """Dibuja un campo label: valor con estilo consistente."""
+                    canvas.setFillColor(_lbl_color)
+                    canvas.setFont('Helvetica', _flbl)
+                    canvas.drawString(x, y, label)
+                    lbl_w = canvas.stringWidth(label + " ", 'Helvetica', _flbl)
+                    canvas.setFillColor(_val_color)
+                    canvas.setFont('Helvetica-Bold', _fval)
+                    canvas.drawString(x + lbl_w, y, value)
 
-                    # Valores
-                    canvas.setFont('Helvetica', _font_val)
-                    canvas.drawString(col1_x + val_offset, row1_y, nombre_paciente[:_max_nom])
-                    canvas.drawString(col1_x + val_offset, row2_y, cedula)
-                    canvas.drawString(col1_x + val_offset, row3_y, edad_texto)
-                    canvas.drawString(col1_x + val_offset, row4_y, medico[:_max_med] if medico else '')
-                    canvas.drawString(col2_x + val_offset, row1_y, fecha_sol)
-                    canvas.drawString(col2_x + val_offset, row2_y, str(num_orden)[:20])
-                    canvas.drawString(col2_x + val_offset, row3_y, sexo)
-                    canvas.drawString(col2_x + val_offset, row4_y, telefono_pac[:15] if telefono_pac else '')
+                # Fila 1: Cédula | Fecha de ingreso
+                _draw_field(left_margin, _dy, "Cédula:", cedula)
+                _draw_field(_col2_x, _dy, "Fecha de ingreso:",
+                            f"{fecha_sol} {datetime.now().strftime('%I:%M%p')}")
+                _dy -= _row_sp
+
+                # Fila 2: Sexo | Médico
+                _draw_field(left_margin, _dy, "Sexo:", sexo)
+                _draw_field(_col2_x, _dy, "Médico:",
+                            medico[:_max_med] if medico else 'Médico Eventual')
+                _dy -= _row_sp
+
+                # Fila 3: Edad | Observaciones
+                _draw_field(left_margin, _dy, "Edad:", edad_texto)
+                _obs_sol = str(sol.get('Observaciones') or '').strip()
+                _draw_field(_col2_x, _dy, "Observaciones:",
+                            _obs_sol[:40] if _obs_sol else '')
+
+                _dy -= _row_sp + 0.06*inch
+
+                # ── TÍTULO "Informe de resultados" centrado ──
+                _fi_titulo = layout.font_informe_titulo if layout else 10
+                canvas.setFillColor(colors.HexColor('#37474f'))
+                canvas.setFont('Helvetica-Bold', _fi_titulo)
+                canvas.drawCentredString(page_width / 2, _dy, "Informe de resultados")
+
+                # Línea fina debajo del título
+                _dy -= 0.10*inch
+                canvas.setStrokeColor(colors.HexColor('#bdbdbd'))
+                canvas.setLineWidth(0.5)
+                canvas.line(left_margin, _dy, right_edge, _dy)
 
                 canvas.restoreState()
 
@@ -8603,11 +9824,10 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                 bios_unicos = list(bioanalistas_por_area.values())
 
                 if bios_unicos:
-                    # Dibujar firmas de bioanalistas (proporcional al formato)
+                    # Dibujar firmas de bioanalistas alineadas a la derecha,
+                    # justo encima del pie de página para no interferir con resultados
                     _max_firmas = layout.max_firmas if layout else 3
                     num_bios = min(len(bios_unicos), _max_firmas)
-                    ancho_disponible = page_width - left_margin - right_margin
-                    ancho_bloque = ancho_disponible / num_bios
 
                     _firma_w = layout.firma_img_width if layout else 1.2*inch
                     _firma_h = layout.firma_img_height if layout else 0.4*inch
@@ -8616,10 +9836,17 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                     _f_detalle = layout.font_bio_detalle if layout else 6.5
                     _f_area = layout.font_bio_area if layout else 6
 
-                    for idx, bio in enumerate(bios_unicos[:_max_firmas]):
-                        bloque_x = left_margin + (idx * ancho_bloque) + (ancho_bloque / 2)
+                    # Ancho de cada bloque de firma
+                    _ancho_bloque_firma = _linea_w + 0.3*inch
+                    # Posición base: alineado a la derecha
+                    _right_edge = page_width - right_margin
 
-                        y_pos = footer_y + 0.9*inch
+                    for idx, bio in enumerate(bios_unicos[:_max_firmas]):
+                        # Distribuir desde la derecha hacia la izquierda
+                        bloque_x = _right_edge - (_ancho_bloque_firma * (num_bios - 1 - idx)) - _ancho_bloque_firma / 2
+
+                        # Posicionar encima del pie de página (línea separadora está a ~0.30")
+                        y_pos = 0.38*inch + 0.85*inch
 
                         # Dibujar imagen de firma si existe
                         ruta_firma = bio.get('RutaFirma', '')
@@ -8657,12 +9884,14 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                         y_pos -= 0.1*inch
                         canvas.drawCentredString(bloque_x, y_pos, f"Reg.: {bio.get('NumeroRegistro', '')}")
 
-                        # Área
+                        # Título profesional / Área
                         y_pos -= 0.1*inch
                         canvas.setFont('Helvetica-Oblique', _f_area)
                         area_nombre = bio.get('NombreArea', '')
-                        if area_nombre:
+                        if area_nombre and area_nombre.lower() != 'general':
                             canvas.drawCentredString(bloque_x, y_pos, f"Bioanalista - {area_nombre}")
+                        else:
+                            canvas.drawCentredString(bloque_x, y_pos, "Bioanalista")
 
                 elif config_lab and config_lab.get('MostrarFirma'):
                     # Fallback: firma del Director (comportamiento original)
@@ -8672,12 +9901,28 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                     if config_lab.get('TituloDirector'):
                         canvas.drawRightString(page_width - right_margin, footer_y + 0.15*inch, config_lab['TituloDirector'])
 
-                canvas.restoreState()
+                # ── PIE DE PÁGINA: Orden / Paciente / Fecha + Página ──
+                _pie_y = 0.22 * inch
+                _right_edge = page_width - right_margin
 
-            # Función combinada para header y footer
-            def header_footer(canvas, doc):
-                draw_header(canvas, doc)
-                draw_footer(canvas, doc)
+                # Separador sutil
+                canvas.setStrokeColor(colors.HexColor('#e0e0e0'))
+                canvas.setLineWidth(0.3)
+                canvas.line(left_margin, _pie_y + 0.08*inch, _right_edge, _pie_y + 0.08*inch)
+
+                canvas.setFont('Helvetica', layout.font_lab_pie if layout else 5.5)
+                canvas.setFillColor(colors.HexColor('#9e9e9e'))
+
+                # Info izquierda: orden, nombre y nota de valores de referencia
+                _pie_texto = (f"Orden No: {num_orden}  -  {nombre_paciente}"
+                              f"  |  Valores de referencia reportados según edad y sexo del paciente")
+                canvas.drawString(left_margin, _pie_y, _pie_texto)
+
+                # Página derecha
+                canvas.drawRightString(_right_edge, _pie_y,
+                                       f"Página {doc.page}")
+
+                canvas.restoreState()
 
             # Crear el documento con template personalizado
             doc = BaseDocTemplate(filename, pagesize=page_size)
@@ -8691,8 +9936,12 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                 id='content'
             )
 
-            # Template de página
-            page_template = PageTemplate(id='main', frames=[content_frame], onPage=header_footer)
+            # Template de página:
+            # - onPage (draw_header): se dibuja ANTES de los flowables (fondo)
+            # - onPageEnd (draw_footer): se dibuja DESPUÉS de los flowables (frente)
+            #   para que las firmas queden por encima de las tablas de resultados
+            page_template = PageTemplate(id='main', frames=[content_frame],
+                                         onPage=draw_header, onPageEnd=draw_footer)
             doc.addPageTemplates([page_template])
 
             styles = getSampleStyleSheet()
@@ -8706,13 +9955,17 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
 
             titulo_prueba_style = ParagraphStyle(
                 'TituloPrueba',
-                parent=styles['Heading2'],
+                parent=styles['Normal'],
                 fontSize=_ft_titulo,
                 fontName='Helvetica-Bold',
                 alignment=TA_CENTER,
                 spaceAfter=_sp_after,
                 spaceBefore=_sp_before,
-                textColor=colors.black
+                leading=_ft_titulo + 2,
+                textColor=PDF_COLOR_HEADER_DARK,
+                borderWidth=0,
+                borderColor=PDF_COLOR_ACCENT,
+                borderPadding=(2, 4, 2, 4),
             )
 
             seccion_style = ParagraphStyle(
@@ -8731,15 +9984,21 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
             COLOR_INTERMEDIO = colors.HexColor('#f57f17')     # Naranja/Amarillo
             COLOR_RESISTENTE = colors.HexColor('#c62828')     # Rojo
             COLOR_GERMEN = colors.HexColor('#b71c1c')         # Rojo oscuro
-            COLOR_MICRO_HEADER = colors.HexColor('#1a237e')   # Azul oscuro
+            COLOR_MICRO_HEADER = PDF_COLOR_HEADER_DARK
             COLOR_MICRO_SECCION = colors.HexColor('#455a64')  # Gris azulado
 
-            # Procesar cada prueba
+            # Procesar cada prueba — agrupar por área
+            _area_actual = None          # AreaID del bloque abierto
+            _area_param_data = []        # param_data acumulado para el área
+            _area_elements_pre = []      # elementos previos a la tabla (titulo, header)
+            _area_col_widths = None
+
             for prueba in pruebas:
                 detalle_id = prueba['DetalleID']
                 prueba_id = prueba['PruebaID']
                 nombre_prueba = (prueba.get('NombrePrueba') or '').upper()
                 area_id = prueba.get('AreaID')
+                nombre_area = (prueba.get('NombreArea') or nombre_prueba).upper()
 
                 # ==============================================================
                 # GTT - PRUEBA DE TOLERANCIA A LA GLUCOSA
@@ -8748,6 +10007,15 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                 # (con grafica si el operador lo eligio previamente)
                 # ==============================================================
                 if GTT_DISPONIBLE and es_prueba_gtt(prueba):
+                    # Flush área genérica acumulada antes de renderizar GTT
+                    if _area_param_data and _area_elements_pre:
+                        self._flush_area_pdf(elements, _area_elements_pre, _area_param_data,
+                                             _area_col_widths, layout, KeepTogether, Table, TableStyle,
+                                             Spacer, colors, PDF_COLOR_SECCION_BG, PDF_COLOR_SECCION_TEXT,
+                                             PDF_COLOR_FILA_ALT, PDF_COLOR_HEADER, PDF_HEADER_TEXT)
+                        _area_actual = None
+                        _area_param_data = []
+                        _area_elements_pre = []
                     try:
                         from modulos.gtt_reporte import (
                             TIEMPOS_DISPLAY, _generar_imagen_grafica,
@@ -8777,14 +10045,16 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
 
                         dosis_gtt = str((vals_gtt.get('GTT000') or {}).get('Valor') or '').strip()
 
-                        # Titulo GTT
+                        # Titulo GTT (mismo formato que titulo_prueba_style)
                         gtt_titulo_style = ParagraphStyle(
-                            'TituloGTT_pdf', parent=styles['Heading1'],
-                            fontSize=11, fontName='Helvetica-Bold',
-                            alignment=TA_CENTER, spaceAfter=5, spaceBefore=8,
-                            textColor=colors.white,
-                            backColor=colors.HexColor('#1a237e'),
-                            borderPadding=(6, 6, 6, 6),
+                            'TituloGTT_pdf', parent=styles['Normal'],
+                            fontSize=_ft_titulo, fontName='Helvetica-Bold',
+                            alignment=TA_CENTER, spaceAfter=_sp_after, spaceBefore=_sp_before,
+                            leading=_ft_titulo + 2,
+                            textColor=PDF_COLOR_HEADER_DARK,
+                            borderWidth=0,
+                            borderColor=PDF_COLOR_ACCENT,
+                            borderPadding=(2, 4, 2, 4),
                         )
                         elements.append(Paragraph(
                             "CURVA DE GLUCEMIA - TOLERANCIA A LA GLUCOSA", gtt_titulo_style
@@ -8796,16 +10066,30 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                                 f"<b>Dosis de Carga Glucosada:</b> {dosis_gtt} g",
                                 ParagraphStyle('DosisGTT', parent=styles['Normal'],
                                                fontSize=9, alignment=TA_CENTER,
-                                               textColor=colors.HexColor('#1565c0'),
+                                               textColor=PDF_COLOR_ACCENT,
                                                spaceAfter=6)
                             ))
 
-                        # Tabla resultados GTT (proporcional)
-                        gtt_col_w = layout.gtt_col_widths if layout else [2.1*inch, 1.2*inch, 1.1*inch, 2.3*inch]
-                        gtt_tabla = [['Tiempo', 'Resultado', 'Unidad', 'Valor de Referencia']]
-                        gtt_estilos = []
-                        gtt_row_idx = 1
+                        # Tabla resultados GTT (mismo formato que _flush_area_pdf)
+                        _ft_datos_gtt = layout.font_datos_tabla if layout else 8
+                        _ft_hdr_gtt = layout.font_header_tabla if layout else 9
+                        gtt_col_w = layout.col_widths if layout else [2.5*inch, 1.2*inch, 0.8*inch, 2.0*inch]
 
+                        # Header de columnas (tabla separada, mismo estilo que el reporte general)
+                        gtt_header_data = [['Descripción del Examen', 'Resultado', 'Unidad', 'Valores Referenciales']]
+                        gtt_header_t = Table(gtt_header_data, colWidths=gtt_col_w)
+                        gtt_header_t.setStyle(TableStyle([
+                            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                            ('FONTSIZE', (0, 0), (-1, 0), _ft_hdr_gtt),
+                            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+                            ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
+                            ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+                            ('TOPPADDING', (0, 0), (-1, 0), 6),
+                            ('BACKGROUND', (0, 0), (-1, 0), PDF_COLOR_HEADER),
+                            ('TEXTCOLOR', (0, 0), (-1, 0), PDF_HEADER_TEXT),
+                        ]))
+
+                        gtt_param_data = []
                         for cod_t, etq_t, min_t, ref_t in TIEMPOS_DISPLAY:
                             rp_t = vals_gtt.get(cod_t)
                             if not rp_t:
@@ -8813,50 +10097,31 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                             val_t = str(rp_t.get('Valor') or '').strip()
                             if not val_t:
                                 continue
-                            fuera_t = bool(rp_t.get('FueraDeRango'))
-                            tipo_t = str(rp_t.get('TipoAlerta') or '')
+                            gtt_param_data.append(['   ' + etq_t, val_t, 'mg/dL', ref_t])
 
-                            gtt_tabla.append([etq_t, val_t, 'mg/dL', ref_t])
-
-                            if fuera_t and 'Critico' in tipo_t:
-                                gtt_estilos += [
-                                    ('TEXTCOLOR', (1, gtt_row_idx), (1, gtt_row_idx), colors.HexColor('#c62828')),
-                                    ('FONTNAME', (1, gtt_row_idx), (1, gtt_row_idx), 'Helvetica-Bold'),
-                                    ('BACKGROUND', (0, gtt_row_idx), (-1, gtt_row_idx), colors.HexColor('#fff3e0')),
-                                ]
-                            elif fuera_t and 'Alto' in tipo_t:
-                                gtt_estilos += [
-                                    ('TEXTCOLOR', (1, gtt_row_idx), (1, gtt_row_idx), colors.HexColor('#e65100')),
-                                    ('FONTNAME', (1, gtt_row_idx), (1, gtt_row_idx), 'Helvetica-Bold'),
-                                ]
-                            elif fuera_t:
-                                gtt_estilos += [
-                                    ('TEXTCOLOR', (1, gtt_row_idx), (1, gtt_row_idx), colors.HexColor('#1565c0')),
-                                    ('FONTNAME', (1, gtt_row_idx), (1, gtt_row_idx), 'Helvetica-Bold'),
-                                ]
-                            else:
-                                gtt_estilos += [
-                                    ('TEXTCOLOR', (1, gtt_row_idx), (1, gtt_row_idx), colors.HexColor('#2e7d32')),
-                                ]
-                            gtt_row_idx += 1
-
-                        if len(gtt_tabla) > 1:
-                            gtt_t = Table(gtt_tabla, colWidths=gtt_col_w)
-                            gtt_t.setStyle(TableStyle([
-                                ('BOX', (0, 0), (-1, -1), 1, colors.black),
-                                ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                                ('FONTSIZE', (0, 0), (-1, -1), 9),
-                                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                        if gtt_param_data:
+                            gtt_t = Table(gtt_param_data, colWidths=gtt_col_w)
+                            gtt_style = [
+                                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+                                ('FONTSIZE', (0, 0), (-1, -1), _ft_datos_gtt),
+                                ('ALIGN', (1, 0), (1, -1), 'CENTER'),
+                                ('ALIGN', (2, 0), (2, -1), 'CENTER'),
+                                ('ALIGN', (3, 0), (3, -1), 'LEFT'),
                                 ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1565c0')),
-                                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                                ('TOPPADDING', (0, 0), (-1, -1), 4),
-                                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-                                ('ROWBACKGROUNDS', (0, 1), (-1, -1),
-                                 [colors.white, colors.HexColor('#f5f5f5')]),
-                                ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-                            ] + gtt_estilos))
+                                ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
+                                ('TOPPADDING', (0, 0), (-1, -1), 1),
+                                ('LEFTPADDING', (0, 0), (0, -1), 8),
+                                ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#bdbdbd')),
+                                ('LINEBELOW', (0, -1), (-1, -1), 0.8, colors.HexColor('#37474f')),
+                                ('LINEBELOW', (0, 0), (-1, -2), 0.25, colors.HexColor('#e0e0e0')),
+                            ]
+                            # Filas alternas
+                            for i in range(len(gtt_param_data)):
+                                if i % 2 == 1:
+                                    gtt_style.append(('BACKGROUND', (0, i), (-1, i), PDF_COLOR_FILA_ALT))
+                            gtt_t.setStyle(TableStyle(gtt_style))
+
+                            elements.append(gtt_header_t)
                             elements.append(gtt_t)
                             elements.append(Spacer(1, 0.1*inch))
 
@@ -8885,7 +10150,7 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                                 "Gráfica de la Curva de Glucemia",
                                 ParagraphStyle('GTitGraf', parent=styles['Normal'],
                                                fontSize=9, fontName='Helvetica-Bold',
-                                               textColor=colors.HexColor('#1565c0'),
+                                               textColor=PDF_COLOR_ACCENT,
                                                alignment=TA_CENTER, spaceBefore=6, spaceAfter=3)
                             ))
                             elements.append(RLImage(img_gtt,
@@ -8906,15 +10171,25 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                         ))
                     continue   # No usar el render generico para GTT
 
-                # Obtener parámetros
+                # Obtener parámetros de la prueba
                 parametros = db.query(f"""
-                    SELECT pp.ParametroID, par.NombreParametro, par.UnidadID,
-                           par.Observaciones as ValorRef, par.Seccion
+                    SELECT pp.ParametroID, pp.Secuencia,
+                           par.NombreParametro, par.UnidadID,
+                           par.Observaciones as ValorRefBase, par.Seccion
                     FROM ParametrosPrueba pp
                     INNER JOIN Parametros par ON pp.ParametroID = par.ParametroID
                     WHERE pp.PruebaID = {prueba_id}
                     ORDER BY pp.Secuencia
                 """)
+
+                # Resolver símbolo de unidad por separado (ADODB no soporta alias en LEFT JOIN)
+                for param in (parametros or []):
+                    unidad_sim = ''
+                    if param.get('UnidadID'):
+                        u_row = db.query_one(f"SELECT Simbolo FROM Unidades WHERE UnidadID = {param['UnidadID']}")
+                        if u_row:
+                            unidad_sim = u_row.get('Simbolo') or ''
+                    param['UnidadSimbolo'] = self._formato_superindice(unidad_sim, para_pdf=True)
 
                 if not parametros:
                     continue
@@ -8924,6 +10199,16 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                 # Formato especial con antibiograma coloreado S/I/R
                 # ================================================================
                 if area_id == 10:
+                    # Flush área genérica acumulada antes de renderizar microbiología
+                    if _area_param_data and _area_elements_pre:
+                        self._flush_area_pdf(elements, _area_elements_pre, _area_param_data,
+                                             _area_col_widths, layout, KeepTogether, Table, TableStyle,
+                                             Spacer, colors, PDF_COLOR_SECCION_BG, PDF_COLOR_SECCION_TEXT,
+                                             PDF_COLOR_FILA_ALT, PDF_COLOR_HEADER, PDF_HEADER_TEXT)
+                        _area_actual = None
+                        _area_param_data = []
+                        _area_elements_pre = []
+
                     prueba_elements = []
 
                     # Titulo de la prueba con fondo azul oscuro
@@ -8939,13 +10224,13 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                         backColor=COLOR_MICRO_HEADER,
                         borderPadding=(6, 6, 6, 6),
                     )
-                    prueba_elements.append(Paragraph(nombre_prueba, titulo_micro_style))
+                    prueba_elements.append(Paragraph(nombre_area, titulo_micro_style))
 
                     # Clasificar parametros por seccion
                     secciones_micro = {}
                     for param in parametros:
                         resultado = db.query_one(f"""
-                            SELECT Valor FROM ResultadosParametros
+                            SELECT Valor, ValorReferencia FROM ResultadosParametros
                             WHERE DetalleID = {detalle_id} AND ParametroID = {param['ParametroID']}
                         """)
                         valor = resultado.get('Valor') if resultado else ''
@@ -8955,14 +10240,30 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                         if not valor_str:
                             continue
 
+                        # ValorReferencia: resolución por edad/sexo → ResultadosParametros → Parametros
+                        vref = ''
+                        if VALORES_REF_DISPONIBLE and self.gestor_ref and _pdf_fn:
+                            try:
+                                _ref_esp = self.gestor_ref.resolver_valor_referencia(
+                                    param['ParametroID'], _pdf_sexo, _pdf_fn
+                                )
+                                if _ref_esp:
+                                    vref = _ref_esp
+                            except Exception:
+                                pass
+                        if not vref and resultado:
+                            vref = str(resultado.get('ValorReferencia') or '').strip()
+                        if not vref:
+                            vref = str(param.get('ValorRefBase') or '').strip()
+
                         seccion = param.get('Seccion') or 'General'
                         if seccion not in secciones_micro:
                             secciones_micro[seccion] = []
                         secciones_micro[seccion].append({
                             'nombre': param['NombreParametro'] or '',
                             'valor': valor_str,
-                            'valor_ref': param.get('ValorRef') or '',
-                            'unidad_id': param.get('UnidadID'),
+                            'valor_ref': self._formato_superindice(vref, para_pdf=True),
+                            'unidad_simbolo': param.get('UnidadSimbolo') or '',
                         })
 
                     # Orden preferente de secciones
@@ -9067,8 +10368,8 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                                     ('ALIGN', (1, 0), (1, -1), 'CENTER'),
                                     ('ALIGN', (2, 0), (2, -1), 'CENTER'),
                                     ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                                    ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-                                    ('TOPPADDING', (0, 0), (-1, -1), 3),
+                                    ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
+                                    ('TOPPADDING', (0, 0), (-1, -1), 1),
                                     ('LEFTPADDING', (0, 0), (0, -1), 8),
                                     ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#cccccc')),
                                     ('INNERGRID', (0, 0), (-1, -1), 0.25, colors.HexColor('#cccccc')),
@@ -9101,16 +10402,10 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                                     'CRECIMIENTO', 'DESARROLLO BACTERIANO'
                                 ])
 
-                                unidad_texto = ""
-                                if p.get('unidad_id'):
-                                    unidad = db.query_one(f"SELECT Simbolo FROM Unidades WHERE UnidadID = {p['unidad_id']}")
-                                    if unidad:
-                                        unidad_texto = unidad.get('Simbolo') or ''
-
                                 micro_data.append([
                                     '   ' + p['nombre'],
                                     p['valor'],
-                                    unidad_texto,
+                                    p.get('unidad_simbolo') or '',
                                     p['valor_ref']
                                 ])
                                 micro_estilos_fila.append({
@@ -9127,8 +10422,8 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                                     ('ALIGN', (1, 0), (1, -1), 'CENTER'),
                                     ('ALIGN', (2, 0), (2, -1), 'CENTER'),
                                     ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                                    ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-                                    ('TOPPADDING', (0, 0), (-1, -1), 3),
+                                    ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
+                                    ('TOPPADDING', (0, 0), (-1, -1), 1),
                                     ('LEFTPADDING', (0, 0), (0, -1), 8),
                                     ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#cccccc')),
                                     ('INNERGRID', (0, 0), (-1, -1), 0.25, colors.HexColor('#cccccc')),
@@ -9161,50 +10456,86 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                             prueba_elements.append(KeepTogether(seccion_elements))
 
                     if tiene_contenido_micro:
-                        prueba_elements.append(Spacer(1, 0.15*inch))
+                        prueba_elements.append(Spacer(1, 0.08*inch))
                         elements.extend(prueba_elements)
 
                     continue  # Saltar el renderizado generico
 
                 # ================================================================
                 # AREAS GENERICAS (no microbiologia)
+                # Agrupadas: si varias pruebas son de la misma área,
+                # comparten un solo bloque con un header de área.
                 # ================================================================
 
-                # Elementos de esta prueba (para mantenerlos juntos si es posible)
-                prueba_elements = []
-
-                # Título de la prueba centrado
-                prueba_elements.append(Paragraph(nombre_prueba, titulo_prueba_style))
-
-                # Encabezado de la tabla
-                header_data = [['Descripción del Examen', 'Resultado', 'Unidad', 'Valores Referenciales']]
-
-                # Anchos de columna (proporcionales al formato)
                 col_widths = layout.col_widths if layout else [2.5*inch, 1.2*inch, 0.8*inch, 2.0*inch]
 
-                _ft_hdr = layout.font_header_tabla if layout else 9
-                header_table = Table(header_data, colWidths=col_widths)
-                header_table.setStyle(TableStyle([
-                    ('BOX', (0, 0), (-1, -1), 1, colors.black),
-                    ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.black),
-                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                    ('FONTSIZE', (0, 0), (-1, 0), _ft_hdr),
-                    ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-                    ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
-                    ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
-                    ('TOPPADDING', (0, 0), (-1, 0), 6),
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.white),
-                ]))
-                prueba_elements.append(header_table)
+                # Si cambió el área, emitir el bloque acumulado anterior y empezar uno nuevo
+                if area_id != _area_actual:
+                    # Flush del área anterior si tenía datos
+                    if _area_param_data and _area_elements_pre:
+                        self._flush_area_pdf(elements, _area_elements_pre, _area_param_data,
+                                             _area_col_widths, layout, KeepTogether, Table, TableStyle,
+                                             Spacer, colors, PDF_COLOR_SECCION_BG, PDF_COLOR_SECCION_TEXT,
+                                             PDF_COLOR_FILA_ALT, PDF_COLOR_HEADER, PDF_HEADER_TEXT)
+
+                    # Iniciar nuevo bloque de área
+                    _area_actual = area_id
+                    _area_param_data = []
+                    _area_col_widths = col_widths
+                    _area_elements_pre = []
+                    # Reiniciar secciones emitidas para la nueva área
+                    self._pdf_seccion_area_id = area_id
+                    self._pdf_secciones_emitidas = set()
+                    self._pdf_seccion_actual = None
+
+                    # Título del área centrado
+                    _area_elements_pre.append(Paragraph(nombre_area, titulo_prueba_style))
+
+                    # Encabezado de la tabla
+                    header_data = [['Descripción del Examen', 'Resultado', 'Unidad', 'Valores Referenciales']]
+                    _ft_hdr = layout.font_header_tabla if layout else 9
+                    header_table = Table(header_data, colWidths=col_widths)
+                    header_table.setStyle(TableStyle([
+                        ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#37474f')),
+                        ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#90a4ae')),
+                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                        ('FONTSIZE', (0, 0), (-1, 0), _ft_hdr),
+                        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+                        ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
+                        ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+                        ('TOPPADDING', (0, 0), (-1, 0), 6),
+                        ('BACKGROUND', (0, 0), (-1, 0), PDF_COLOR_HEADER),
+                        ('TEXTCOLOR', (0, 0), (-1, 0), PDF_HEADER_TEXT),
+                    ]))
+                    _area_elements_pre.append(header_table)
+
+                # Marcar inicio de prueba con cantidad de parámetros con valor
+                _n_params_con_valor = 0
+                for _pp in parametros:
+                    _rv = db.query_one(f"""
+                        SELECT Valor FROM ResultadosParametros
+                        WHERE DetalleID = {detalle_id} AND ParametroID = {_pp['ParametroID']}
+                    """)
+                    if _rv and str(_rv.get('Valor') or '').strip():
+                        _n_params_con_valor += 1
+                _area_param_data.append(['__PRUEBA__', nombre_prueba, str(_n_params_con_valor), ''])
 
                 # Datos de parámetros
-                param_data = []
-                seccion_actual = None
+                # NO reiniciar seccion_actual entre pruebas de la misma área,
+                # para evitar duplicar encabezados de sección (ej: "SERIE BLANCA" 2 veces)
+                if not hasattr(self, '_pdf_seccion_actual'):
+                    self._pdf_seccion_actual = None
+                if area_id != getattr(self, '_pdf_seccion_area_id', None):
+                    self._pdf_seccion_actual = None
+                    self._pdf_seccion_area_id = area_id
+                    # Llevar registro de secciones ya emitidas en este bloque de área
+                    self._pdf_secciones_emitidas = set()
+                seccion_actual = self._pdf_seccion_actual
 
                 for param in parametros:
-                    # Obtener resultado primero para verificar si tiene valor
+                    # Obtener resultado + ValorReferencia real almacenado
                     resultado = db.query_one(f"""
-                        SELECT Valor FROM ResultadosParametros
+                        SELECT Valor, ValorReferencia FROM ResultadosParametros
                         WHERE DetalleID = {detalle_id} AND ParametroID = {param['ParametroID']}
                     """)
                     valor = resultado.get('Valor') if resultado else ''
@@ -9212,92 +10543,113 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                         valor = ''
 
                     # IMPORTANTE: Solo incluir parámetros que tengan valor asignado
-                    # Si no hay valor, saltar este parámetro (no aparece en el reporte)
                     valor_str = str(valor).strip()
                     if not valor_str:
                         continue  # No incluir parámetros sin valor en el reporte
 
                     # Verificar si hay cambio de sección
+                    # Solo agregar header si la sección no fue emitida antes en esta área
+                    # Si ya existe, insertar el parámetro bajo la sección existente
                     seccion = param.get('Seccion') or ''
-                    if seccion and seccion != seccion_actual:
+                    seccion_upper = seccion.upper() if seccion else ''
+                    _insertar_pos = None  # None = append al final (normal)
+
+                    # Función auxiliar: encontrar posición de inserción al final de una sección existente
+                    def _buscar_fin_seccion(datos, nombre_seccion):
+                        """Retorna el índice donde insertar un parámetro al final de la sección dada."""
+                        _idx = None
+                        for _si in range(len(datos)):
+                            if (datos[_si][0] == nombre_seccion
+                                    and datos[_si][1] == ''
+                                    and datos[_si][2] == ''
+                                    and datos[_si][3] == ''):
+                                _idx = _si
+                                break
+                        if _idx is None:
+                            return None
+                        # Avanzar hasta el final de los parámetros de esta sección
+                        pos = _idx + 1
+                        while pos < len(datos):
+                            _next = datos[pos]
+                            # Si es otro header de sección o marcador de prueba, detener
+                            if ((_next[1] == '' and _next[2] == '' and _next[3] == '')
+                                    or _next[0] == '__PRUEBA__'):
+                                break
+                            pos += 1
+                        return pos
+
+                    if seccion and seccion_upper in self._pdf_secciones_emitidas:
+                        # La sección ya fue emitida: insertar al final de esa sección
                         seccion_actual = seccion
-                        # Agregar fila de sección
-                        param_data.append([seccion.upper(), '', '', ''])
+                        _insertar_pos = _buscar_fin_seccion(_area_param_data, seccion_upper)
+                    elif seccion and seccion != seccion_actual:
+                        # Sección nueva: agregar header
+                        seccion_actual = seccion
+                        self._pdf_secciones_emitidas.add(seccion_upper)
+                        _area_param_data.append([seccion_upper, '', '', ''])
 
-                    # Obtener unidad
-                    unidad_texto = ""
-                    if param.get('UnidadID'):
-                        unidad = db.query_one(f"SELECT Simbolo FROM Unidades WHERE UnidadID = {param['UnidadID']}")
-                        if unidad:
-                            unidad_texto = unidad.get('Simbolo') or ''
+                    # Valor referencia: prioridad → resolución por edad/sexo
+                    #                   fallback  → ResultadosParametros.ValorReferencia
+                    #                   fallback  → Parametros.Observaciones
+                    valor_ref = ''
+                    # Intentar resolver por edad/sexo primero
+                    if VALORES_REF_DISPONIBLE and self.gestor_ref and _pdf_fn:
+                        try:
+                            _ref_esp = self.gestor_ref.resolver_valor_referencia(
+                                param['ParametroID'], _pdf_sexo, _pdf_fn
+                            )
+                            if _ref_esp:
+                                valor_ref = _ref_esp
+                        except Exception:
+                            pass
+                    # Fallback a lo guardado en ResultadosParametros
+                    if not valor_ref and resultado:
+                        valor_ref = str(resultado.get('ValorReferencia') or '').strip()
+                    # Fallback a Parametros.Observaciones
+                    if not valor_ref:
+                        valor_ref = str(param.get('ValorRefBase') or '').strip()
 
-                    valor_ref = param.get('ValorRef') or ''
-                    nombre_param = '   ' + (param['NombreParametro'] or '')  # Indentación
+                    # Unidad: prioridad → Parametros.UnidadID → Unidades.Simbolo
+                    #         fallback  → extraer del texto de ValorReferencia
+                    unidad_texto = param.get('UnidadSimbolo') or ''
+                    if not unidad_texto and valor_ref:
+                        # Extraer unidad del final del ValorReferencia
+                        # Ej: "( 70 - 110 ) mg/dL" → "mg/dL"
+                        #     "12.0 - 17.0 g/dL"   → "g/dL"
+                        #     "37 - 52 %"           → "%"
+                        import re
+                        _m_unidad = re.search(
+                            r'[\d\)\s]'                       # después de dígito, cierre parén o espacio
+                            r'\s+'                             # espacio(s) separador
+                            r'([a-zA-Zµμ%/\^°×x]'             # inicio de unidad (letra, %, /, etc.)
+                            r'[a-zA-Z0-9µμ%/\^°×³⁶⁹·.\- ]*'  # resto de la unidad
+                            r')$',                             # hasta el final del string
+                            valor_ref
+                        )
+                        if _m_unidad:
+                            unidad_texto = _m_unidad.group(1).strip()
 
-                    param_data.append([
-                        nombre_param,
-                        valor_str,
-                        unidad_texto,
-                        valor_ref
-                    ])
+                    nombre_param = '   ' + (param['NombreParametro'] or '')
 
-                # Filtrar filas de sección que quedaron sin parámetros después
-                # (una sección es una fila donde resultado, unidad y referencia están vacíos)
-                param_data_filtrado = []
-                for i, row in enumerate(param_data):
-                    es_seccion = row[1] == '' and row[2] == '' and row[3] == ''
-                    if es_seccion:
-                        # Verificar si hay al menos un parámetro después de esta sección
-                        tiene_params = False
-                        for j in range(i + 1, len(param_data)):
-                            siguiente = param_data[j]
-                            es_siguiente_seccion = siguiente[1] == '' and siguiente[2] == '' and siguiente[3] == ''
-                            if es_siguiente_seccion:
-                                break  # Llegamos a otra sección sin encontrar parámetros
-                            tiene_params = True
-                            break
-                        if tiene_params:
-                            param_data_filtrado.append(row)
+                    # Convertir notación ^N a formato legible para PDF (sin Unicode extendido)
+                    unidad_texto = self._formato_superindice(unidad_texto, para_pdf=True)
+                    valor_ref = self._formato_superindice(valor_ref, para_pdf=True) if valor_ref else valor_ref
+
+                    _fila_param = [nombre_param, valor_str, unidad_texto, valor_ref]
+                    if _insertar_pos is not None:
+                        _area_param_data.insert(_insertar_pos, _fila_param)
                     else:
-                        param_data_filtrado.append(row)
+                        _area_param_data.append(_fila_param)
 
-                # Solo agregar la prueba si tiene al menos un parámetro con valor
-                # (no solo secciones vacías)
-                tiene_resultados = any(row[1] != '' for row in param_data_filtrado)
+                # Guardar estado de sección para la siguiente prueba del área
+                self._pdf_seccion_actual = seccion_actual
 
-                if param_data_filtrado and tiene_resultados:
-                    param_table = Table(param_data_filtrado, colWidths=col_widths)
-
-                    # Estilo base para datos (fuente proporcional)
-                    _ft_datos = layout.font_datos_tabla if layout else 8
-                    table_style = [
-                        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-                        ('FONTSIZE', (0, 0), (-1, -1), _ft_datos),
-                        ('ALIGN', (1, 0), (1, -1), 'CENTER'),  # Resultado centrado
-                        ('ALIGN', (2, 0), (2, -1), 'CENTER'),  # Unidad centrada
-                        ('ALIGN', (3, 0), (3, -1), 'LEFT'),    # Valores ref a la izquierda
-                        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-                        ('TOPPADDING', (0, 0), (-1, -1), 3),
-                        ('LEFTPADDING', (0, 0), (0, -1), 8),
-                    ]
-
-                    # Marcar filas de sección (negrita, sin indentación)
-                    for i, row in enumerate(param_data_filtrado):
-                        if row[1] == '' and row[2] == '' and row[3] == '':
-                            # Es una fila de sección
-                            table_style.append(('FONTNAME', (0, i), (0, i), 'Helvetica-Bold'))
-                            table_style.append(('FONTSIZE', (0, i), (0, i), _ft_datos))
-
-                    param_table.setStyle(TableStyle(table_style))
-                    prueba_elements.append(param_table)
-
-                    # Agregar espacio después de cada prueba
-                    _sp_prueba = layout.space_after_prueba if layout else 0.15*inch
-                    prueba_elements.append(Spacer(1, _sp_prueba))
-
-                    # Intentar mantener la prueba junta
-                    elements.append(KeepTogether(prueba_elements))
+            # Flush del último bloque de área acumulado
+            if _area_param_data and _area_elements_pre:
+                self._flush_area_pdf(elements, _area_elements_pre, _area_param_data,
+                                     _area_col_widths, layout, KeepTogether, Table, TableStyle,
+                                     Spacer, colors, PDF_COLOR_SECCION_BG, PDF_COLOR_SECCION_TEXT,
+                                     PDF_COLOR_FILA_ALT, PDF_COLOR_HEADER, PDF_HEADER_TEXT)
 
             # Pie de página con fecha de generación
             elements.append(Spacer(1, 0.3*inch))
@@ -9322,9 +10674,164 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
 
         except Exception as e:
             messagebox.showerror("Error", f"Error al generar PDF:\n{str(e)}")
-            import traceback
-            traceback.print_exc()
+            _log.error("Error generando PDF: %s", e, exc_info=True)
             return None
+
+    def _flush_area_pdf(self, elements, pre_elements, param_data, col_widths,
+                        layout, KeepTogether, Table, TableStyle, Spacer,
+                        colors, COLOR_SECCION_BG, COLOR_SECCION_TEXT, COLOR_FILA_ALT,
+                        COLOR_HEADER=None, HEADER_TEXT=None):
+        """Emite un bloque de área completo al PDF (puede contener varias pruebas agrupadas)."""
+        from reportlab.lib.units import inch
+
+        # Contar cuántas pruebas tiene este bloque (marcadores __PRUEBA__)
+        marcas_prueba = [i for i, row in enumerate(param_data) if row[0] == '__PRUEBA__']
+        multiples_pruebas = len(marcas_prueba) > 1
+
+        # Detectar si el bloque usa secciones (ej: Serie Roja, Serie Blanca en Hematología)
+        tiene_secciones = any(
+            row[0] != '__PRUEBA__' and row[1] == '' and row[2] == '' and row[3] == ''
+            for row in param_data
+        )
+
+        # Filtrar: convertir marcadores __PRUEBA__ en sub-headers solo cuando es útil
+        param_data_limpio = []
+        for row in param_data:
+            if row[0] == '__PRUEBA__':
+                # Si el bloque ya tiene secciones (Serie Roja, Serie Blanca, etc.),
+                # omitir sub-headers de prueba para no duplicar agrupadores
+                if tiene_secciones:
+                    continue
+                if multiples_pruebas:
+                    # row[2] contiene la cantidad de parámetros con valor
+                    n_params = int(row[2]) if row[2].isdigit() else 0
+                    # Solo mostrar sub-header si la prueba tiene >1 parámetro
+                    # (si tiene 1 solo, el nombre del parámetro ya identifica la prueba)
+                    if n_params > 1:
+                        param_data_limpio.append([row[1], '', '', ''])
+                # Si es una sola prueba en el área, omitir siempre
+            else:
+                param_data_limpio.append(row)
+
+        # Filtrar filas de sección vacías (sin parámetros después)
+        param_data_filtrado = []
+        for i, row in enumerate(param_data_limpio):
+            es_seccion = row[1] == '' and row[2] == '' and row[3] == ''
+            if es_seccion:
+                tiene_params = False
+                for j in range(i + 1, len(param_data_limpio)):
+                    siguiente = param_data_limpio[j]
+                    es_sig_seccion = siguiente[1] == '' and siguiente[2] == '' and siguiente[3] == ''
+                    if es_sig_seccion:
+                        break
+                    tiene_params = True
+                    break
+                if tiene_params:
+                    param_data_filtrado.append(row)
+            else:
+                param_data_filtrado.append(row)
+
+        # Solo emitir si hay al menos un parámetro con valor
+        tiene_resultados = any(row[1] != '' for row in param_data_filtrado)
+        if not param_data_filtrado or not tiene_resultados:
+            return
+
+        area_elements = list(pre_elements)
+
+        param_table = Table(param_data_filtrado, colWidths=col_widths)
+
+        _ft_datos = layout.font_datos_tabla if layout else 8
+        table_style = [
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), _ft_datos),
+            ('ALIGN', (1, 0), (1, -1), 'CENTER'),
+            ('ALIGN', (2, 0), (2, -1), 'CENTER'),
+            ('ALIGN', (3, 0), (3, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
+            ('TOPPADDING', (0, 0), (-1, -1), 1),
+            ('LEFTPADDING', (0, 0), (0, -1), 8),
+            ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#bdbdbd')),
+            ('LINEBELOW', (0, -1), (-1, -1), 0.8, colors.HexColor('#37474f')),
+        ]
+
+        for i, row in enumerate(param_data_filtrado):
+            if row[1] == '' and row[2] == '' and row[3] == '':
+                # Fila de sección/sub-header: negrita con fondo sutil
+                table_style.append(('FONTNAME', (0, i), (0, i), 'Helvetica-Bold'))
+                table_style.append(('FONTSIZE', (0, i), (0, i), _ft_datos))
+                table_style.append(('BACKGROUND', (0, i), (-1, i), COLOR_SECCION_BG))
+                table_style.append(('TEXTCOLOR', (0, i), (0, i), COLOR_SECCION_TEXT))
+            elif i % 2 == 1:
+                table_style.append(('BACKGROUND', (0, i), (-1, i), COLOR_FILA_ALT))
+
+        table_style.append(('LINEBELOW', (0, 0), (-1, -2), 0.25, colors.HexColor('#e0e0e0')))
+
+        param_table.setStyle(TableStyle(table_style))
+
+        _sp = layout.space_after_prueba if layout else 0.15 * inch
+
+        # Si el bloque es pequeño (<=12 filas), mantenerlo junto en una página
+        if len(param_data_filtrado) <= 12:
+            area_elements.append(param_table)
+            area_elements.append(Spacer(1, _sp))
+            elements.append(KeepTogether(area_elements))
+        else:
+            # Bloque grande: permitir que la tabla se parta entre páginas.
+            # Incluir fila de encabezado dentro de la tabla de datos para
+            # que se repita en cada página con repeatRows.
+            header_row = ['Descripción del Examen', 'Resultado', 'Unidad', 'Valores Referenciales']
+            full_data = [header_row] + param_data_filtrado
+            full_table = Table(full_data, colWidths=col_widths)
+
+            # Re-aplicar estilos desplazando 1 fila (la 0 es el header)
+            _ft_hdr = layout.font_header_tabla if layout else 9
+            full_style = [
+                # Header de columnas (fila 0)
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), _ft_hdr),
+                ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+                ('TOPPADDING', (0, 0), (-1, 0), 6),
+                ('BACKGROUND', (0, 0), (-1, 0), COLOR_HEADER if COLOR_HEADER else colors.HexColor('#1565c0')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), HEADER_TEXT if HEADER_TEXT else colors.white),
+                # Datos (filas 1+)
+                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 1), (-1, -1), layout.font_datos_tabla if layout else 8),
+                ('ALIGN', (1, 1), (1, -1), 'CENTER'),
+                ('ALIGN', (2, 1), (2, -1), 'CENTER'),
+                ('ALIGN', (3, 1), (3, -1), 'LEFT'),
+                ('VALIGN', (0, 1), (-1, -1), 'MIDDLE'),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 1),
+                ('TOPPADDING', (0, 1), (-1, -1), 1),
+                ('LEFTPADDING', (0, 1), (0, -1), 8),
+                ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#bdbdbd')),
+                ('LINEBELOW', (0, -1), (-1, -1), 0.8, colors.HexColor('#37474f')),
+                ('LINEBELOW', (0, 0), (-1, -2), 0.25, colors.HexColor('#e0e0e0')),
+            ]
+
+            # Estilos de sección y filas alternas (offset +1 por header)
+            _ft_datos = layout.font_datos_tabla if layout else 8
+            for i, row in enumerate(param_data_filtrado):
+                ri = i + 1  # índice real en full_data
+                if row[1] == '' and row[2] == '' and row[3] == '':
+                    full_style.append(('FONTNAME', (0, ri), (0, ri), 'Helvetica-Bold'))
+                    full_style.append(('FONTSIZE', (0, ri), (0, ri), _ft_datos))
+                    full_style.append(('BACKGROUND', (0, ri), (-1, ri), COLOR_SECCION_BG))
+                    full_style.append(('TEXTCOLOR', (0, ri), (0, ri), COLOR_SECCION_TEXT))
+                elif ri % 2 == 0:
+                    full_style.append(('BACKGROUND', (0, ri), (-1, ri), COLOR_FILA_ALT))
+
+            full_table.setStyle(TableStyle(full_style))
+            full_table.repeatRows = 1  # Repetir header en cada página
+
+            # Título del área junto con las primeras filas (no queda huérfano)
+            # pre_elements tiene: título del área (sin header de tabla, que ahora va en full_table)
+            titulo_elements = [pre_elements[0]]  # Solo el Paragraph del título
+            elements.append(KeepTogether(titulo_elements + [Spacer(1, 2)]))
+            elements.append(full_table)
+            elements.append(Spacer(1, _sp))
 
     def _imprimir_resultado_directo(self):
         """Genera el PDF de resultados y lo envía a la impresora configurada."""
@@ -9965,7 +11472,7 @@ ANgesLAB - Laboratorio Clínico""")
                 ))
                 self.pac_hist_map[iid] = r['PacienteID']
         except Exception as e:
-            print(f"Error cargando pacientes historial: {e}")
+            _log.error("Error cargando pacientes historial: %s", e)
 
     def _buscar_pacientes_historial(self):
         """Filtra pacientes por texto de busqueda."""
@@ -10000,14 +11507,14 @@ ANgesLAB - Laboratorio Clínico""")
                             (hoy.month, hoy.day) < (fn.month, fn.day)
                         )
                         edad = f" | {edad_val} años"
-                    except:
+                    except Exception:
                         pass
                 sexo = f" | {pac.get('Sexo', '')}" if pac.get('Sexo') else ""
                 doc = f" | {pac.get('NumeroDocumento', '')}" if pac.get('NumeroDocumento') else ""
                 self.lbl_hist_paciente.config(
                     text=f"{pac.get('Nombre', 'N/A')}{doc}{edad}{sexo}"
                 )
-        except:
+        except Exception:
             pass
 
         self._cambiar_tab_historial('resumen')
@@ -10091,14 +11598,14 @@ ANgesLAB - Laboratorio Clínico""")
         if datos.get('primera_visita'):
             try:
                 primera_visita_str = datos['primera_visita'].strftime('%d/%m/%Y')
-            except:
+            except Exception:
                 primera_visita_str = str(datos['primera_visita'])[:10]
 
         ultima_visita_str = "Sin visitas"
         if datos.get('ultima_visita'):
             try:
                 ultima_visita_str = datos['ultima_visita'].strftime('%d/%m/%Y')
-            except:
+            except Exception:
                 ultima_visita_str = str(datos['ultima_visita'])[:10]
 
         stats = [
@@ -10201,7 +11708,7 @@ ANgesLAB - Laboratorio Clínico""")
                     if al.get('fecha'):
                         try:
                             fecha_ah = al['fecha'].strftime('%d/%m/%Y')
-                        except:
+                        except Exception:
                             fecha_ah = str(al['fecha'])[:10]
                     tk.Label(ar, text=fecha_ah, font=('Segoe UI', 8),
                              bg=bg_ah, width=11, anchor='w').pack(side='left', padx=2, pady=2)
@@ -10558,7 +12065,7 @@ ANgesLAB - Laboratorio Clínico""")
             if sol.get('FechaSolicitud'):
                 try:
                     fecha_str = sol['FechaSolicitud'].strftime('%d/%m/%Y')
-                except:
+                except Exception:
                     fecha_str = str(sol['FechaSolicitud'])[:10]
 
             estado = sol.get('EstadoSolicitud', 'Pendiente')
@@ -10753,7 +12260,7 @@ ANgesLAB - Laboratorio Clínico""")
                 return '---'
             try:
                 return f.strftime('%d/%m/%Y')
-            except:
+            except Exception:
                 return str(f)[:10]
 
         # Card de contexto de fechas
@@ -11109,7 +12616,7 @@ ANgesLAB - Laboratorio Clínico""")
                 if val.get('fecha'):
                     try:
                         fecha_str = val['fecha'].strftime('%d/%m/%Y')
-                    except:
+                    except Exception:
                         fecha_str = str(val['fecha'])[:10]
 
                 tk.Label(vr, text=fecha_str, font=('Segoe UI', 9),
@@ -11298,7 +12805,7 @@ ANgesLAB - Laboratorio Clínico""")
                 combo.current(0)
             setattr(self, map_attr, mapa)
         except Exception as e:
-            print(f"[graficas] Error cargando pruebas: {e}")
+            _log.error("Error cargando pruebas graficas: %s", e)
 
     def _ejecutar_graficas_historial(self):
         """Genera y muestra las gráficas matplotlib para la prueba seleccionada."""
@@ -12000,7 +13507,7 @@ ANgesLAB - Laboratorio Clínico""")
                                 historia.append(rl_img)
                                 historia.append(Spacer(1, 0.3*cm))
             except Exception as e:
-                print(f"[PDF IA] Error insertando gráfica: {e}")
+                _log.error("Error insertando grafica IA en PDF: %s", e)
 
         # Disclaimer
         from modulos.ia_interpretacion import DISCLAIMER as IA_DISCLAIMER
@@ -12250,7 +13757,7 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
         filename = filedialog.asksaveasfilename(
             defaultextension=".csv",
             filetypes=[("CSV files", "*.csv")],
-            initialfilename=f"{nombre}_{datetime.now().strftime('%Y%m%d')}.csv"
+            initialfile=f"{nombre}_{datetime.now().strftime('%Y%m%d')}.csv"
         )
 
         if filename:
@@ -12369,7 +13876,7 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
         param_frame = tk.Frame(right_panel, bg='white')
         param_frame.pack(fill='both', expand=True, padx=15, pady=10)
 
-        columns_param = ('Sec', 'ID', 'Código', 'Nombre', 'Tipo', 'Referencia', 'Sección')
+        columns_param = ('Sec', 'ID', 'Código', 'Nombre', 'Tipo', 'Unidad', 'Referencia', 'Sección')
         self.tree_params = ttk.Treeview(param_frame, columns=columns_param, show='headings')
 
         self.tree_params.heading('Sec', text='#')
@@ -12377,6 +13884,7 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
         self.tree_params.heading('Código', text='Código')
         self.tree_params.heading('Nombre', text='Nombre')
         self.tree_params.heading('Tipo', text='Tipo')
+        self.tree_params.heading('Unidad', text='Unidad')
         self.tree_params.heading('Referencia', text='Valor Referencia')
         self.tree_params.heading('Sección', text='Sección')
 
@@ -12385,6 +13893,7 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
         self.tree_params.column('Código', width=100)
         self.tree_params.column('Nombre', width=180)
         self.tree_params.column('Tipo', width=80)
+        self.tree_params.column('Unidad', width=80)
         self.tree_params.column('Referencia', width=150)
         self.tree_params.column('Sección', width=120)
 
@@ -12443,7 +13952,7 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
         # Cargar parámetros
         parametros = db.query(f"""
             SELECT pp.Secuencia, pp.ParametroID, par.CodigoParametro, par.NombreParametro,
-                   par.TipoResultado, par.Observaciones, par.Seccion
+                   par.TipoResultado, par.Observaciones, par.Seccion, par.UnidadID
             FROM ParametrosPrueba pp
             INNER JOIN Parametros par ON pp.ParametroID = par.ParametroID
             WHERE pp.PruebaID = {self.prueba_id_seleccionada}
@@ -12451,13 +13960,22 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
         """)
 
         for p in parametros:
+            # Resolver símbolo de unidad
+            unidad_simbolo = ''
+            if p.get('UnidadID'):
+                u_row = db.query_one(f"SELECT Simbolo FROM Unidades WHERE UnidadID = {p['UnidadID']}")
+                if u_row:
+                    unidad_simbolo = u_row.get('Simbolo') or ''
+            unidad_simbolo = self._formato_superindice(unidad_simbolo)
+            ref_display = self._formato_superindice(p['Observaciones'] or '')
             self.tree_params.insert('', 'end', values=(
                 p['Secuencia'] or '',
                 p['ParametroID'],
                 p['CodigoParametro'] or '',
                 p['NombreParametro'] or '',
                 p['TipoResultado'] or '',
-                p['Observaciones'] or '',
+                unidad_simbolo,
+                ref_display,
                 p['Seccion'] or ''
             ))
 
@@ -12538,11 +14056,36 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
             entry.pack(fill='x', ipady=5)
             entries[key] = entry
 
+        # Unidad de medida
+        tk.Label(frame, text="Unidad de Medida:", font=('Segoe UI', 10), bg='white', anchor='w').pack(fill='x', pady=(10, 2))
+        # Cargar unidades disponibles de la BD
+        _unidades_db = db.query("SELECT UnidadID, Simbolo FROM Unidades ORDER BY Simbolo")
+        _unidades_lista = ['(Ninguna)'] + [u['Simbolo'] for u in (_unidades_db or [])]
+        _unidades_map = {u['Simbolo']: u['UnidadID'] for u in (_unidades_db or [])}
+        _unidades_map_inv = {u['UnidadID']: u['Simbolo'] for u in (_unidades_db or [])}
+        entries['unidad'] = ttk.Combobox(frame, font=('Segoe UI', 10), values=_unidades_lista, state='readonly')
+        entries['unidad'].set('(Ninguna)')
+        entries['unidad'].pack(fill='x', ipady=5)
+
         # Opciones para tipo TEXTO
         tk.Label(frame, text="Opciones (para tipo TEXTO, separar con comas):",
                 font=('Segoe UI', 10), bg='white', anchor='w').pack(fill='x', pady=(10, 2))
         entries['opciones'] = tk.Entry(frame, font=('Segoe UI', 10))
         entries['opciones'].pack(fill='x', ipady=5)
+
+        # Boton de valores de referencia por edad/sexo (solo para parametros existentes)
+        if param_id and VALORES_REF_DISPONIBLE and self.gestor_ref:
+            tiene_var = self.gestor_ref.tiene_variantes(param_id)
+            indicador = " ✓" if tiene_var else ""
+            btn_ref_edadsexo = tk.Button(
+                frame, text=f"📊 Valores por Edad/Sexo{indicador}",
+                font=('Segoe UI', 10, 'bold'),
+                bg='#1565c0', fg='white', relief='flat', cursor='hand2',
+                command=lambda: self._abrir_editor_valores_ref(param_id, win)
+            )
+            btn_ref_edadsexo.pack(fill='x', pady=(15, 0), ipady=6)
+            tk.Label(frame, text="Configure valores de referencia diferenciados por RN, pediatrico, adulto M/F, etc.",
+                    font=('Segoe UI', 8), bg='white', fg='gray').pack(anchor='w')
 
         # Cargar datos si es edición
         if param_id:
@@ -12557,6 +14100,10 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
                 entries['seccion'].insert(0, param.get('Seccion') or '')
                 entries['formula'].insert(0, param.get('FormulaCalculo') or '')
 
+                # Cargar unidad actual
+                if param.get('UnidadID') and param['UnidadID'] in _unidades_map_inv:
+                    entries['unidad'].set(_unidades_map_inv[param['UnidadID']])
+
                 # Cargar opciones
                 opciones = db.query(f"SELECT Valor FROM OpcionesParametro WHERE ParametroID={param_id} ORDER BY Orden")
                 if opciones:
@@ -12570,6 +14117,8 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
             seccion = entries['seccion'].get().strip()
             formula = entries['formula'].get().strip()
             opciones_str = entries['opciones'].get().strip()
+            unidad_sel = entries['unidad'].get()
+            unidad_id = _unidades_map.get(unidad_sel)  # None si es '(Ninguna)'
 
             if not codigo or not nombre:
                 messagebox.showwarning("Aviso", "Código y Nombre son obligatorios")
@@ -12584,7 +14133,8 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
                         'TipoResultado': tipo,
                         'Observaciones': referencia,
                         'Seccion': seccion,
-                        'FormulaCalculo': formula if formula else None
+                        'FormulaCalculo': formula if formula else None,
+                        'UnidadID': unidad_id
                     }, f"ParametroID={param_id}")
                     new_param_id = param_id
                 else:
@@ -12596,6 +14146,7 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
                         'Observaciones': referencia,
                         'Seccion': seccion,
                         'FormulaCalculo': formula if formula else None,
+                        'UnidadID': unidad_id,
                         'Activo': True
                     })
                     # Obtener ID del nuevo parámetro
@@ -12667,6 +14218,217 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
         btn_guardar.bind('<Leave>', on_leave_guardar)
         btn_cancelar.bind('<Enter>', on_enter_cancelar)
         btn_cancelar.bind('<Leave>', on_leave_cancelar)
+
+    def _abrir_editor_valores_ref(self, parametro_id, parent_win=None):
+        """Abre editor de valores de referencia por edad/sexo para un parametro."""
+        if not self.gestor_ref:
+            return
+
+        from modulos.valores_referencia import PLANTILLAS_GRUPOS
+
+        # Obtener nombre del parametro
+        param_info = db.query_one(
+            f"SELECT NombreParametro, Observaciones FROM Parametros "
+            f"WHERE ParametroID = {parametro_id}")
+        nombre_param = param_info.get('NombreParametro', '') if param_info else ''
+        ref_generico = param_info.get('Observaciones', '') if param_info else ''
+
+        win = tk.Toplevel(parent_win or self.root)
+        win.title(f"Valores de Referencia por Edad/Sexo - {nombre_param}")
+        win.grab_set()
+        win.focus_set()
+        win.configure(bg='white')
+        hacer_ventana_responsiva(win, 750, 550, min_ancho=650, min_alto=450)
+
+        # Header
+        header_f = tk.Frame(win, bg='#1565c0', height=55)
+        header_f.pack(fill='x')
+        header_f.pack_propagate(False)
+        tk.Label(header_f, text=f"📊 Valores por Edad/Sexo: {nombre_param}",
+                font=('Segoe UI', 13, 'bold'), bg='#1565c0', fg='white').pack(
+                    side='left', padx=15, pady=10)
+
+        # Info del valor generico
+        info_f = tk.Frame(win, bg='#e3f2fd')
+        info_f.pack(fill='x', padx=10, pady=(10, 5))
+        tk.Label(info_f, text=f"Valor generico (por defecto): {ref_generico or '(vacio)'}",
+                font=('Segoe UI', 9), bg='#e3f2fd', fg='#1565c0').pack(
+                    anchor='w', padx=10, pady=5)
+
+        # Tabla de variantes
+        tree_frame = tk.Frame(win, bg='white')
+        tree_frame.pack(fill='both', expand=True, padx=10, pady=5)
+
+        cols = ('ID', 'Grupo', 'Sexo', 'Edad', 'Valor Referencia')
+        tree = ttk.Treeview(tree_frame, columns=cols, show='headings', height=10)
+        tree.heading('ID', text='ID')
+        tree.heading('Grupo', text='Grupo Etario')
+        tree.heading('Sexo', text='Sexo')
+        tree.heading('Edad', text='Rango Edad')
+        tree.heading('Valor Referencia', text='Valor de Referencia')
+
+        tree.column('ID', width=40, anchor='center')
+        tree.column('Grupo', width=150, anchor='w')
+        tree.column('Sexo', width=60, anchor='center')
+        tree.column('Edad', width=140, anchor='center')
+        tree.column('Valor Referencia', width=250, anchor='w')
+
+        scroll = ttk.Scrollbar(tree_frame, orient='vertical', command=tree.yview)
+        tree.configure(yscrollcommand=scroll.set)
+        tree.pack(side='left', fill='both', expand=True)
+        scroll.pack(side='right', fill='y')
+
+        def _dias_a_texto(dias):
+            if dias is None:
+                return '?'
+            if dias <= 28:
+                return f"{dias}d"
+            elif dias <= 730:
+                return f"{dias // 30}m"
+            else:
+                return f"{dias // 365}a"
+
+        def cargar_variantes():
+            for item in tree.get_children():
+                tree.delete(item)
+            variantes = self.gestor_ref.obtener_variantes(parametro_id)
+            for v in variantes:
+                if not v.get('Activo', True):
+                    continue
+                edad_txt = f"{_dias_a_texto(v.get('EdadMinDias'))} - {_dias_a_texto(v.get('EdadMaxDias'))}"
+                sexo_txt = v.get('Sexo') or 'Ambos'
+                tree.insert('', 'end', values=(
+                    v.get('RefID', ''),
+                    v.get('GrupoEtario', ''),
+                    sexo_txt,
+                    edad_txt,
+                    v.get('ValorReferencia', '')
+                ))
+
+        cargar_variantes()
+
+        # Botones
+        btn_frame = tk.Frame(win, bg='white')
+        btn_frame.pack(fill='x', padx=10, pady=10)
+
+        def agregar_variante():
+            add_win = tk.Toplevel(win)
+            add_win.title("Agregar Variante")
+            add_win.grab_set()
+            add_win.configure(bg='white')
+            hacer_ventana_responsiva(add_win, 450, 250, min_ancho=400, min_alto=200)
+
+            tk.Label(add_win, text="Grupo Etario:", font=('Segoe UI', 10, 'bold'),
+                    bg='white').pack(anchor='w', padx=15, pady=(15, 3))
+
+            nombres_grupos = [desc for _, _, _, _, desc in PLANTILLAS_GRUPOS]
+            combo_grupo = ttk.Combobox(add_win, values=nombres_grupos,
+                                        state='readonly', font=('Segoe UI', 10))
+            combo_grupo.pack(fill='x', padx=15, ipady=4)
+            combo_grupo.current(0)
+
+            tk.Label(add_win, text="Valor de Referencia:", font=('Segoe UI', 10, 'bold'),
+                    bg='white').pack(anchor='w', padx=15, pady=(10, 3))
+            tk.Label(add_win, text='Ej: "13.0 - 17.0 g/dL" o "< 200 mg/dL"',
+                    font=('Segoe UI', 8), bg='white', fg='gray').pack(anchor='w', padx=15)
+            entry_valor = tk.Entry(add_win, font=('Segoe UI', 10))
+            entry_valor.pack(fill='x', padx=15, ipady=4)
+            entry_valor.insert(0, ref_generico)
+
+            def confirmar():
+                idx = combo_grupo.current()
+                if idx < 0:
+                    return
+                valor = entry_valor.get().strip()
+                if not valor:
+                    messagebox.showwarning("Aviso", "Ingrese un valor de referencia",
+                                          parent=add_win)
+                    return
+                grupo_key, e_min, e_max, g_sexo, _ = PLANTILLAS_GRUPOS[idx]
+                self.gestor_ref.guardar_variante(
+                    parametro_id, grupo_key, e_min, e_max, g_sexo, valor)
+                add_win.destroy()
+                cargar_variantes()
+
+            tk.Button(add_win, text="💾 Guardar", font=('Segoe UI', 10, 'bold'),
+                     bg='#27ae60', fg='white', relief='flat', padx=15, pady=6,
+                     command=confirmar).pack(side='right', padx=15, pady=15)
+            tk.Button(add_win, text="Cancelar", font=('Segoe UI', 10),
+                     bg='#95a5a6', fg='white', relief='flat', padx=15, pady=6,
+                     command=add_win.destroy).pack(side='right', pady=15)
+
+        def editar_variante():
+            sel = tree.selection()
+            if not sel:
+                messagebox.showwarning("Aviso", "Seleccione una variante", parent=win)
+                return
+            vals = tree.item(sel[0], 'values')
+            ref_id = int(vals[0])
+            valor_actual = vals[4]
+
+            from tkinter import simpledialog as _sd
+            nuevo_valor = _sd.askstring(
+                "Editar Valor de Referencia",
+                f"Grupo: {vals[1]} | Sexo: {vals[2]}\n\nNuevo valor de referencia:",
+                initialvalue=valor_actual, parent=win)
+            if nuevo_valor and nuevo_valor.strip():
+                self.gestor_ref.actualizar_variante(ref_id, nuevo_valor.strip())
+                cargar_variantes()
+
+        def eliminar_variante():
+            sel = tree.selection()
+            if not sel:
+                messagebox.showwarning("Aviso", "Seleccione una variante", parent=win)
+                return
+            vals = tree.item(sel[0], 'values')
+            ref_id = int(vals[0])
+            if messagebox.askyesno("Confirmar", f"Eliminar variante '{vals[1]} - {vals[2]}'?",
+                                   parent=win):
+                self.gestor_ref.eliminar_variante(ref_id)
+                cargar_variantes()
+
+        tk.Button(btn_frame, text="➕ Agregar", font=('Segoe UI', 10, 'bold'),
+                 bg='#27ae60', fg='white', relief='flat', padx=12, pady=5,
+                 cursor='hand2', command=agregar_variante).pack(side='left', padx=5)
+        tk.Button(btn_frame, text="✏️ Editar", font=('Segoe UI', 10),
+                 bg='#f39c12', fg='white', relief='flat', padx=12, pady=5,
+                 cursor='hand2', command=editar_variante).pack(side='left', padx=5)
+        tk.Button(btn_frame, text="🗑️ Eliminar", font=('Segoe UI', 10),
+                 bg='#e74c3c', fg='white', relief='flat', padx=12, pady=5,
+                 cursor='hand2', command=eliminar_variante).pack(side='left', padx=5)
+        tk.Button(btn_frame, text="Cerrar", font=('Segoe UI', 10),
+                 bg='#95a5a6', fg='white', relief='flat', padx=12, pady=5,
+                 command=win.destroy).pack(side='right', padx=5)
+
+        # Botón de carga masiva de valores predeterminados
+        def _cargar_predeterminados_masivo():
+            if not messagebox.askyesno(
+                "Cargar Valores Predeterminados",
+                "Esto cargará valores de referencia por edad/sexo para los parámetros "
+                "estándar (Hematología, Química, Coagulación, Tiroides) basados en "
+                "bibliografía clínica.\n\n"
+                "Solo se cargarán para parámetros que NO tengan variantes configuradas.\n\n"
+                "¿Continuar?", parent=win):
+                return
+            try:
+                from modulos.valores_referencia import cargar_valores_predeterminados
+                insertados, omitidos, no_encontrados = cargar_valores_predeterminados(db)
+                messagebox.showinfo(
+                    "Carga Completa",
+                    f"Parámetros configurados: {insertados}\n"
+                    f"Ya tenían variantes (omitidos): {omitidos}\n"
+                    f"No encontrados en BD: {no_encontrados}",
+                    parent=win)
+                cargar_variantes()
+            except Exception as e:
+                messagebox.showerror("Error", f"Error al cargar: {e}", parent=win)
+
+        btn_frame2 = tk.Frame(win, bg='white')
+        btn_frame2.pack(fill='x', padx=10, pady=(0, 10))
+        tk.Button(btn_frame2, text="📥 Cargar Valores Predeterminados (Hematología, Química, etc.)",
+                 font=('Segoe UI', 9), bg='#5c6bc0', fg='white', relief='flat',
+                 padx=10, pady=4, cursor='hand2',
+                 command=_cargar_predeterminados_masivo).pack(side='left', padx=5)
 
     def agregar_parametro_existente(self):
         """Permite agregar un parámetro existente a la prueba"""
@@ -13582,7 +15344,7 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
                 if pac.get('FechaNacimiento'):
                     try:
                         entries['fecha_nac'].insert(0, pac['FechaNacimiento'].strftime('%d/%m/%Y'))
-                    except:
+                    except Exception:
                         pass
                 entries['propietario'].insert(0, pac.get('NombrePropietario') or '')
                 entries['telefono'].insert(0, pac.get('TelefonoPropietario') or '')
@@ -14030,7 +15792,7 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
                 ))
                 self.sol_res_map_vet[iid] = s['SolicitudVetID']
         except Exception as e:
-            print(f"Error cargando solicitudes vet: {e}")
+            _log.error("Error cargando solicitudes vet: %s", e)
 
     def buscar_solicitudes_resultado_vet(self):
         filtro = self.entry_buscar_res_vet.get().strip()
@@ -14053,7 +15815,7 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
                 ))
                 self.sol_res_map_vet[iid] = s.get('SolicitudVetID') or s.get('SolicitudVetID')
         except Exception as e:
-            print(f"Error buscando: {e}")
+            _log.error("Error buscando: %s", e)
 
     def cargar_pruebas_resultado_vet(self, event=None):
         """Carga las pruebas de una solicitud vet con parametros y valores de referencia por especie"""
@@ -14085,7 +15847,7 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
                     hoy = datetime.now()
                     anios = hoy.year - fn.year - ((hoy.month, hoy.day) < (fn.month, fn.day))
                     edad = f" | {anios} años"
-                except:
+                except Exception:
                     pass
 
             sexo = sol.get('Sexo') or ''
@@ -14288,7 +16050,7 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
             if val and not p.get('es_calculado'):
                 try:
                     valores[p['nombre']] = float(val)
-                except:
+                except Exception:
                     pass
 
         hematies = valores.get('Hematies')
@@ -14345,7 +16107,7 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
                 self.gestor_vet.db.update('DetalleSolicitudesVet', {
                     'Estado': 'Capturado'
                 }, f"DetalleVetID = {detalle_id}")
-            except:
+            except Exception:
                 pass
 
             # Ejecutar calculos automaticos
@@ -14382,7 +16144,7 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
                         total += 1
             try:
                 self.gestor_vet.db.update('DetalleSolicitudesVet', {'Estado': 'Capturado'}, f"DetalleVetID = {detalle_id}")
-            except:
+            except Exception:
                 pass
             self.gestor_vet.ejecutar_calculos_hematologia(detalle_id)
 
@@ -14402,7 +16164,7 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
         try:
             self.gestor_vet.db.update('SolicitudesVet', {'EstadoSolicitud': 'Completado'},
                                       f"SolicitudVetID = {self.sol_id_resultado_vet}")
-        except:
+        except Exception:
             pass
 
         messagebox.showinfo("Éxito", "Todos los resultados validados")
@@ -14491,7 +16253,7 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
                     hoy = datetime.now()
                     edad = hoy.year - fn.year - ((hoy.month, hoy.day) < (fn.month, fn.day))
                     edad_texto = f"{edad} Años"
-                except:
+                except Exception:
                     pass
 
             nombre_lab = config_lab.get('NombreLaboratorio', 'LABORATORIO CLÍNICO') if config_lab else 'LABORATORIO CLÍNICO'
@@ -14510,7 +16272,7 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
                     try:
                         canvas_pdf.drawImage(ruta_logo, left_margin, y_top - 1.1*inch, width=1.2*inch, height=1.0*inch,
                                            preserveAspectRatio=True, mask='auto')
-                    except:
+                    except Exception:
                         pass
 
                 # Info lab
@@ -14758,7 +16520,7 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
 
                     try:
                         elements.append(KeepTogether(prueba_elements))
-                    except:
+                    except Exception:
                         elements.extend(prueba_elements)
 
                     elements.append(Spacer(1, 0.2*inch))
@@ -14773,7 +16535,7 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
                 # Abrir PDF directamente
                 try:
                     os.startfile(filename)
-                except:
+                except Exception:
                     webbrowser.open(filename)
 
             messagebox.showinfo("Éxito", f"PDF generado:\n{filename}")
@@ -14799,8 +16561,7 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
             )
         except Exception as e:
             messagebox.showerror("Error", f"Error al abrir configuración:\n{e}")
-            import traceback
-            traceback.print_exc()
+            _log.error("Error abriendo configuracion: %s", e, exc_info=True)
 
     # ── Red LAN ─────────────────────────────────────────────────────────────
 
@@ -14880,7 +16641,7 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
                 bg='white').pack(anchor='w', pady=(0, 15))
 
         info = [
-            ("Versión:", "1.0.0"),
+            ("Versión:", "2.0.0"),
             ("Base de datos:", "ANgesLAB.accdb"),
             ("Usuario:", self.user.get('NombreCompleto', 'N/A')),
             ("Rol:", self.user.get('NombreUsuario', 'N/A')),
@@ -15020,7 +16781,7 @@ def _asegurar_usuario_admin():
             for i in range(rs.Fields.Count):
                 campos.append(rs.Fields[i].Name)
             return campos
-        except:
+        except Exception:
             return []
 
     def _crear_columna_segura(nombre_col, tipo_col):
@@ -15032,7 +16793,7 @@ def _asegurar_usuario_admin():
         # Cerrar conexion actual para liberar locks en la tabla
         try:
             db.close()
-        except:
+        except Exception:
             pass
         time.sleep(0.5)
 
@@ -15056,17 +16817,17 @@ def _asegurar_usuario_admin():
                         conn_temp.Execute(f"ALTER TABLE [Usuarios] ADD COLUMN [{nombre_col}] MEMO")
                         exito = True
                     except Exception as e3:
-                        print(f"Error creando columna {nombre_col}: {e3}")
+                        _log.error("Error creando columna {nombre_col}: %s", e3)
             conn_temp.Close()
         except Exception as ec:
-            print(f"Error en conexion temporal para {nombre_col}: {ec}")
+            _log.error("Error en conexion temporal para {nombre_col}: %s", ec)
 
         time.sleep(0.5)
         # Reconectar la conexion principal
         try:
             db.conn = None  # Forzar reconexion
             db.connect()
-        except:
+        except Exception:
             pass
 
         return exito
@@ -15078,7 +16839,7 @@ def _asegurar_usuario_admin():
             if 'Nivel' not in campos:
                 _crear_columna_segura('Nivel', "TEXT(20)")
             db.execute("UPDATE [Usuarios] SET [Nivel] = 'Administrador' WHERE [Nivel] IS NULL")
-        except:
+        except Exception:
             pass
 
         # Paso 2: Asegurar columnas de hash de contrasena
@@ -15091,10 +16852,6 @@ def _asegurar_usuario_admin():
         tiene_salt = 'PasswordSalt' in campos
 
         if not tiene_hash or not tiene_salt:
-            print(f"ADVERTENCIA: No se pudieron crear columnas de seguridad.")
-            print(f"  PasswordHash: {'OK' if tiene_hash else 'FALTA'}")
-            print(f"  PasswordSalt: {'OK' if tiene_salt else 'FALTA'}")
-            print(f"  El login funcionara con contrasenas en texto plano.")
             # Aun asi, asegurar que exista al menos un admin
             total = db.count('Usuarios')
             if total == 0:
@@ -15106,7 +16863,7 @@ def _asegurar_usuario_admin():
                         'Nivel': 'Administrador',
                         'Activo': True
                     })
-                except:
+                except Exception:
                     pass
             return
 
@@ -15170,8 +16927,8 @@ def _asegurar_usuario_admin():
                             f"[Nivel]='Desarrollador', [Activo]=True "
                             f"WHERE [UsuarioID]={dev_existe['UsuarioID']}"
                         )
-            except Exception as ed:
-                print(f"Advertencia creando desarrollador: {ed}")
+            except Exception:
+                pass
 
             # Migrar contrasenas en texto plano a hash
             try:
@@ -15188,25 +16945,25 @@ def _asegurar_usuario_admin():
                             f"[PasswordSalt]='{pwd_salt}', [Password]='' "
                             f"WHERE [UsuarioID]={u['UsuarioID']}"
                         )
-            except Exception as em:
-                print(f"Advertencia migracion contrasenas: {em}")
+            except Exception:
+                pass
 
             # Mapear nivel Operador -> Recepcion
             try:
                 db.execute("UPDATE [Usuarios] SET [Nivel]='Recepcion' WHERE [Nivel]='Operador'")
-            except:
+            except Exception:
                 pass
 
-    except Exception as e:
-        print(f"Advertencia: No se pudo verificar usuario admin: {e}")
+    except Exception:
+        pass
 
 def main():
-    # Mostrar splash screen primero
+    """Punto de entrada principal de ANgesLAB."""
     try:
         from modulos.splash_screen import mostrar_splash
         mostrar_splash(duracion=3500)
-    except Exception as e:
-        print(f"Splash omitido: {e}")
+    except Exception:
+        pass
 
     _asegurar_usuario_admin()
     login = LoginWindow()
