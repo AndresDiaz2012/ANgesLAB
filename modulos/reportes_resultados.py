@@ -167,6 +167,7 @@ class ReportesResultados:
                 SELECT
                     rp.ResultadoParamID, rp.DetalleID, rp.ParametroID, rp.Valor,
                     rp.Estado, rp.FechaCaptura,
+                    rp.ValorReferencia as ValorRefCalculado,
                     param.CodigoParametro,
                     param.NombreParametro,
                     param.Seccion,
@@ -183,11 +184,22 @@ class ReportesResultados:
         solicitud['pruebas'] = pruebas
 
         # Post-proceso: aplicar valores de referencia especificos por edad/sexo
+        # Prioridad: 1) valores_referencia por edad/sexo, 2) ValorRefCalculado
+        #            (guardado al calcular), 3) Parametros.Observaciones (genérico)
+        sexo_pac = solicitud.get('Sexo')
+        fn_pac = solicitud.get('FechaNacimiento')
+
+        # Primero: si hay ValorRefCalculado (parámetros calculados), usarlo
+        for prueba in pruebas:
+            for resultado in (prueba.get('resultados') or []):
+                ref_calc = resultado.get('ValorRefCalculado')
+                if ref_calc and str(ref_calc).strip():
+                    resultado['ValorReferencia'] = ref_calc
+
+        # Segundo: aplicar resolución por edad/sexo del módulo valores_referencia
         try:
             from modulos.valores_referencia import obtener_gestor as _obtener_gestor_ref
             _gestor_ref = _obtener_gestor_ref(self.db)
-            sexo_pac = solicitud.get('Sexo')
-            fn_pac = solicitud.get('FechaNacimiento')
             if sexo_pac or fn_pac:
                 for prueba in pruebas:
                     for resultado in (prueba.get('resultados') or []):

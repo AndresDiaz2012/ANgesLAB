@@ -2728,8 +2728,9 @@ class MainApplication:
         entries['fecha_nac'] = tk.Entry(row5, font=('Segoe UI', 11), width=12, relief='flat', bg='#f8f9fa',
                                        highlightthickness=1, highlightbackground=COLORS['border'])
         entries['fecha_nac'].pack(side='left', ipady=5, padx=(0, 5))
-        lbl_edad_pac = tk.Label(row5, text="", font=('Segoe UI', 9, 'bold'), bg='white', fg='#1565c0')
-        lbl_edad_pac.pack(side='left', padx=(0, 10))
+        lbl_edad_pac = tk.Label(row5, text="", font=('Segoe UI', 11, 'bold'),
+                                bg='#e3f2fd', fg='#0d47a1', padx=8, pady=1,
+                                relief='groove', borderwidth=1)
 
         def _calc_edad_pac(*args):
             fs = entries['fecha_nac'].get().strip()
@@ -2741,13 +2742,17 @@ class MainApplication:
                     if a < 2:
                         d = (hoy - fn).days
                         m = d // 30
-                        lbl_edad_pac.config(text=f"{d}d" if m < 1 else f"{m}m")
+                        txt = f"Edad: {d}d" if m < 1 else f"Edad: {m}m"
                     else:
-                        lbl_edad_pac.config(text=f"{a} años")
+                        txt = f"Edad: {a} años"
+                    lbl_edad_pac.config(text=txt, bg='#e3f2fd')
+                    lbl_edad_pac.pack(side='left', padx=(0, 10))
                 except ValueError:
                     lbl_edad_pac.config(text="")
+                    lbl_edad_pac.pack_forget()
             else:
                 lbl_edad_pac.config(text="")
+                lbl_edad_pac.pack_forget()
 
         entries['fecha_nac'].bind('<KeyRelease>', _calc_edad_pac)
         entries['fecha_nac'].bind('<FocusOut>', _calc_edad_pac)
@@ -10597,10 +10602,11 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                         _area_param_data.append([seccion_upper, '', '', ''])
 
                     # Valor referencia: prioridad → resolución por edad/sexo
+                    #                   fallback  → cálculos automáticos (por sexo+edad)
                     #                   fallback  → ResultadosParametros.ValorReferencia
                     #                   fallback  → Parametros.Observaciones
                     valor_ref = ''
-                    # Intentar resolver por edad/sexo primero
+                    # Intentar resolver por edad/sexo (módulo valores_referencia)
                     if VALORES_REF_DISPONIBLE and self.gestor_ref and _pdf_fn:
                         try:
                             _ref_esp = self.gestor_ref.resolver_valor_referencia(
@@ -10608,6 +10614,21 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                             )
                             if _ref_esp:
                                 valor_ref = _ref_esp
+                        except Exception:
+                            pass
+                    # Para parámetros calculados: resolver referencia por sexo+edad
+                    if not valor_ref and CALCULOS_AUTOMATICOS_DISPONIBLE:
+                        try:
+                            _calc = obtener_calculador()
+                            _nombre_norm = _calc.normalizar_nombre(param['NombreParametro'] or '')
+                            if _nombre_norm:
+                                _edad_pac = None
+                                if _pdf_fn:
+                                    _hoy = datetime.now()
+                                    _edad_pac = _hoy.year - _pdf_fn.year - ((_hoy.month, _hoy.day) < (_pdf_fn.month, _pdf_fn.day))
+                                _ref_calc = _calc.obtener_referencia_calculo(_nombre_norm, _pdf_sexo, _edad_pac)
+                                if _ref_calc:
+                                    valor_ref = _ref_calc
                         except Exception:
                             pass
                     # Fallback a lo guardado en ResultadosParametros
