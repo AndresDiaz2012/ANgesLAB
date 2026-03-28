@@ -85,12 +85,17 @@ class GestorTasasCambio:
             RuntimeError: si pyBCV no esta instalado
             Exception: si falla la consulta al BCV
         """
-        if not PYBCV_DISPONIBLE:
+        # Importar en tiempo de ejecucion para detectar instalaciones recientes
+        try:
+            from pyBCV import Currency as _Currency
+        except ImportError:
             raise RuntimeError(
-                "pyBCV no esta instalado. Ejecute: pip install pyBCV"
+                "pyBCV no esta instalado.\n\n"
+                "Ejecute en una terminal:\n"
+                "  pip install pyBCV"
             )
 
-        currency = _BCV_Currency()
+        currency = _Currency()
         tasas_raw = currency.get_rate()
 
         tasas = {}

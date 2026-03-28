@@ -530,11 +530,15 @@ class VentanaConfigAdministrativa:
                 text=f"Ultima actualizacion: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
 
             messagebox.showinfo("Tasas Actualizadas",
-                                "Las tasas BCV se han actualizado correctamente.")
+                                f"Tasas BCV actualizadas correctamente.\n\n"
+                                f"USD/Bs: {tasas.get('USD', '--')}\n"
+                                f"EUR/Bs: {tasas.get('EUR', '--')}")
 
+        except RuntimeError as e:
+            messagebox.showwarning("pyBCV no disponible", str(e))
         except ImportError:
-            messagebox.showwarning("pyBCV no disponible",
-                                   "El modulo pyBCV no esta instalado.\n"
+            messagebox.showwarning("Modulo no disponible",
+                                   "El modulo tasas_cambio no esta disponible.\n"
                                    "Ejecute: pip install pyBCV")
         except Exception as e:
             messagebox.showerror("Error", f"Error al actualizar tasas BCV:\n{e}")
@@ -555,10 +559,20 @@ class VentanaConfigAdministrativa:
 
             ultima = gestor.get_ultima_actualizacion()
             if ultima:
-                self.label_ultima_act.config(
-                    text=f"Ultima actualizacion: {ultima.strftime('%d/%m/%Y %H:%M')}")
-        except Exception:
-            pass
+                try:
+                    self.label_ultima_act.config(
+                        text=f"Ultima actualizacion: {ultima.strftime('%d/%m/%Y %H:%M')}")
+                except AttributeError:
+                    # pywintypes.datetime puede no tener strftime directo
+                    from datetime import datetime as _dt
+                    if hasattr(ultima, 'year'):
+                        dt = _dt(ultima.year, ultima.month, ultima.day,
+                                 ultima.hour, ultima.minute, ultima.second)
+                        self.label_ultima_act.config(
+                            text=f"Ultima actualizacion: {dt.strftime('%d/%m/%Y %H:%M')}")
+        except Exception as e:
+            logging.getLogger("angeslab.ventana_config_administrativa").debug(
+                "Error cargando tasas: %s", e)
 
         # Tasa COP/USD desde ConfiguracionAdministrativa
         try:
