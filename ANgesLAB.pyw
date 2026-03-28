@@ -3880,15 +3880,15 @@ class MainApplication:
                 SELECT m.MedicoID,
                        m.Nombres & ' ' & m.Apellidos AS NombreMedico,
                        m.Especialidad,
-                       Nz(m.ComisionPorcentaje, 0) AS Comision,
-                       COUNT(s.SolicitudID) AS NumSolicitudes,
-                       Nz(SUM(s.MontoTotal), 0) AS TotalFacturado
-                  FROM Medicos m
-                  LEFT JOIN Solicitudes s ON s.MedicoID = m.MedicoID
-                   AND s.FechaSolicitud BETWEEN {desde_acc} AND {hasta_acc}
+                       IIF(m.ComisionPorcentaje IS NULL, 0, m.ComisionPorcentaje) AS Comision,
+                       COUNT(sf.SolicitudID) AS NumSolicitudes,
+                       IIF(SUM(sf.MontoTotal) IS NULL, 0, SUM(sf.MontoTotal)) AS TotalFacturado
+                  FROM Medicos AS m
+                  LEFT JOIN (SELECT SolicitudID, MedicoID, MontoTotal FROM Solicitudes
+                             WHERE FechaSolicitud >= {desde_acc} AND FechaSolicitud <= {hasta_acc}) AS sf
+                    ON sf.MedicoID = m.MedicoID
                  WHERE m.Activo = True
                  GROUP BY m.MedicoID, m.Nombres, m.Apellidos, m.Especialidad, m.ComisionPorcentaje
-                 ORDER BY TotalFacturado DESC
             """
             try:
                 rows = db.query(sql) or []
