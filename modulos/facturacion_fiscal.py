@@ -59,6 +59,19 @@ class ConfiguracionFiscal:
     RETENCION_IVA_ORDINARIO = Decimal('75.00')    # 75% contribuyente ordinario
     RETENCION_IVA_ESPECIAL = Decimal('100.00')     # 100% contribuyente especial
 
+    # Tasas de retencion de ISLR (Decreto 1.808)
+    # Clave: codigo de actividad → (porcentaje retencion, sustraendo UT)
+    RETENCIONES_ISLR = {
+        'servicios_salud':      {'tasa': Decimal('1.00'),  'sustraendo_ut': 0,  'descripcion': 'Servicios de salud'},
+        'servicios_profesional': {'tasa': Decimal('3.00'),  'sustraendo_ut': 0,  'descripcion': 'Honorarios profesionales PJD'},
+        'servicios_general':    {'tasa': Decimal('2.00'),  'sustraendo_ut': 0,  'descripcion': 'Servicios en general'},
+        'compras_bienes':       {'tasa': Decimal('1.00'),  'sustraendo_ut': 0,  'descripcion': 'Compra de bienes muebles'},
+        'alquiler_inmueble':    {'tasa': Decimal('3.00'),  'sustraendo_ut': 0,  'descripcion': 'Alquiler de bienes inmuebles'},
+        'comisiones':           {'tasa': Decimal('3.00'),  'sustraendo_ut': 0,  'descripcion': 'Comisiones mercantiles'},
+        'fletes':               {'tasa': Decimal('1.00'),  'sustraendo_ut': 0,  'descripcion': 'Fletes y transporte'},
+        'publicidad':           {'tasa': Decimal('5.00'),  'sustraendo_ut': 0,  'descripcion': 'Publicidad y propaganda'},
+    }
+
     # Formatos de numeracion
     FORMATO_FACTURA = "FAC-{YYYY}-{NNNNNN}"           # FAC-2024-000001
     FORMATO_NOTA_CREDITO = "NC-{YYYY}-{NNNNNN}"       # NC-2024-000001
@@ -848,6 +861,192 @@ class FacturacionFiscal:
             'total_cobrado': result['TotalCobrado'] or 0,
             'por_cobrar': (result['TotalVentas'] or 0) - (result['TotalCobrado'] or 0),
             'total_igtf': result.get('TotalIGTF') or 0,
+        }
+
+    # -------------------------------------------------------------------------
+    # RETENCION ISLR (Decreto 1.808)
+    # -------------------------------------------------------------------------
+
+    def calcular_retencion_islr(self, monto_bruto, tipo_actividad='servicios_general',
+                                  es_persona_natural=False):
+        """
+        Calcula la retención de ISLR según tipo de actividad.
+
+        Args:
+            monto_bruto: Monto total del pago
+            tipo_actividad: Código de actividad (ver RETENCIONES_ISLR)
+            es_persona_natural: True si el beneficiario es persona natural
+
+        Returns:
+            dict con tasa, monto_retencion, monto_neto, descripcion
+        """
+        info = ConfiguracionFiscal.RETENCIONES_ISLR.get(
+            tipo_actividad,
+            ConfiguracionFiscal.RETENCIONES_ISLR['servicios_general']
+        )
+        tasa = info['tasa']
+        monto = Decimal(str(monto_bruto))
+        retencion = (monto * tasa / Decimal('100')).quantize(
+            Decimal('0.01'), rounding=ROUND_HALF_UP
+        )
+        return {
+            'tipo_actividad': tipo_actividad,
+            'descripcion': info['descripcion'],
+            'tasa_retencion': float(tasa),
+            'monto_bruto': float(monto),
+            'monto_retencion': float(retencion),
+            'monto_neto': float(monto - retencion),
+            'es_persona_natural': es_persona_natural,
+        }
+
+    def registrar_retencion_islr(self, datos, usuario_id=None):
+        """
+        Registra un comprobante de retención ISLR.
+
+        Args:
+            datos: dict con ProveedorID, NumeroDocumento, FechaDocumento,
+                   MontoDocumento, TipoActividad, MontoRetencion, TasaRetencion,
+                   NumeroComprobante, Periodo (AAAAMM)
+        """
+        fecha = datos.get('FechaDocumento', datetime.now())
+        if isinstance(fecha, datetime):
+            fecha_str = f"#{fecha.strftime('%m/%d/%Y %H:%M:%S')}#"
+        else:
+            fecha_str = f"#{fecha.strftime('%m/%d/%Y')}#"
+
+        sql = (
+            "INSERT INTO [RetencionesISLR] "
+            "([ProveedorID], [NumeroDocumento], [FechaDocumento], "
+            "[MontoDocumento], [TipoActividad], [TasaRetencion], [MontoRetencion], "
+            "[NumeroComprobante], [Periodo], [FechaRegistro]) "
+            f"VALUES ("
+            f"{int(datos.get('ProveedorID', 0))}, "
+            f"'{str(datos.get('NumeroDocumento', '')).replace(chr(39), chr(39)*2)}', "
+            f"{fecha_str}, "
+            f"{float(datos.get('MontoDocumento', 0))}, "
+            f"'{datos.get('TipoActividad', 'servicios_general')}', "
+            f"{float(datos.get('TasaRetencion', 0))}, "
+            f"{float(datos.get('MontoRetencion', 0))}, "
+            f"'{str(datos.get('NumeroComprobante', '')).replace(chr(39), chr(39)*2)}', "
+            f"'{datos.get('Periodo', datetime.now().strftime('%Y%m'))}', "
+            f"#{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}#"
+            f")"
+        )
+        self.db.execute(sql)
+
+        if usuario_id:
+            self._registrar_auditoria(
+                usuario_id, 'Registrar Retencion ISLR',
+                'RetencionesISLR', 0,
+                f"Comprobante: {datos.get('NumeroComprobante', '')}"
+            )
+
+    def listar_retenciones_islr(self, periodo=None, proveedor_id=None):
+        """Lista retenciones ISLR con filtros opcionales."""
+        where = []
+        if periodo:
+            where.append(f"r.Periodo='{periodo}'")
+        if proveedor_id:
+            where.append(f"r.ProveedorID={int(proveedor_id)}")
+
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+
+        sql = (
+            f"SELECT r.*, p.RazonSocial, p.RIF "
+            f"FROM [RetencionesISLR] AS r "
+            f"LEFT JOIN [Proveedores] AS p ON r.ProveedorID = p.ProveedorID "
+            f"{where_sql} "
+            f"ORDER BY r.FechaDocumento DESC"
+        )
+        return self.db.query(sql) or []
+
+    # -------------------------------------------------------------------------
+    # LIBRO DE COMPRAS (formato SENIAT)
+    # -------------------------------------------------------------------------
+
+    def generar_libro_compras(self, fecha_desde, fecha_hasta):
+        """
+        Genera el libro de compras en formato SENIAT.
+
+        Args:
+            fecha_desde: Fecha inicio del período
+            fecha_hasta: Fecha fin del período
+
+        Returns:
+            dict con registros, totales y período
+        """
+        sql = (
+            f"SELECT cp.CuentaPagarID, cp.NumeroDocumento, cp.FechaEmision, "
+            f"cp.FechaVencimiento, cp.MontoOriginal, cp.MontoPagado, cp.Estado, "
+            f"p.RazonSocial, p.RIF, p.TipoContribuyente, "
+            f"cp.Descripcion, cp.Categoria "
+            f"FROM [CuentasPorPagar] AS cp "
+            f"LEFT JOIN [Proveedores] AS p ON cp.ProveedorID = p.ProveedorID "
+            f"WHERE cp.FechaEmision >= #{fecha_desde.strftime('%m/%d/%Y')}# "
+            f"AND cp.FechaEmision <= #{fecha_hasta.strftime('%m/%d/%Y')}# "
+            f"ORDER BY cp.FechaEmision ASC"
+        )
+        compras = self.db.query(sql) or []
+
+        # Calcular desglose IVA para cada compra
+        registros = []
+        totales = {
+            'total_compras': Decimal('0'),
+            'base_imponible': Decimal('0'),
+            'iva_soportado': Decimal('0'),
+            'total_exento': Decimal('0'),
+            'total_retenciones_iva': Decimal('0'),
+            'total_retenciones_islr': Decimal('0'),
+            'num_registros': 0,
+        }
+
+        tasa_iva = ConfiguracionFiscal.TASA_IVA_GENERAL
+
+        for compra in compras:
+            monto = Decimal(str(compra.get('MontoOriginal', 0)))
+            # Calcular base e IVA (asumiendo que el monto incluye IVA)
+            base = (monto / (1 + tasa_iva / 100)).quantize(
+                Decimal('0.01'), rounding=ROUND_HALF_UP
+            )
+            iva = monto - base
+
+            registro = {
+                'numero_doc': compra.get('NumeroDocumento', ''),
+                'fecha': compra.get('FechaEmision'),
+                'razon_social': compra.get('RazonSocial', compra.get('Descripcion', '')),
+                'rif': compra.get('RIF', ''),
+                'tipo_contribuyente': compra.get('TipoContribuyente', 'Ordinario'),
+                'monto_total': float(monto),
+                'base_imponible': float(base),
+                'iva_soportado': float(iva),
+                'tasa_iva': float(tasa_iva),
+                'monto_exento': 0,
+            }
+            registros.append(registro)
+
+            totales['total_compras'] += monto
+            totales['base_imponible'] += base
+            totales['iva_soportado'] += iva
+            totales['num_registros'] += 1
+
+        # Buscar retenciones del período
+        ret_iva_sql = (
+            f"SELECT SUM(MontoRetencion) AS TotalRetIVA "
+            f"FROM [RetencionesISLR] "
+            f"WHERE FechaDocumento >= #{fecha_desde.strftime('%m/%d/%Y')}# "
+            f"AND FechaDocumento <= #{fecha_hasta.strftime('%m/%d/%Y')}#"
+        )
+        try:
+            ret_result = self.db.query_one(ret_iva_sql) or {}
+            totales['total_retenciones_islr'] = Decimal(str(ret_result.get('TotalRetIVA', 0) or 0))
+        except Exception:
+            pass
+
+        return {
+            'periodo_desde': fecha_desde,
+            'periodo_hasta': fecha_hasta,
+            'registros': registros,
+            'totales': {k: float(v) if isinstance(v, Decimal) else v for k, v in totales.items()},
         }
 
     # -------------------------------------------------------------------------

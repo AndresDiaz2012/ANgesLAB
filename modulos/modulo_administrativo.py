@@ -720,3 +720,280 @@ class ResumenFinanciero:
         except Exception:
             return []
 
+
+# ============================================================================
+# GESTOR DE PROVEEDORES
+# ============================================================================
+
+class GestorProveedores:
+    """Gestión de proveedores del laboratorio (reactivos, insumos, servicios)."""
+
+    def __init__(self, db):
+        self.db = db
+
+    def crear_proveedor(self, datos: dict) -> int:
+        """
+        Crea un nuevo proveedor.
+
+        Args:
+            datos: dict con RazonSocial, RIF, Direccion, Telefono, Email,
+                   Contacto, TipoContribuyente, Observaciones
+        """
+        razon = (datos.get('RazonSocial') or '').strip()
+        if not razon:
+            raise ValueError("La razón social es obligatoria")
+
+        rif = (datos.get('RIF') or '').strip()
+
+        fecha = datetime.now().strftime('#%m/%d/%Y %H:%M:%S#')
+        sql = (
+            f"INSERT INTO [Proveedores] "
+            f"([RazonSocial], [RIF], [Direccion], [Telefono], [Email], "
+            f"[Contacto], [TipoContribuyente], [Observaciones], [Activo], [FechaCreacion]) "
+            f"VALUES ("
+            f"'{razon.replace(chr(39), chr(39)*2)}', "
+            f"'{rif.replace(chr(39), chr(39)*2)}', "
+            f"'{(datos.get('Direccion') or '').replace(chr(39), chr(39)*2)}', "
+            f"'{(datos.get('Telefono') or '').replace(chr(39), chr(39)*2)}', "
+            f"'{(datos.get('Email') or '').replace(chr(39), chr(39)*2)}', "
+            f"'{(datos.get('Contacto') or '').replace(chr(39), chr(39)*2)}', "
+            f"'{datos.get('TipoContribuyente', 'Ordinario')}', "
+            f"'{(datos.get('Observaciones') or '').replace(chr(39), chr(39)*2)}', "
+            f"True, {fecha})"
+        )
+        self.db.execute(sql)
+
+        row = self.db.query_one(
+            f"SELECT TOP 1 ProveedorID FROM [Proveedores] "
+            f"WHERE RazonSocial='{razon.replace(chr(39), chr(39)*2)}' "
+            f"ORDER BY ProveedorID DESC"
+        )
+        return (row or {}).get('ProveedorID', 0)
+
+    def actualizar_proveedor(self, proveedor_id: int, datos: dict):
+        """Actualiza datos de un proveedor."""
+        sets = []
+        for campo in ('RazonSocial', 'RIF', 'Direccion', 'Telefono', 'Email',
+                       'Contacto', 'TipoContribuyente', 'Observaciones'):
+            val = datos.get(campo)
+            if val is not None:
+                sets.append(f"[{campo}]='{str(val).replace(chr(39), chr(39)*2)}'")
+
+        if datos.get('Activo') is not None:
+            sets.append(f"[Activo]={datos['Activo']}")
+
+        if sets:
+            self.db.execute(
+                f"UPDATE [Proveedores] SET {', '.join(sets)} "
+                f"WHERE ProveedorID={int(proveedor_id)}"
+            )
+
+    def desactivar_proveedor(self, proveedor_id: int):
+        self.db.execute(
+            f"UPDATE [Proveedores] SET Activo=False WHERE ProveedorID={int(proveedor_id)}"
+        )
+
+    def obtener_proveedor(self, proveedor_id: int) -> dict:
+        return self.db.query_one(
+            f"SELECT * FROM [Proveedores] WHERE ProveedorID={int(proveedor_id)}"
+        ) or {}
+
+    def listar_proveedores(self, solo_activos=True, busqueda=None) -> list:
+        """Lista proveedores con filtros."""
+        where = []
+        if solo_activos:
+            where.append("Activo=True")
+        if busqueda:
+            term = busqueda.replace("'", "''").replace("%", "").replace("_", "")
+            where.append(f"(RazonSocial LIKE '%{term}%' OR RIF LIKE '%{term}%')")
+
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+        return self.db.query(
+            f"SELECT * FROM [Proveedores] {where_sql} ORDER BY RazonSocial"
+        ) or []
+
+
+# ============================================================================
+# GESTOR DE SEGUROS / CONVENIOS
+# ============================================================================
+
+class GestorSeguros:
+    """Gestión de aseguradoras y convenios del laboratorio."""
+
+    def __init__(self, db):
+        self.db = db
+
+    def crear_seguro(self, datos: dict) -> int:
+        """
+        Crea una aseguradora/convenio.
+
+        Args:
+            datos: dict con Nombre, RIF, Telefono, Email, Contacto,
+                   DescuentoPorcentaje, ListaPreciosID, Observaciones
+        """
+        nombre = (datos.get('Nombre') or '').strip()
+        if not nombre:
+            raise ValueError("El nombre es obligatorio")
+
+        fecha = datetime.now().strftime('#%m/%d/%Y %H:%M:%S#')
+        descuento = float(datos.get('DescuentoPorcentaje', 0))
+        lista_id = datos.get('ListaPreciosID')
+
+        sql = (
+            f"INSERT INTO [Seguros] "
+            f"([Nombre], [RIF], [Telefono], [Email], [Contacto], "
+            f"[DescuentoPorcentaje], [ListaPreciosID], [Observaciones], [Activo], [FechaCreacion]) "
+            f"VALUES ("
+            f"'{nombre.replace(chr(39), chr(39)*2)}', "
+            f"'{(datos.get('RIF') or '').replace(chr(39), chr(39)*2)}', "
+            f"'{(datos.get('Telefono') or '').replace(chr(39), chr(39)*2)}', "
+            f"'{(datos.get('Email') or '').replace(chr(39), chr(39)*2)}', "
+            f"'{(datos.get('Contacto') or '').replace(chr(39), chr(39)*2)}', "
+            f"{descuento}, "
+            f"{'NULL' if lista_id is None else int(lista_id)}, "
+            f"'{(datos.get('Observaciones') or '').replace(chr(39), chr(39)*2)}', "
+            f"True, {fecha})"
+        )
+        self.db.execute(sql)
+
+        row = self.db.query_one(
+            f"SELECT TOP 1 SeguroID FROM [Seguros] "
+            f"WHERE Nombre='{nombre.replace(chr(39), chr(39)*2)}' ORDER BY SeguroID DESC"
+        )
+        return (row or {}).get('SeguroID', 0)
+
+    def actualizar_seguro(self, seguro_id: int, datos: dict):
+        sets = []
+        for campo in ('Nombre', 'RIF', 'Telefono', 'Email', 'Contacto', 'Observaciones'):
+            val = datos.get(campo)
+            if val is not None:
+                sets.append(f"[{campo}]='{str(val).replace(chr(39), chr(39)*2)}'")
+
+        if datos.get('DescuentoPorcentaje') is not None:
+            sets.append(f"[DescuentoPorcentaje]={float(datos['DescuentoPorcentaje'])}")
+        if datos.get('ListaPreciosID') is not None:
+            sets.append(f"[ListaPreciosID]={int(datos['ListaPreciosID'])}")
+        if datos.get('Activo') is not None:
+            sets.append(f"[Activo]={datos['Activo']}")
+
+        if sets:
+            self.db.execute(
+                f"UPDATE [Seguros] SET {', '.join(sets)} WHERE SeguroID={int(seguro_id)}"
+            )
+
+    def obtener_seguro(self, seguro_id: int) -> dict:
+        return self.db.query_one(
+            f"SELECT * FROM [Seguros] WHERE SeguroID={int(seguro_id)}"
+        ) or {}
+
+    def listar_seguros(self, solo_activos=True, busqueda=None) -> list:
+        where = []
+        if solo_activos:
+            where.append("Activo=True")
+        if busqueda:
+            term = busqueda.replace("'", "''").replace("%", "").replace("_", "")
+            where.append(f"Nombre LIKE '%{term}%'")
+
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+        return self.db.query(
+            f"SELECT * FROM [Seguros] {where_sql} ORDER BY Nombre"
+        ) or []
+
+    def obtener_descuento_seguro(self, seguro_id: int) -> float:
+        """Obtiene el porcentaje de descuento de un seguro."""
+        seg = self.obtener_seguro(seguro_id)
+        return float(seg.get('DescuentoPorcentaje', 0))
+
+
+# ============================================================================
+# GESTOR DE LISTAS DE PRECIOS
+# ============================================================================
+
+class GestorListasPrecios:
+    """Gestión de múltiples listas de precios (particular, seguro, convenio, USD)."""
+
+    def __init__(self, db):
+        self.db = db
+
+    def crear_lista(self, nombre: str, descripcion: str = '',
+                     moneda: str = 'USD') -> int:
+        """Crea una nueva lista de precios."""
+        nombre = nombre.strip()
+        if not nombre:
+            raise ValueError("El nombre de la lista es obligatorio")
+
+        fecha = datetime.now().strftime('#%m/%d/%Y %H:%M:%S#')
+        sql = (
+            f"INSERT INTO [ListasPrecios] "
+            f"([Nombre], [Descripcion], [Moneda], [Activo], [FechaCreacion]) "
+            f"VALUES ("
+            f"'{nombre.replace(chr(39), chr(39)*2)}', "
+            f"'{(descripcion or '').replace(chr(39), chr(39)*2)}', "
+            f"'{moneda}', True, {fecha})"
+        )
+        self.db.execute(sql)
+
+        row = self.db.query_one(
+            f"SELECT TOP 1 ListaPreciosID FROM [ListasPrecios] "
+            f"WHERE Nombre='{nombre.replace(chr(39), chr(39)*2)}' ORDER BY ListaPreciosID DESC"
+        )
+        return (row or {}).get('ListaPreciosID', 0)
+
+    def listar_listas(self, solo_activas=True) -> list:
+        where = "WHERE Activo=True" if solo_activas else ""
+        return self.db.query(
+            f"SELECT * FROM [ListasPrecios] {where} ORDER BY Nombre"
+        ) or []
+
+    def asignar_precio(self, lista_id: int, prueba_id: int, precio: float):
+        """Asigna o actualiza el precio de una prueba en una lista."""
+        # Verificar si ya existe
+        existing = self.db.query_one(
+            f"SELECT PrecioListaID FROM [PreciosLista] "
+            f"WHERE ListaPreciosID={int(lista_id)} AND PruebaID={int(prueba_id)}"
+        )
+        if existing:
+            self.db.execute(
+                f"UPDATE [PreciosLista] SET Precio={float(precio)} "
+                f"WHERE ListaPreciosID={int(lista_id)} AND PruebaID={int(prueba_id)}"
+            )
+        else:
+            self.db.execute(
+                f"INSERT INTO [PreciosLista] ([ListaPreciosID], [PruebaID], [Precio]) "
+                f"VALUES ({int(lista_id)}, {int(prueba_id)}, {float(precio)})"
+            )
+
+    def obtener_precio(self, lista_id: int, prueba_id: int) -> float:
+        """Obtiene el precio de una prueba en una lista específica."""
+        row = self.db.query_one(
+            f"SELECT Precio FROM [PreciosLista] "
+            f"WHERE ListaPreciosID={int(lista_id)} AND PruebaID={int(prueba_id)}"
+        )
+        if row:
+            return float(row.get('Precio', 0))
+        # Fallback: precio base de la prueba
+        prueba = self.db.query_one(
+            f"SELECT Precio FROM [Pruebas] WHERE PruebaID={int(prueba_id)}"
+        )
+        return float((prueba or {}).get('Precio', 0))
+
+    def obtener_precios_lista(self, lista_id: int) -> list:
+        """Obtiene todos los precios de una lista."""
+        return self.db.query(
+            f"SELECT pl.PrecioListaID, pl.PruebaID, pl.Precio, "
+            f"p.NombrePrueba, p.CodigoPrueba, p.Precio AS PrecioBase "
+            f"FROM [PreciosLista] AS pl "
+            f"INNER JOIN [Pruebas] AS p ON pl.PruebaID = p.PruebaID "
+            f"WHERE pl.ListaPreciosID={int(lista_id)} "
+            f"ORDER BY p.NombrePrueba"
+        ) or []
+
+    def copiar_precios_base(self, lista_id: int, factor: float = 1.0):
+        """Copia todos los precios base de Pruebas a una lista, aplicando un factor."""
+        pruebas = self.db.query(
+            "SELECT PruebaID, Precio FROM [Pruebas] WHERE Activo=True AND Precio > 0"
+        ) or []
+        for p in pruebas:
+            precio = float(p.get('Precio', 0)) * factor
+            self.asignar_precio(lista_id, p['PruebaID'], precio)
+

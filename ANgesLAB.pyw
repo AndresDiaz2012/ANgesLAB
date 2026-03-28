@@ -1172,6 +1172,10 @@ class MainApplication:
                     ("📋", "Cuentas por Pagar", self.show_cuentas_pagar),
                     ("💸", "Gastos", self.show_gastos),
                     ("🩺", "Comisiones Médicos", self.show_comisiones_medico),
+                    ("📦", "Inventario", self.show_inventario),
+                    ("🔬", "Equipos", self.show_equipos),
+                    ("🏷️", "Etiquetas", self.show_etiquetas),
+                    ("📄", "Hojas de Trabajo", self.show_hojas_trabajo),
                 ]
             self._create_menu_section("Administrativo", items_admin, expanded=False)
 
@@ -4271,19 +4275,25 @@ class MainApplication:
         self.cargar_solicitudes(self.search_sol.get().strip())
 
     def form_solicitud(self, solicitud_id=None):
-        """Ventana principal de Registro de Solicitudes - Núcleo operativo del sistema"""
+        """Ventana principal de Registro de Solicitudes - Estilo profesional"""
+        # ── Paleta neutra local (no modifica COLORS global) ──
+        S = {
+            'bg': '#f0f0f0', 'frame': '#fafafa', 'header': '#1a237e',
+            'label': '#333333', 'border': '#bdbdbd', 'input': '#ffffff',
+            'btn': '#e0e0e0', 'btn_fg': '#212121', 'btn_act': '#1565c0',
+            'btn_act_fg': '#ffffff', 'btn_ok': '#2e7d32', 'btn_del': '#c62828',
+            'sec_fg': '#1a237e', 'ced_bg': '#fff9c4', 'total_bg': '#e8eaf6',
+        }
+
         win = tk.Toplevel(self.root)
-        win.title("Editar Solicitud" if solicitud_id else "Registro de Solicitud de Laboratorio")
-        win.configure(bg=COLORS['bg'])
+        win.title("Editar Solicitud" if solicitud_id else "Registro de Solicitud")
+        win.configure(bg=S['bg'])
         win.grab_set()
         win.focus_set()
-
-        # Hacer ventana responsiva - grande pero no pantalla completa
         hacer_ventana_responsiva(win, 1400, 900, min_ancho=1000, min_alto=700)
 
-        # Variables para cálculos
-        self.sol_pruebas_seleccionadas = []  # Lista de pruebas seleccionadas
-        # Reiniciar modo de solicitud al abrir nueva ventana
+        # Variables
+        self.sol_pruebas_seleccionadas = []
         self.modo_solicitud = 'nueva'
         self.solicitud_existente_id = None
         self.sol_subtotal = tk.DoubleVar(value=0.0)
@@ -4295,189 +4305,138 @@ class MainApplication:
         self.sol_abonado = tk.DoubleVar(value=0.0)
         self.sol_saldo = tk.DoubleVar(value=0.0)
 
-        # ============================================================
-        # HEADER PRINCIPAL (FIJO - NO SE MUEVE CON SCROLL)
-        # ============================================================
-        header = tk.Frame(win, bg=COLORS['primary'], height=60)
+        # ── HEADER ──
+        header = tk.Frame(win, bg=S['header'], height=50)
         header.pack(fill='x', side='top')
         header.pack_propagate(False)
+        tk.Label(header, text="REGISTRO DE SOLICITUD DE LABORATORIO",
+                font=('Segoe UI', 14, 'bold'), bg=S['header'], fg='white').pack(side='left', padx=20, pady=12)
+        tk.Label(header, text=f"{datetime.now().strftime('%d/%m/%Y %H:%M')}",
+                font=('Segoe UI', 10), bg=S['header'], fg='#b0bec5').pack(side='right', padx=20, pady=14)
 
-        header_left = tk.Frame(header, bg=COLORS['primary'])
-        header_left.pack(side='left', fill='y')
-        tk.Label(header_left, text="📋 REGISTRO DE SOLICITUD DE LABORATORIO",
-                font=('Segoe UI', 16, 'bold'), bg=COLORS['primary'], fg='white').pack(side='left', padx=20, pady=15)
-
-        header_right = tk.Frame(header, bg=COLORS['primary'])
-        header_right.pack(side='right', fill='y')
-        tk.Label(header_right, text=f"📅 {datetime.now().strftime('%d/%m/%Y %H:%M')}",
-                font=('Segoe UI', 11), bg=COLORS['primary'], fg='white').pack(side='right', padx=20, pady=18)
-
-        # ============================================================
-        # ÁREA DE CONTENIDO CON SCROLL
-        # ============================================================
-        # Canvas para scroll
-        canvas_container = tk.Frame(win, bg=COLORS['bg'])
+        # ── SCROLL AREA ──
+        canvas_container = tk.Frame(win, bg=S['bg'])
         canvas_container.pack(fill='both', expand=True, side='top')
-
-        canvas = tk.Canvas(canvas_container, bg=COLORS['bg'], highlightthickness=0)
+        canvas = tk.Canvas(canvas_container, bg=S['bg'], highlightthickness=0)
         scrollbar = ttk.Scrollbar(canvas_container, orient='vertical', command=canvas.yview)
-
-        # Frame scrollable que contendrá todo el contenido
-        scrollable_frame = tk.Frame(canvas, bg=COLORS['bg'])
-
-        scrollable_frame.bind(
-            '<Configure>',
-            lambda e: canvas.configure(scrollregion=canvas.bbox('all'))
-        )
-
+        scrollable_frame = tk.Frame(canvas, bg=S['bg'])
+        scrollable_frame.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
         canvas.create_window((0, 0), window=scrollable_frame, anchor='nw')
         canvas.configure(yscrollcommand=scrollbar.set)
-
-        # Empaquetar canvas y scrollbar
         canvas.pack(side='left', fill='both', expand=True)
         scrollbar.pack(side='right', fill='y')
 
-        # Habilitar scroll con rueda del mouse
         def _on_mousewheel(event):
             canvas.yview_scroll(int(-1*(event.delta/120)), "units")
         canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        win.bind('<Destroy>', lambda e: canvas.unbind_all('<MouseWheel>') if e.widget == win else None)
 
-        # ============================================================
-        # CONTENEDOR PRINCIPAL (2 columnas) - AHORA DENTRO DEL CANVAS
-        # ============================================================
-        main_container = tk.Frame(scrollable_frame, bg=COLORS['bg'])
-        main_container.pack(fill='both', expand=True, padx=15, pady=10)
+        # ── 2 COLUMNAS ──
+        main_container = tk.Frame(scrollable_frame, bg=S['bg'])
+        main_container.pack(fill='both', expand=True, padx=12, pady=8)
 
-        # COLUMNA IZQUIERDA (Datos principales)
-        left_col = tk.Frame(main_container, bg=COLORS['bg'])
-        left_col.pack(side='left', fill='both', expand=True, padx=(0, 10))
+        left_col = tk.Frame(main_container, bg=S['bg'])
+        left_col.pack(side='left', fill='both', expand=True, padx=(0, 8))
 
-        # COLUMNA DERECHA (Facturación)
-        right_col = tk.Frame(main_container, bg='white', width=350)
-        right_col.pack(side='right', fill='y', padx=(10, 0))
+        right_col = tk.Frame(main_container, bg=S['frame'], width=340, relief='groove', bd=1)
+        right_col.pack(side='right', fill='y', padx=(8, 0))
         right_col.pack_propagate(False)
 
-        # ============================================================
-        # SECCIÓN 1: DATOS DE LA SOLICITUD
-        # ============================================================
-        sec_datos = tk.LabelFrame(left_col, text=" 📝 Datos de la Solicitud ", font=('Segoe UI', 11, 'bold'),
-                                  bg='white', fg=COLORS['text'])
-        sec_datos.pack(fill='x', pady=(0, 10))
+        # ==============================================================
+        # SECCION 1: DATOS DE LA SOLICITUD
+        # ==============================================================
+        sec_datos = tk.LabelFrame(left_col, text=" Datos de la Solicitud ",
+                                  font=('Segoe UI', 10, 'bold'), bg=S['frame'], fg=S['sec_fg'])
+        sec_datos.pack(fill='x', pady=(0, 8))
+        datos_frame = tk.Frame(sec_datos, bg=S['frame'])
+        datos_frame.pack(fill='x', padx=12, pady=8)
 
-        datos_frame = tk.Frame(sec_datos, bg='white')
-        datos_frame.pack(fill='x', padx=15, pady=10)
-
-        # Fila 1: Número y Fecha
-        row1 = tk.Frame(datos_frame, bg='white')
-        row1.pack(fill='x', pady=3)
-
-        tk.Label(row1, text="N° Solicitud:", font=('Segoe UI', 10, 'bold'), bg='white', width=14, anchor='w').pack(side='left')
-
-        # Mostrar mensaje de que se generará al guardar
-        self.lbl_numero = tk.Label(row1, text="(Se generará al guardar)", font=('Segoe UI', 12, 'bold'), bg='white', fg=COLORS['text_light'])
-        self.lbl_numero.pack(side='left', padx=(0, 30))
-
-        tk.Label(row1, text="Fecha:", font=('Segoe UI', 10, 'bold'), bg='white', width=8, anchor='w').pack(side='left')
-        self.entry_fecha = tk.Entry(row1, font=('Segoe UI', 10), width=12, relief='flat', bg='#f8f9fa',
-                                   highlightthickness=1, highlightbackground=COLORS['border'])
-        self.entry_fecha.pack(side='left', ipady=4)
+        row1 = tk.Frame(datos_frame, bg=S['frame'])
+        row1.pack(fill='x', pady=2)
+        tk.Label(row1, text="N. Solicitud:", font=('Segoe UI', 9, 'bold'), bg=S['frame'], fg=S['label'], width=13, anchor='w').pack(side='left')
+        self.lbl_numero = tk.Label(row1, text="(Se generara al guardar)", font=('Segoe UI', 11, 'bold'), bg=S['frame'], fg='#757575')
+        self.lbl_numero.pack(side='left', padx=(0, 25))
+        tk.Label(row1, text="Fecha:", font=('Segoe UI', 9, 'bold'), bg=S['frame'], fg=S['label'], width=7, anchor='w').pack(side='left')
+        self.entry_fecha = tk.Entry(row1, font=('Segoe UI', 9), width=11, relief='solid', bg=S['input'], bd=1)
+        self.entry_fecha.pack(side='left', ipady=3)
         self.entry_fecha.insert(0, datetime.now().strftime('%d/%m/%Y'))
-
-        tk.Label(row1, text="Hora:", font=('Segoe UI', 10, 'bold'), bg='white', width=6, anchor='e').pack(side='left', padx=(20, 0))
-        self.entry_hora = tk.Entry(row1, font=('Segoe UI', 10), width=8, relief='flat', bg='#f8f9fa',
-                                  highlightthickness=1, highlightbackground=COLORS['border'])
-        self.entry_hora.pack(side='left', ipady=4)
+        tk.Label(row1, text="Hora:", font=('Segoe UI', 9, 'bold'), bg=S['frame'], fg=S['label'], width=6, anchor='e').pack(side='left', padx=(15, 0))
+        self.entry_hora = tk.Entry(row1, font=('Segoe UI', 9), width=7, relief='solid', bg=S['input'], bd=1)
+        self.entry_hora.pack(side='left', ipady=3)
         self.entry_hora.insert(0, datetime.now().strftime('%H:%M'))
 
-        # Fila 2: Estado y Tipo de Atención
-        row2 = tk.Frame(datos_frame, bg='white')
-        row2.pack(fill='x', pady=3)
-
-        tk.Label(row2, text="Estado:", font=('Segoe UI', 10, 'bold'), bg='white', width=14, anchor='w').pack(side='left')
-        self.combo_estado = ttk.Combobox(row2, font=('Segoe UI', 10), width=15, state='readonly')
+        row2 = tk.Frame(datos_frame, bg=S['frame'])
+        row2.pack(fill='x', pady=2)
+        tk.Label(row2, text="Estado:", font=('Segoe UI', 9, 'bold'), bg=S['frame'], fg=S['label'], width=13, anchor='w').pack(side='left')
+        self.combo_estado = ttk.Combobox(row2, font=('Segoe UI', 9), width=14, state='readonly')
         self.combo_estado['values'] = ['Pendiente', 'En Proceso', 'Completada', 'Entregada', 'Anulada']
         self.combo_estado.set('Pendiente')
-        self.combo_estado.pack(side='left', padx=(0, 30))
-
-        tk.Label(row2, text="Tipo Atención:", font=('Segoe UI', 10, 'bold'), bg='white', width=14, anchor='w').pack(side='left')
-        self.combo_tipo = ttk.Combobox(row2, font=('Segoe UI', 10), width=20, state='readonly')
-        self.combo_tipo['values'] = ['Particular', 'Convenio', 'Seguro', 'Emergencia', 'Cortesía']
-        self.combo_tipo.set('Particular')
+        self.combo_estado.pack(side='left', padx=(0, 25))
+        tk.Label(row2, text="Procedencia:", font=('Segoe UI', 9, 'bold'), bg=S['frame'], fg=S['label'], width=12, anchor='w').pack(side='left')
+        self.combo_tipo = ttk.Combobox(row2, font=('Segoe UI', 9), width=28, state='readonly')
+        self.combo_tipo['values'] = ['Ambulatorio', 'Hospitalizado Particular', 'Hospitalizado Asegurado',
+                                     'Emergencia Particular', 'Emergencia Asegurado', 'Asegurado']
+        self.combo_tipo.set('Ambulatorio')
         self.combo_tipo.pack(side='left')
 
-        # ============================================================
-        # SECCIÓN 2: INFORMACIÓN DEL PACIENTE (inline)
-        # ============================================================
-        sec_paciente = tk.LabelFrame(left_col, text=" 👤 Información del Paciente ", font=('Segoe UI', 11, 'bold'),
-                                     bg='white', fg=COLORS['text'])
-        sec_paciente.pack(fill='x', pady=(0, 10))
+        # ==============================================================
+        # SECCION 2: INFORMACION DEL PACIENTE
+        # ==============================================================
+        sec_paciente = tk.LabelFrame(left_col, text=" Informacion del Paciente ",
+                                     font=('Segoe UI', 10, 'bold'), bg=S['frame'], fg=S['sec_fg'])
+        sec_paciente.pack(fill='x', pady=(0, 8))
+        pac_frame = tk.Frame(sec_paciente, bg=S['frame'])
+        pac_frame.pack(fill='x', padx=12, pady=6)
 
-        pac_frame = tk.Frame(sec_paciente, bg='white')
-        pac_frame.pack(fill='x', padx=15, pady=8)
-
-        # Indicador de estado del paciente
-        self.pac_status_frame = tk.Frame(pac_frame, bg='#e8f5e9', height=28)
-        self.pac_status_frame.pack(fill='x', pady=(0, 8))
+        # Status bar
+        self.pac_status_frame = tk.Frame(pac_frame, bg='#e0e0e0', height=26)
+        self.pac_status_frame.pack(fill='x', pady=(0, 6))
         self.pac_status_frame.pack_propagate(False)
-        self.lbl_pac_status = tk.Label(self.pac_status_frame, text="Ingrese la cédula para buscar o registrar paciente",
-                                        font=('Segoe UI', 9), bg='#e8f5e9', fg='#555')
-        self.lbl_pac_status.pack(anchor='w', padx=10, pady=4)
+        self.lbl_pac_status = tk.Label(self.pac_status_frame, text="Ingrese la cedula para buscar o registrar paciente",
+                                        font=('Segoe UI', 8), bg='#e0e0e0', fg='#555')
+        self.lbl_pac_status.pack(anchor='w', padx=8, pady=3)
 
         self.pac_id_seleccionado = None
-        self._pac_auto_filled = False  # True si los campos se llenaron desde BD
+        self._pac_auto_filled = False
 
-        # Fila 1: Cédula (campo principal con auto-búsqueda)
-        row_ced = tk.Frame(pac_frame, bg='white')
+        # Fila cedula
+        row_ced = tk.Frame(pac_frame, bg=S['frame'])
         row_ced.pack(fill='x', pady=2)
-
-        tk.Label(row_ced, text="Tipo Doc:", font=('Segoe UI', 10), bg='white', width=10, anchor='w').pack(side='left')
-        self.pac_tipo_doc = ttk.Combobox(row_ced, font=('Segoe UI', 10), width=4, values=['V', 'E', 'P', 'J', 'G'])
+        tk.Label(row_ced, text="Tipo Doc:", font=('Segoe UI', 9), bg=S['frame'], fg=S['label'], width=9, anchor='w').pack(side='left')
+        self.pac_tipo_doc = ttk.Combobox(row_ced, font=('Segoe UI', 9), width=4, values=['V', 'E', 'P', 'J', 'G'])
         self.pac_tipo_doc.set('V')
-        self.pac_tipo_doc.pack(side='left', ipady=3, padx=(0, 10))
-
-        tk.Label(row_ced, text="Cédula / Doc*:", font=('Segoe UI', 10, 'bold'), bg='white', anchor='w').pack(side='left')
-        self.pac_cedula = tk.Entry(row_ced, font=('Segoe UI', 12, 'bold'), width=18, relief='flat', bg='#fffde7',
-                                   highlightthickness=2, highlightbackground='#f9a825', highlightcolor='#f57f17')
-        self.pac_cedula.pack(side='left', ipady=5, padx=(5, 10))
-        # Auto-búsqueda al salir del campo o presionar Enter
+        self.pac_tipo_doc.pack(side='left', ipady=2, padx=(0, 8))
+        tk.Label(row_ced, text="Cedula / Doc*:", font=('Segoe UI', 9, 'bold'), bg=S['frame'], fg=S['label'], anchor='w').pack(side='left')
+        self.pac_cedula = tk.Entry(row_ced, font=('Segoe UI', 11, 'bold'), width=16, relief='solid', bg=S['ced_bg'], bd=1)
+        self.pac_cedula.pack(side='left', ipady=4, padx=(4, 8))
         self.pac_cedula.bind('<Return>', lambda e: self._buscar_paciente_por_cedula())
         self.pac_cedula.bind('<FocusOut>', lambda e: self._buscar_paciente_por_cedula())
-
-        self.btn_buscar_pac = tk.Button(row_ced, text="🔍", font=('Segoe UI', 10),
-                                        bg=COLORS['primary'], fg='white', relief='flat', padx=6,
+        self.btn_buscar_pac = tk.Button(row_ced, text="Buscar", font=('Segoe UI', 8),
+                                        bg=S['btn_act'], fg=S['btn_act_fg'], relief='raised', padx=6,
                                         cursor='hand2', command=self._buscar_paciente_por_cedula)
-        self.btn_buscar_pac.pack(side='left', padx=(0, 5))
-
-        # Botón limpiar para ingresar otro paciente
-        tk.Button(row_ced, text="🔄 Limpiar", font=('Segoe UI', 9), bg='#ef5350', fg='white',
-                 relief='flat', padx=6, cursor='hand2',
+        self.btn_buscar_pac.pack(side='left', padx=(0, 4))
+        tk.Button(row_ced, text="Limpiar", font=('Segoe UI', 8), bg=S['btn'], fg=S['btn_fg'],
+                 relief='raised', padx=6, cursor='hand2',
                  command=self._limpiar_campos_paciente).pack(side='left')
 
-        # Fila 2: Nombres y Apellidos
-        row_nom = tk.Frame(pac_frame, bg='white')
+        # Fila nombres
+        row_nom = tk.Frame(pac_frame, bg=S['frame'])
         row_nom.pack(fill='x', pady=2)
+        tk.Label(row_nom, text="Nombres*:", font=('Segoe UI', 9), bg=S['frame'], fg=S['label'], width=9, anchor='w').pack(side='left')
+        self.pac_nombres = tk.Entry(row_nom, font=('Segoe UI', 9), relief='solid', bg=S['input'], bd=1)
+        self.pac_nombres.pack(side='left', fill='x', expand=True, ipady=3, padx=(0, 8))
+        tk.Label(row_nom, text="Apellidos*:", font=('Segoe UI', 9), bg=S['frame'], fg=S['label'], anchor='w').pack(side='left')
+        self.pac_apellidos = tk.Entry(row_nom, font=('Segoe UI', 9), relief='solid', bg=S['input'], bd=1)
+        self.pac_apellidos.pack(side='left', fill='x', expand=True, ipady=3)
 
-        tk.Label(row_nom, text="Nombres*:", font=('Segoe UI', 10), bg='white', width=10, anchor='w').pack(side='left')
-        self.pac_nombres = tk.Entry(row_nom, font=('Segoe UI', 10), relief='flat', bg='#f8f9fa',
-                                    highlightthickness=1, highlightbackground=COLORS['border'])
-        self.pac_nombres.pack(side='left', fill='x', expand=True, ipady=4, padx=(0, 10))
-
-        tk.Label(row_nom, text="Apellidos*:", font=('Segoe UI', 10), bg='white', anchor='w').pack(side='left')
-        self.pac_apellidos = tk.Entry(row_nom, font=('Segoe UI', 10), relief='flat', bg='#f8f9fa',
-                                      highlightthickness=1, highlightbackground=COLORS['border'])
-        self.pac_apellidos.pack(side='left', fill='x', expand=True, ipady=4)
-
-        # Fila 3: Fecha Nac, Sexo, Teléfono
-        row_extra = tk.Frame(pac_frame, bg='white')
+        # Fila extra
+        row_extra = tk.Frame(pac_frame, bg=S['frame'])
         row_extra.pack(fill='x', pady=2)
-
-        tk.Label(row_extra, text="Fecha Nac:", font=('Segoe UI', 10), bg='white', width=10, anchor='w').pack(side='left')
-        self.pac_fecha_nac = tk.Entry(row_extra, font=('Segoe UI', 10), width=12, relief='flat', bg='#f8f9fa',
-                                      highlightthickness=1, highlightbackground=COLORS['border'])
-        self.pac_fecha_nac.pack(side='left', ipady=4, padx=(0, 3))
-        self.lbl_edad_calc = tk.Label(row_extra, text="", font=('Segoe UI', 11, 'bold'),
-                                       bg='white', fg='#0d47a1')
-        self.lbl_edad_calc.pack(side='left', padx=(0, 10))
+        tk.Label(row_extra, text="Fecha Nac:", font=('Segoe UI', 9), bg=S['frame'], fg=S['label'], width=9, anchor='w').pack(side='left')
+        self.pac_fecha_nac = tk.Entry(row_extra, font=('Segoe UI', 9), width=11, relief='solid', bg=S['input'], bd=1)
+        self.pac_fecha_nac.pack(side='left', ipady=3, padx=(0, 3))
+        self.lbl_edad_calc = tk.Label(row_extra, text="", font=('Segoe UI', 10, 'bold'), bg=S['frame'], fg='#0d47a1')
+        self.lbl_edad_calc.pack(side='left', padx=(0, 8))
 
         def _actualizar_edad_desde_fecha(*args):
             fecha_str = self.pac_fecha_nac.get().strip()
@@ -4489,347 +4448,281 @@ class MainApplication:
                     if anios < 2:
                         dias = (hoy - fn).days
                         meses = dias // 30
-                        if meses < 1:
-                            txt = f"Edad: {dias}d"
-                        else:
-                            txt = f"Edad: {meses}m"
+                        txt = f"Edad: {dias}d" if meses < 1 else f"Edad: {meses}m"
                     else:
-                        txt = f"Edad: {anios} años"
-                    self.lbl_edad_calc.config(text=txt, bg='#e3f2fd',
-                                              relief='groove', borderwidth=1, padx=8, pady=1)
+                        txt = f"Edad: {anios} anos"
+                    self.lbl_edad_calc.config(text=txt, bg='#e3f2fd', relief='groove', borderwidth=1, padx=6, pady=1)
                 except ValueError:
-                    self.lbl_edad_calc.config(text="", bg='white', relief='flat', borderwidth=0)
+                    self.lbl_edad_calc.config(text="", bg=S['frame'], relief='flat', borderwidth=0)
             else:
-                self.lbl_edad_calc.config(text="", bg='white', relief='flat', borderwidth=0)
+                self.lbl_edad_calc.config(text="", bg=S['frame'], relief='flat', borderwidth=0)
 
         self.pac_fecha_nac.bind('<KeyRelease>', _actualizar_edad_desde_fecha)
         self.pac_fecha_nac.bind('<FocusOut>', _actualizar_edad_desde_fecha)
 
-        tk.Label(row_extra, text="Sexo:", font=('Segoe UI', 10), bg='white', anchor='w').pack(side='left')
-        self.pac_sexo = ttk.Combobox(row_extra, font=('Segoe UI', 10), width=13, values=['M - Masculino', 'F - Femenino'])
-        self.pac_sexo.pack(side='left', ipady=3, padx=(3, 10))
+        tk.Label(row_extra, text="Sexo:", font=('Segoe UI', 9), bg=S['frame'], fg=S['label'], anchor='w').pack(side='left')
+        self.pac_sexo = ttk.Combobox(row_extra, font=('Segoe UI', 9), width=12, values=['M - Masculino', 'F - Femenino'])
+        self.pac_sexo.pack(side='left', ipady=2, padx=(3, 8))
+        tk.Label(row_extra, text="Telefono:", font=('Segoe UI', 9), bg=S['frame'], fg=S['label'], anchor='w').pack(side='left')
+        self.pac_telefono = tk.Entry(row_extra, font=('Segoe UI', 9), width=15, relief='solid', bg=S['input'], bd=1)
+        self.pac_telefono.pack(side='left', ipady=3, padx=(3, 0))
 
-        tk.Label(row_extra, text="Tel/WhatsApp:", font=('Segoe UI', 10), bg='white', anchor='w').pack(side='left')
-        self.pac_telefono = tk.Entry(row_extra, font=('Segoe UI', 10), width=16, relief='flat', bg='#f8f9fa',
-                                     highlightthickness=1, highlightbackground=COLORS['border'])
-        self.pac_telefono.pack(side='left', ipady=4, padx=(3, 0))
-
-        # Focus inicial en la cédula
         self.pac_cedula.focus_set()
 
-        # ============================================================
-        # SECCIÓN 3: MÉDICO TRATANTE
-        # ============================================================
-        sec_medico = tk.LabelFrame(left_col, text=" 🩺 Médico Tratante / Remitente ", font=('Segoe UI', 11, 'bold'),
-                                   bg='white', fg=COLORS['text'])
-        sec_medico.pack(fill='x', pady=(0, 10))
-
-        med_frame = tk.Frame(sec_medico, bg='white')
-        med_frame.pack(fill='x', padx=15, pady=10)
-
-        tk.Label(med_frame, text="Médico:", font=('Segoe UI', 10, 'bold'), bg='white').pack(side='left')
-        self.combo_medico = ttk.Combobox(med_frame, font=('Segoe UI', 10), width=50)
-        self.combo_medico.pack(side='left', padx=10)
-
+        # ==============================================================
+        # SECCION 3: MEDICO TRATANTE
+        # ==============================================================
+        sec_medico = tk.LabelFrame(left_col, text=" Medico Tratante ",
+                                   font=('Segoe UI', 10, 'bold'), bg=S['frame'], fg=S['sec_fg'])
+        sec_medico.pack(fill='x', pady=(0, 8))
+        med_frame = tk.Frame(sec_medico, bg=S['frame'])
+        med_frame.pack(fill='x', padx=12, pady=8)
+        tk.Label(med_frame, text="Medico:", font=('Segoe UI', 9, 'bold'), bg=S['frame'], fg=S['label']).pack(side='left')
+        self.combo_medico = ttk.Combobox(med_frame, font=('Segoe UI', 9), width=48)
+        self.combo_medico.pack(side='left', padx=8)
         medicos = db.query("SELECT MedicoID, CodigoMedico & ' - ' & Nombres & ' ' & Apellidos & ' (' & IIF(Especialidad IS NULL, '', Especialidad) & ')' AS Nombre FROM Medicos WHERE Activo=True ORDER BY Nombres")
         self.med_map = {m['Nombre']: m['MedicoID'] for m in medicos}
         self.combo_medico['values'] = [''] + list(self.med_map.keys())
+        tk.Button(med_frame, text="Nuevo", font=('Segoe UI', 8), bg=S['btn_act'], fg=S['btn_act_fg'],
+                 relief='raised', padx=8, cursor='hand2', command=self.form_medico).pack(side='left')
 
-        tk.Button(med_frame, text="➕ Nuevo", font=('Segoe UI', 9), bg=COLORS['danger'], fg='white',
-                 relief='flat', padx=10, cursor='hand2', command=self.form_medico).pack(side='left')
+        # ==============================================================
+        # SECCION 4: PRUEBAS / ESTUDIOS SOLICITADOS
+        # ==============================================================
+        sec_pruebas = tk.LabelFrame(left_col, text=" Pruebas / Estudios Solicitados ",
+                                    font=('Segoe UI', 10, 'bold'), bg=S['frame'], fg=S['sec_fg'])
+        sec_pruebas.pack(fill='both', expand=True, pady=(0, 8))
 
-        # ============================================================
-        # SECCIÓN 4: PRUEBAS SOLICITADAS
-        # ============================================================
-        sec_pruebas = tk.LabelFrame(left_col, text=" 🧪 Pruebas / Estudios Solicitados ", font=('Segoe UI', 11, 'bold'),
-                                    bg='white', fg=COLORS['text'])
-        sec_pruebas.pack(fill='both', expand=True, pady=(0, 10))
+        pruebas_container = tk.Frame(sec_pruebas, bg=S['frame'])
+        pruebas_container.pack(fill='both', expand=True, padx=12, pady=8)
 
-        pruebas_container = tk.Frame(sec_pruebas, bg='white')
-        pruebas_container.pack(fill='both', expand=True, padx=15, pady=10)
+        # -- Fila 1: Perfil
+        row_perfil = tk.Frame(pruebas_container, bg=S['frame'])
+        row_perfil.pack(fill='x', pady=(0, 4))
+        tk.Label(row_perfil, text="Perfil:", font=('Segoe UI', 9, 'bold'), bg=S['frame'], fg=S['label']).pack(side='left')
+        self.combo_perfil = ttk.Combobox(row_perfil, font=('Segoe UI', 9), width=40, state='readonly')
+        self.combo_perfil.pack(side='left', padx=6)
+        try:
+            perfiles = db.query("SELECT PerfilID, CodigoPerfil, NombrePerfil FROM Perfiles WHERE Activo=True ORDER BY NombrePerfil")
+            self._perfil_map = {f"{p['CodigoPerfil']} - {p['NombrePerfil']}": p['PerfilID'] for p in (perfiles or [])}
+        except Exception:
+            self._perfil_map = {}
+        self.combo_perfil['values'] = [''] + list(self._perfil_map.keys())
+        tk.Button(row_perfil, text="Agregar Perfil", font=('Segoe UI', 8, 'bold'), bg=S['btn_ok'], fg='white',
+                 relief='raised', padx=8, cursor='hand2', command=self._agregar_perfil).pack(side='left', padx=4)
 
-        # Frame superior: búsqueda y agregar
-        top_pruebas = tk.Frame(pruebas_container, bg='white')
-        top_pruebas.pack(fill='x', pady=(0, 10))
+        # -- Fila 2: Busqueda individual
+        row_buscar = tk.Frame(pruebas_container, bg=S['frame'])
+        row_buscar.pack(fill='x', pady=(0, 6))
+        tk.Label(row_buscar, text="Buscar:", font=('Segoe UI', 9, 'bold'), bg=S['frame'], fg=S['label']).pack(side='left')
+        self.entry_buscar_prueba = tk.Entry(row_buscar, font=('Segoe UI', 9), width=35, relief='solid', bg=S['input'], bd=1)
+        self.entry_buscar_prueba.pack(side='left', padx=6, ipady=3)
+        self.entry_buscar_prueba.bind('<Return>', lambda e: self._agregar_primera_coincidencia())
+        tk.Button(row_buscar, text="Agregar", font=('Segoe UI', 8), bg=S['btn_act'], fg=S['btn_act_fg'],
+                 relief='raised', padx=8, cursor='hand2', command=self._agregar_primera_coincidencia).pack(side='left', padx=4)
+        tk.Button(row_buscar, text="Quitar Seleccionada", font=('Segoe UI', 8), bg=S['btn_del'], fg='white',
+                 relief='raised', padx=8, cursor='hand2', command=self.quitar_prueba_sol).pack(side='right')
 
-        tk.Label(top_pruebas, text="Buscar Prueba:", font=('Segoe UI', 10), bg='white').pack(side='left')
-        self.entry_buscar_prueba = tk.Entry(top_pruebas, font=('Segoe UI', 10), width=30, relief='flat', bg='#f8f9fa',
-                                           highlightthickness=1, highlightbackground=COLORS['border'])
-        self.entry_buscar_prueba.pack(side='left', padx=10, ipady=4)
-        # Autocompletar mientras escribe
-        self.entry_buscar_prueba.bind('<KeyRelease>', lambda e: self.filtrar_pruebas_disponibles())
+        # -- Treeview unico: pruebas seleccionadas
+        tree_frame = tk.Frame(pruebas_container, bg=S['frame'])
+        tree_frame.pack(fill='both', expand=True)
 
-        tk.Button(top_pruebas, text="🔄 Mostrar Todas", font=('Segoe UI', 9), bg=COLORS['primary'], fg='white',
-                 relief='flat', padx=8, cursor='hand2', command=lambda: [self.entry_buscar_prueba.delete(0, 'end'), self.cargar_pruebas_disponibles()]).pack(side='left')
-
-        # Frame con dos listas: Disponibles y Seleccionadas
-        listas_frame = tk.Frame(pruebas_container, bg='white')
-        listas_frame.pack(fill='both', expand=True)
-
-        # Lista de pruebas disponibles
-        disp_frame = tk.Frame(listas_frame, bg='white')
-        disp_frame.pack(side='left', fill='both', expand=True, padx=(0, 5))
-
-        tk.Label(disp_frame, text="Pruebas Disponibles:", font=('Segoe UI', 9, 'bold'), bg='white').pack(anchor='w')
-
-        tree_disp_frame = tk.Frame(disp_frame, bg='white')
-        tree_disp_frame.pack(fill='both', expand=True)
-
-        cols_disp = ('Código', 'Nombre', 'Precio')
-        self.tree_pruebas_disp = ttk.Treeview(tree_disp_frame, columns=cols_disp, show='headings', height=8)
-        self.tree_pruebas_disp.heading('Código', text='Código')
-        self.tree_pruebas_disp.heading('Nombre', text='Nombre')
-        self.tree_pruebas_disp.heading('Precio', text='Precio')
-        self.tree_pruebas_disp.column('Código', width=70)
-        self.tree_pruebas_disp.column('Nombre', width=200)
-        self.tree_pruebas_disp.column('Precio', width=70)
-
-        vsb1 = ttk.Scrollbar(tree_disp_frame, orient='vertical', command=self.tree_pruebas_disp.yview)
-        self.tree_pruebas_disp.configure(yscrollcommand=vsb1.set)
-        self.tree_pruebas_disp.pack(side='left', fill='both', expand=True)
-        vsb1.pack(side='right', fill='y')
-
-        # Botones de agregar/quitar
-        btn_frame_pruebas = tk.Frame(listas_frame, bg='white', width=80)
-        btn_frame_pruebas.pack(side='left', fill='y', padx=5)
-
-        tk.Button(btn_frame_pruebas, text="➡️ Agregar", font=('Segoe UI', 9), bg=COLORS['success'], fg='white',
-                 relief='flat', width=10, cursor='hand2', command=self.agregar_prueba_sol).pack(pady=(40, 5))
-        tk.Button(btn_frame_pruebas, text="⬅️ Quitar", font=('Segoe UI', 9), bg=COLORS['danger'], fg='white',
-                 relief='flat', width=10, cursor='hand2', command=self.quitar_prueba_sol).pack(pady=5)
-
-        # Lista de pruebas seleccionadas
-        sel_frame = tk.Frame(listas_frame, bg='white')
-        sel_frame.pack(side='left', fill='both', expand=True, padx=(5, 0))
-
-        tk.Label(sel_frame, text="Pruebas Seleccionadas:", font=('Segoe UI', 9, 'bold'), bg='white').pack(anchor='w')
-
-        tree_sel_frame = tk.Frame(sel_frame, bg='white')
-        tree_sel_frame.pack(fill='both', expand=True)
-
-        cols_sel = ('Código', 'Nombre', 'Precio')
-        self.tree_pruebas_sel = ttk.Treeview(tree_sel_frame, columns=cols_sel, show='headings', height=8)
-        self.tree_pruebas_sel.heading('Código', text='Código')
+        cols_sel = ('#', 'Codigo', 'Nombre', 'Precio')
+        self.tree_pruebas_sel = ttk.Treeview(tree_frame, columns=cols_sel, show='headings', height=10)
+        self.tree_pruebas_sel.heading('#', text='#')
+        self.tree_pruebas_sel.heading('Codigo', text='Codigo')
         self.tree_pruebas_sel.heading('Nombre', text='Nombre')
         self.tree_pruebas_sel.heading('Precio', text='Precio')
-        self.tree_pruebas_sel.column('Código', width=70)
-        self.tree_pruebas_sel.column('Nombre', width=200)
-        self.tree_pruebas_sel.column('Precio', width=70)
+        self.tree_pruebas_sel.column('#', width=35, anchor='center')
+        self.tree_pruebas_sel.column('Codigo', width=70)
+        self.tree_pruebas_sel.column('Nombre', width=280)
+        self.tree_pruebas_sel.column('Precio', width=75, anchor='e')
 
-        vsb2 = ttk.Scrollbar(tree_sel_frame, orient='vertical', command=self.tree_pruebas_sel.yview)
-        self.tree_pruebas_sel.configure(yscrollcommand=vsb2.set)
+        vsb_sel = ttk.Scrollbar(tree_frame, orient='vertical', command=self.tree_pruebas_sel.yview)
+        self.tree_pruebas_sel.configure(yscrollcommand=vsb_sel.set)
         self.tree_pruebas_sel.pack(side='left', fill='both', expand=True)
-        vsb2.pack(side='right', fill='y')
+        vsb_sel.pack(side='right', fill='y')
+        self.tree_pruebas_sel.bind('<Delete>', lambda e: self.quitar_prueba_sol())
+        self.tree_pruebas_sel.bind('<Double-1>', lambda e: self.quitar_prueba_sol())
 
-        # Cargar pruebas disponibles
-        self.cargar_pruebas_disponibles()
+        # Backward compat: create hidden tree_pruebas_disp reference
+        self.tree_pruebas_disp = self.tree_pruebas_sel
+        self.pruebas_data = {}
 
-        # Doble click para agregar
-        self.tree_pruebas_disp.bind('<Double-1>', lambda e: self.agregar_prueba_sol())
+        # -- Barra resumen
+        self.lbl_resumen_pruebas = tk.Label(pruebas_container, text="0 pruebas | Subtotal: $0.00",
+                                             font=('Segoe UI', 9, 'bold'), bg=S['total_bg'], fg=S['label'],
+                                             relief='groove', bd=1, padx=8, pady=4)
+        self.lbl_resumen_pruebas.pack(fill='x', pady=(4, 0))
 
-        # ============================================================
-        # SECCIÓN 5: OBSERVACIONES
-        # ============================================================
-        sec_obs = tk.LabelFrame(left_col, text=" 📝 Observaciones ", font=('Segoe UI', 11, 'bold'),
-                                bg='white', fg=COLORS['text'])
-        sec_obs.pack(fill='x', pady=(0, 10))
-
-        obs_frame = tk.Frame(sec_obs, bg='white')
-        obs_frame.pack(fill='x', padx=15, pady=10)
-
-        # Observaciones clínicas
-        tk.Label(obs_frame, text="Diagnóstico / Motivo:", font=('Segoe UI', 9), bg='white').pack(anchor='w')
-        self.txt_diagnostico = tk.Text(obs_frame, font=('Segoe UI', 10), height=2, relief='flat', bg='#f8f9fa',
-                                       highlightthickness=1, highlightbackground=COLORS['border'])
-        self.txt_diagnostico.pack(fill='x', pady=(2, 8))
-
-        tk.Label(obs_frame, text="Observaciones Internas:", font=('Segoe UI', 9), bg='white').pack(anchor='w')
-        self.txt_observaciones = tk.Text(obs_frame, font=('Segoe UI', 10), height=2, relief='flat', bg='#f8f9fa',
-                                        highlightthickness=1, highlightbackground=COLORS['border'])
+        # ==============================================================
+        # SECCION 5: OBSERVACIONES
+        # ==============================================================
+        sec_obs = tk.LabelFrame(left_col, text=" Observaciones ",
+                                font=('Segoe UI', 10, 'bold'), bg=S['frame'], fg=S['sec_fg'])
+        sec_obs.pack(fill='x', pady=(0, 8))
+        obs_frame = tk.Frame(sec_obs, bg=S['frame'])
+        obs_frame.pack(fill='x', padx=12, pady=8)
+        tk.Label(obs_frame, text="Diagnostico / Motivo:", font=('Segoe UI', 8), bg=S['frame'], fg=S['label']).pack(anchor='w')
+        self.txt_diagnostico = tk.Text(obs_frame, font=('Segoe UI', 9), height=2, relief='solid', bg=S['input'], bd=1)
+        self.txt_diagnostico.pack(fill='x', pady=(2, 6))
+        tk.Label(obs_frame, text="Observaciones Internas:", font=('Segoe UI', 8), bg=S['frame'], fg=S['label']).pack(anchor='w')
+        self.txt_observaciones = tk.Text(obs_frame, font=('Segoe UI', 9), height=2, relief='solid', bg=S['input'], bd=1)
         self.txt_observaciones.pack(fill='x')
 
-        # ============================================================
-        # COLUMNA DERECHA: FACTURACIÓN
-        # ============================================================
-        tk.Label(right_col, text="💰 FACTURACIÓN", font=('Segoe UI', 14, 'bold'),
-                bg='white', fg=COLORS['text']).pack(pady=10)
+        # ==============================================================
+        # COLUMNA DERECHA: FACTURACION
+        # ==============================================================
+        tk.Label(right_col, text="FACTURACION", font=('Segoe UI', 12, 'bold'),
+                bg=S['frame'], fg=S['sec_fg']).pack(pady=8)
 
-        # TASAS DE CAMBIO
-        tasas_frame = tk.LabelFrame(right_col, text=" 💱 Tasas de Cambio (Ref: USD) ", font=('Segoe UI', 9, 'bold'),
-                                   bg='#fff8e1', fg=COLORS['text'])
-        tasas_frame.pack(fill='x', padx=10, pady=5)
-
-        tasas_inner = tk.Frame(tasas_frame, bg='#fff8e1')
-        tasas_inner.pack(fill='x', padx=10, pady=8)
-
-        # Tasa Bs
-        tk.Label(tasas_inner, text="1 USD =", font=('Segoe UI', 9), bg='#fff8e1').pack(side='left')
-        self.entry_tasa_bs = tk.Entry(tasas_inner, font=('Segoe UI', 10), width=10, relief='flat',
-                                     highlightthickness=1, highlightbackground=COLORS['border'], justify='right')
+        # Tasas de cambio
+        tasas_frame = tk.LabelFrame(right_col, text=" Tasas de Cambio (Ref: USD) ",
+                                   font=('Segoe UI', 8, 'bold'), bg=S['frame'], fg=S['label'])
+        tasas_frame.pack(fill='x', padx=8, pady=4)
+        tasas_inner = tk.Frame(tasas_frame, bg=S['frame'])
+        tasas_inner.pack(fill='x', padx=8, pady=6)
+        tk.Label(tasas_inner, text="1 USD =", font=('Segoe UI', 8), bg=S['frame'], fg=S['label']).pack(side='left')
+        self.entry_tasa_bs = tk.Entry(tasas_inner, font=('Segoe UI', 9), width=9, relief='solid', bg=S['input'], bd=1, justify='right')
         self.entry_tasa_bs.pack(side='left', padx=3, ipady=2)
         self.entry_tasa_bs.insert(0, '50.00')
         self.entry_tasa_bs.bind('<KeyRelease>', lambda e: self.calcular_totales())
-        tk.Label(tasas_inner, text="Bs", font=('Segoe UI', 9, 'bold'), bg='#fff8e1', fg='#e65100').pack(side='left', padx=(0, 10))
-
-        # Tasa COP
-        tk.Label(tasas_inner, text="=", font=('Segoe UI', 9), bg='#fff8e1').pack(side='left')
-        self.entry_tasa_cop = tk.Entry(tasas_inner, font=('Segoe UI', 10), width=10, relief='flat',
-                                      highlightthickness=1, highlightbackground=COLORS['border'], justify='right')
+        tk.Label(tasas_inner, text="Bs", font=('Segoe UI', 8, 'bold'), bg=S['frame'], fg='#e65100').pack(side='left', padx=(0, 8))
+        tk.Label(tasas_inner, text="=", font=('Segoe UI', 8), bg=S['frame'], fg=S['label']).pack(side='left')
+        self.entry_tasa_cop = tk.Entry(tasas_inner, font=('Segoe UI', 9), width=9, relief='solid', bg=S['input'], bd=1, justify='right')
         self.entry_tasa_cop.pack(side='left', padx=3, ipady=2)
         self.entry_tasa_cop.insert(0, '4200.00')
         self.entry_tasa_cop.bind('<KeyRelease>', lambda e: self.calcular_totales())
-        tk.Label(tasas_inner, text="COP", font=('Segoe UI', 9, 'bold'), bg='#fff8e1', fg='#1565c0').pack(side='left')
+        tk.Label(tasas_inner, text="COP", font=('Segoe UI', 8, 'bold'), bg=S['frame'], fg='#1565c0').pack(side='left')
 
-        tk.Frame(right_col, bg=COLORS['border'], height=1).pack(fill='x', padx=10, pady=5)
+        tk.Frame(right_col, bg=S['border'], height=1).pack(fill='x', padx=8, pady=4)
 
-        fact_frame = tk.Frame(right_col, bg='white')
-        fact_frame.pack(fill='x', padx=15, pady=5)
+        fact_frame = tk.Frame(right_col, bg=S['frame'])
+        fact_frame.pack(fill='x', padx=12, pady=4)
 
         # Subtotal
-        row_sub = tk.Frame(fact_frame, bg='white')
-        row_sub.pack(fill='x', pady=3)
-        tk.Label(row_sub, text="Subtotal:", font=('Segoe UI', 10), bg='white', width=12, anchor='w').pack(side='left')
-        self.lbl_subtotal = tk.Label(row_sub, text="$0.00", font=('Segoe UI', 12, 'bold'), bg='white', fg=COLORS['text'])
+        row_sub = tk.Frame(fact_frame, bg=S['frame'])
+        row_sub.pack(fill='x', pady=2)
+        tk.Label(row_sub, text="Subtotal:", font=('Segoe UI', 9), bg=S['frame'], fg=S['label'], width=12, anchor='w').pack(side='left')
+        self.lbl_subtotal = tk.Label(row_sub, text="$0.00", font=('Segoe UI', 11, 'bold'), bg=S['frame'], fg=S['label'])
         self.lbl_subtotal.pack(side='right')
 
         # Descuento
-        row_desc = tk.Frame(fact_frame, bg='white')
-        row_desc.pack(fill='x', pady=3)
-        tk.Label(row_desc, text="Descuento (%):", font=('Segoe UI', 10), bg='white', width=12, anchor='w').pack(side='left')
-        self.entry_descuento = tk.Entry(row_desc, font=('Segoe UI', 10), width=6, relief='flat', bg='#f8f9fa',
-                                       highlightthickness=1, highlightbackground=COLORS['border'], justify='right')
+        row_desc = tk.Frame(fact_frame, bg=S['frame'])
+        row_desc.pack(fill='x', pady=2)
+        tk.Label(row_desc, text="Descuento (%):", font=('Segoe UI', 9), bg=S['frame'], fg=S['label'], width=12, anchor='w').pack(side='left')
+        self.entry_descuento = tk.Entry(row_desc, font=('Segoe UI', 9), width=6, relief='solid', bg=S['input'], bd=1, justify='right')
         self.entry_descuento.pack(side='right', ipady=2)
         self.entry_descuento.insert(0, '0')
         self.entry_descuento.bind('<KeyRelease>', lambda e: self.calcular_totales())
-
-        row_desc_monto = tk.Frame(fact_frame, bg='white')
+        row_desc_monto = tk.Frame(fact_frame, bg=S['frame'])
         row_desc_monto.pack(fill='x', pady=1)
-        tk.Label(row_desc_monto, text="", bg='white', width=12).pack(side='left')
-        self.lbl_descuento = tk.Label(row_desc_monto, text="-$0.00", font=('Segoe UI', 9), bg='white', fg=COLORS['danger'])
+        tk.Label(row_desc_monto, text="", bg=S['frame'], width=12).pack(side='left')
+        self.lbl_descuento = tk.Label(row_desc_monto, text="-$0.00", font=('Segoe UI', 8), bg=S['frame'], fg=S['btn_del'])
         self.lbl_descuento.pack(side='right')
 
         # IVA
-        row_iva = tk.Frame(fact_frame, bg='white')
-        row_iva.pack(fill='x', pady=3)
-        tk.Label(row_iva, text="IVA (%):", font=('Segoe UI', 10), bg='white', width=12, anchor='w').pack(side='left')
-        self.entry_iva = tk.Entry(row_iva, font=('Segoe UI', 10), width=6, relief='flat', bg='#f8f9fa',
-                                 highlightthickness=1, highlightbackground=COLORS['border'], justify='right')
+        row_iva = tk.Frame(fact_frame, bg=S['frame'])
+        row_iva.pack(fill='x', pady=2)
+        tk.Label(row_iva, text="IVA (%):", font=('Segoe UI', 9), bg=S['frame'], fg=S['label'], width=12, anchor='w').pack(side='left')
+        self.entry_iva = tk.Entry(row_iva, font=('Segoe UI', 9), width=6, relief='solid', bg=S['input'], bd=1, justify='right')
         self.entry_iva.pack(side='right', ipady=2)
         self.entry_iva.insert(0, '16')
         self.entry_iva.bind('<KeyRelease>', lambda e: self.calcular_totales())
-
-        row_iva_monto = tk.Frame(fact_frame, bg='white')
+        row_iva_monto = tk.Frame(fact_frame, bg=S['frame'])
         row_iva_monto.pack(fill='x', pady=1)
-        tk.Label(row_iva_monto, text="", bg='white', width=12).pack(side='left')
-        self.lbl_iva = tk.Label(row_iva_monto, text="+$0.00", font=('Segoe UI', 9), bg='white', fg=COLORS['success'])
+        tk.Label(row_iva_monto, text="", bg=S['frame'], width=12).pack(side='left')
+        self.lbl_iva = tk.Label(row_iva_monto, text="+$0.00", font=('Segoe UI', 8), bg=S['frame'], fg=S['btn_ok'])
         self.lbl_iva.pack(side='right')
 
-        tk.Frame(fact_frame, bg=COLORS['border'], height=1).pack(fill='x', pady=8)
+        tk.Frame(fact_frame, bg=S['border'], height=1).pack(fill='x', pady=6)
 
-        # TOTALES EN 3 MONEDAS
-        totales_frame = tk.Frame(fact_frame, bg='#e3f2fd')
-        totales_frame.pack(fill='x', pady=5)
+        # Totales en 3 monedas
+        totales_frame = tk.Frame(fact_frame, bg=S['total_bg'], relief='groove', bd=1)
+        totales_frame.pack(fill='x', pady=4)
+        tk.Label(totales_frame, text="TOTAL:", font=('Segoe UI', 10, 'bold'), bg=S['total_bg'], fg=S['sec_fg']).pack(anchor='w', padx=8, pady=(6, 4))
 
-        tk.Label(totales_frame, text="TOTAL:", font=('Segoe UI', 11, 'bold'), bg='#e3f2fd').pack(anchor='w', padx=10, pady=(8, 5))
-
-        # USD
-        row_usd = tk.Frame(totales_frame, bg='#e3f2fd')
-        row_usd.pack(fill='x', padx=10, pady=2)
-        tk.Label(row_usd, text="🇺🇸 USD:", font=('Segoe UI', 10, 'bold'), bg='#e3f2fd', width=10, anchor='w').pack(side='left')
-        self.lbl_total_usd = tk.Label(row_usd, text="$0.00", font=('Segoe UI', 14, 'bold'), bg='#e3f2fd', fg='#2e7d32')
+        row_usd = tk.Frame(totales_frame, bg=S['total_bg'])
+        row_usd.pack(fill='x', padx=8, pady=1)
+        tk.Label(row_usd, text="USD:", font=('Segoe UI', 9, 'bold'), bg=S['total_bg'], fg=S['label'], width=8, anchor='w').pack(side='left')
+        self.lbl_total_usd = tk.Label(row_usd, text="$0.00", font=('Segoe UI', 13, 'bold'), bg=S['total_bg'], fg='#2e7d32')
         self.lbl_total_usd.pack(side='right')
 
-        # Bs
-        row_bs = tk.Frame(totales_frame, bg='#e3f2fd')
-        row_bs.pack(fill='x', padx=10, pady=2)
-        tk.Label(row_bs, text="🇻🇪 Bs:", font=('Segoe UI', 10, 'bold'), bg='#e3f2fd', width=10, anchor='w').pack(side='left')
-        self.lbl_total_bs = tk.Label(row_bs, text="Bs. 0,00", font=('Segoe UI', 12, 'bold'), bg='#e3f2fd', fg='#e65100')
+        row_bs = tk.Frame(totales_frame, bg=S['total_bg'])
+        row_bs.pack(fill='x', padx=8, pady=1)
+        tk.Label(row_bs, text="Bs:", font=('Segoe UI', 9, 'bold'), bg=S['total_bg'], fg=S['label'], width=8, anchor='w').pack(side='left')
+        self.lbl_total_bs = tk.Label(row_bs, text="Bs. 0,00", font=('Segoe UI', 11, 'bold'), bg=S['total_bg'], fg='#e65100')
         self.lbl_total_bs.pack(side='right')
 
-        # COP
-        row_cop = tk.Frame(totales_frame, bg='#e3f2fd')
-        row_cop.pack(fill='x', padx=10, pady=(2, 8))
-        tk.Label(row_cop, text="🇨🇴 COP:", font=('Segoe UI', 10, 'bold'), bg='#e3f2fd', width=10, anchor='w').pack(side='left')
-        self.lbl_total_cop = tk.Label(row_cop, text="$0", font=('Segoe UI', 12, 'bold'), bg='#e3f2fd', fg='#1565c0')
+        row_cop = tk.Frame(totales_frame, bg=S['total_bg'])
+        row_cop.pack(fill='x', padx=8, pady=(1, 6))
+        tk.Label(row_cop, text="COP:", font=('Segoe UI', 9, 'bold'), bg=S['total_bg'], fg=S['label'], width=8, anchor='w').pack(side='left')
+        self.lbl_total_cop = tk.Label(row_cop, text="$0", font=('Segoe UI', 11, 'bold'), bg=S['total_bg'], fg='#1565c0')
         self.lbl_total_cop.pack(side='right')
 
-        tk.Frame(fact_frame, bg=COLORS['border'], height=1).pack(fill='x', pady=8)
+        tk.Frame(fact_frame, bg=S['border'], height=1).pack(fill='x', pady=6)
 
-        # Monto Abonado
-        row_abono = tk.Frame(fact_frame, bg='white')
-        row_abono.pack(fill='x', pady=3)
-        tk.Label(row_abono, text="Abonado (USD):", font=('Segoe UI', 10), bg='white', width=12, anchor='w').pack(side='left')
-        self.entry_abonado = tk.Entry(row_abono, font=('Segoe UI', 10), width=10, relief='flat', bg='#e8f5e9',
-                                     highlightthickness=1, highlightbackground=COLORS['success'], justify='right')
+        # Abonado
+        row_abono = tk.Frame(fact_frame, bg=S['frame'])
+        row_abono.pack(fill='x', pady=2)
+        tk.Label(row_abono, text="Abonado (USD):", font=('Segoe UI', 9), bg=S['frame'], fg=S['label'], width=12, anchor='w').pack(side='left')
+        self.entry_abonado = tk.Entry(row_abono, font=('Segoe UI', 9), width=10, relief='solid', bg=S['input'], bd=1, justify='right')
         self.entry_abonado.pack(side='right', ipady=2)
         self.entry_abonado.insert(0, '0.00')
         self.entry_abonado.bind('<KeyRelease>', lambda e: self.calcular_totales())
 
-        # Saldo Pendiente
-        row_saldo = tk.Frame(fact_frame, bg='white')
-        row_saldo.pack(fill='x', pady=5)
-        tk.Label(row_saldo, text="Saldo:", font=('Segoe UI', 10, 'bold'), bg='white', width=12, anchor='w').pack(side='left')
-        self.lbl_saldo = tk.Label(row_saldo, text="$0.00", font=('Segoe UI', 12, 'bold'), bg='white', fg=COLORS['danger'])
+        # Saldo
+        row_saldo = tk.Frame(fact_frame, bg=S['frame'])
+        row_saldo.pack(fill='x', pady=4)
+        tk.Label(row_saldo, text="Saldo:", font=('Segoe UI', 9, 'bold'), bg=S['frame'], fg=S['label'], width=12, anchor='w').pack(side='left')
+        self.lbl_saldo = tk.Label(row_saldo, text="$0.00", font=('Segoe UI', 11, 'bold'), bg=S['frame'], fg=S['btn_del'])
         self.lbl_saldo.pack(side='right')
 
-        # ============================================================
-        # SELECCIÓN DE MONEDA Y FORMA DE PAGO
-        # ============================================================
-        pago_frame = tk.LabelFrame(fact_frame, text=" 💳 Opciones de Pago ", font=('Segoe UI', 9, 'bold'),
-                                  bg='#f5f5f5', fg=COLORS['text'])
-        pago_frame.pack(fill='x', pady=8)
-
+        # Opciones de pago
+        pago_frame = tk.LabelFrame(fact_frame, text=" Opciones de Pago ",
+                                  font=('Segoe UI', 8, 'bold'), bg='#f5f5f5', fg=S['label'])
+        pago_frame.pack(fill='x', pady=6)
         pago_inner = tk.Frame(pago_frame, bg='#f5f5f5')
-        pago_inner.pack(fill='x', padx=10, pady=8)
+        pago_inner.pack(fill='x', padx=8, pady=6)
 
-        # Moneda de Pago
         row_moneda = tk.Frame(pago_inner, bg='#f5f5f5')
-        row_moneda.pack(fill='x', pady=3)
-        tk.Label(row_moneda, text="Moneda:", font=('Segoe UI', 10, 'bold'), bg='#f5f5f5', width=10, anchor='w').pack(side='left')
-        self.combo_moneda = ttk.Combobox(row_moneda, font=('Segoe UI', 10), state='readonly', width=18)
-        self.combo_moneda['values'] = ['🇺🇸 USD (Dólar)', '🇻🇪 Bs (Bolívares)', '🇨🇴 COP (Pesos)']
-        self.combo_moneda.set('🇺🇸 USD (Dólar)')
+        row_moneda.pack(fill='x', pady=2)
+        tk.Label(row_moneda, text="Moneda:", font=('Segoe UI', 9, 'bold'), bg='#f5f5f5', fg=S['label'], width=9, anchor='w').pack(side='left')
+        self.combo_moneda = ttk.Combobox(row_moneda, font=('Segoe UI', 9), state='readonly', width=17)
+        self.combo_moneda['values'] = ['USD (Dolar)', 'Bs (Bolivares)', 'COP (Pesos)']
+        self.combo_moneda.set('USD (Dolar)')
         self.combo_moneda.pack(side='left')
         self.combo_moneda.bind('<<ComboboxSelected>>', lambda e: self.actualizar_total_moneda())
 
-        # Forma de Pago
         row_forma = tk.Frame(pago_inner, bg='#f5f5f5')
-        row_forma.pack(fill='x', pady=3)
-        tk.Label(row_forma, text="Forma:", font=('Segoe UI', 10, 'bold'), bg='#f5f5f5', width=10, anchor='w').pack(side='left')
-        self.combo_forma_pago = ttk.Combobox(row_forma, font=('Segoe UI', 10), state='readonly', width=18)
-        self.combo_forma_pago['values'] = ['Efectivo', 'Tarjeta Débito', 'Tarjeta Crédito', 'Transferencia', 'Zelle/Pago Móvil', 'Mixto']
+        row_forma.pack(fill='x', pady=2)
+        tk.Label(row_forma, text="Forma:", font=('Segoe UI', 9, 'bold'), bg='#f5f5f5', fg=S['label'], width=9, anchor='w').pack(side='left')
+        self.combo_forma_pago = ttk.Combobox(row_forma, font=('Segoe UI', 9), state='readonly', width=17)
+        self.combo_forma_pago['values'] = ['Efectivo', 'Tarjeta Debito', 'Tarjeta Credito', 'Transferencia', 'Zelle/Pago Movil', 'Mixto']
         self.combo_forma_pago.set('Efectivo')
         self.combo_forma_pago.pack(side='left')
 
-        # Total a Pagar (según moneda seleccionada)
-        tk.Frame(pago_inner, bg='#bdbdbd', height=1).pack(fill='x', pady=8)
-
-        self.frame_total_pagar = tk.Frame(pago_inner, bg='#4caf50')
-        self.frame_total_pagar.pack(fill='x', pady=3)
-
-        tk.Label(self.frame_total_pagar, text="TOTAL A PAGAR:", font=('Segoe UI', 10, 'bold'),
-                bg='#4caf50', fg='white').pack(side='left', padx=10, pady=8)
+        tk.Frame(pago_inner, bg=S['border'], height=1).pack(fill='x', pady=6)
+        self.frame_total_pagar = tk.Frame(pago_inner, bg='#2e7d32')
+        self.frame_total_pagar.pack(fill='x', pady=2)
+        tk.Label(self.frame_total_pagar, text="TOTAL A PAGAR:", font=('Segoe UI', 9, 'bold'),
+                bg='#2e7d32', fg='white').pack(side='left', padx=8, pady=6)
         self.lbl_total_pagar = tk.Label(self.frame_total_pagar, text="$0.00 USD",
-                                        font=('Segoe UI', 16, 'bold'), bg='#4caf50', fg='white')
-        self.lbl_total_pagar.pack(side='right', padx=10, pady=8)
+                                        font=('Segoe UI', 14, 'bold'), bg='#2e7d32', fg='white')
+        self.lbl_total_pagar.pack(side='right', padx=8, pady=6)
 
-        # ============================================================
-        # BOTONES DE ACCIÓN
-        # ============================================================
-        btn_frame = tk.Frame(right_col, bg='white')
-        btn_frame.pack(fill='x', padx=15, pady=15, side='bottom')
-
-        tk.Button(btn_frame, text="💾 GUARDAR SOLICITUD", font=('Segoe UI', 11, 'bold'),
-                 bg=COLORS['success'], fg='white', relief='flat', cursor='hand2',
-                 command=lambda: self.guardar_solicitud_completa(win)).pack(fill='x', pady=3, ipady=8)
-
-        tk.Button(btn_frame, text="🧾 Imprimir Comprobante", font=('Segoe UI', 10),
-                 bg=COLORS['info'], fg='white', relief='flat', cursor='hand2',
-                 command=lambda: self.imprimir_comprobante()).pack(fill='x', pady=3, ipady=5)
-
-        tk.Button(btn_frame, text="❌ Cancelar", font=('Segoe UI', 10),
-                 bg='#95a5a6', fg='white', relief='flat', cursor='hand2',
-                 command=win.destroy).pack(fill='x', pady=3, ipady=5)
+        # Botones
+        btn_frame = tk.Frame(right_col, bg=S['frame'])
+        btn_frame.pack(fill='x', padx=12, pady=12, side='bottom')
+        tk.Button(btn_frame, text="GUARDAR SOLICITUD", font=('Segoe UI', 10, 'bold'),
+                 bg=S['btn_ok'], fg='white', relief='raised', cursor='hand2',
+                 command=lambda: self.guardar_solicitud_completa(win)).pack(fill='x', pady=2, ipady=6)
+        tk.Button(btn_frame, text="Imprimir Comprobante", font=('Segoe UI', 9),
+                 bg=S['btn_act'], fg=S['btn_act_fg'], relief='raised', cursor='hand2',
+                 command=lambda: self.imprimir_comprobante()).pack(fill='x', pady=2, ipady=4)
+        tk.Button(btn_frame, text="Cancelar", font=('Segoe UI', 9),
+                 bg=S['btn'], fg=S['btn_fg'], relief='raised', cursor='hand2',
+                 command=win.destroy).pack(fill='x', pady=2, ipady=4)
 
         # Guardar referencias
         self.sol_win = win
@@ -4883,19 +4776,11 @@ class MainApplication:
         for item in sel:
             if item in self.pruebas_data:
                 data = self.pruebas_data[item]
-                # Agregar a la lista de seleccionadas
-                self.tree_pruebas_sel.insert('', 'end', values=(
-                    data['codigo'],
-                    data['nombre'],
-                    f"${data['precio']:,.2f}"
-                ))
                 self.sol_pruebas_seleccionadas.append(data)
                 pruebas_agregadas = True
 
-        # Actualizar lista de disponibles (para quitar las agregadas)
         if pruebas_agregadas:
-            filtro = self.entry_buscar_prueba.get().strip() if hasattr(self, 'entry_buscar_prueba') else ""
-            self.cargar_pruebas_disponibles(filtro)
+            self._refrescar_lista_seleccionadas()
 
         self.calcular_totales()
 
@@ -4906,15 +4791,12 @@ class MainApplication:
             return
 
         for item in sel:
-            codigo = str(self.tree_pruebas_sel.item(item)['values'][0])
-            self.tree_pruebas_sel.delete(item)
-            # Quitar de la lista interna (comparar como string para evitar desajuste de tipos)
+            vals = self.tree_pruebas_sel.item(item)['values']
+            # Columnas: #, Codigo, Nombre, Precio — Codigo esta en indice 1
+            codigo = str(vals[1]) if len(vals) > 1 else ''
             self.sol_pruebas_seleccionadas = [p for p in self.sol_pruebas_seleccionadas if str(p['codigo']) != codigo]
 
-        # Actualizar lista de disponibles (para mostrar las pruebas removidas)
-        filtro = self.entry_buscar_prueba.get().strip() if hasattr(self, 'entry_buscar_prueba') else ""
-        self.cargar_pruebas_disponibles(filtro)
-
+        self._refrescar_lista_seleccionadas()
         self.calcular_totales()
 
     def calcular_totales(self):
@@ -5043,7 +4925,7 @@ class MainApplication:
                 # Paciente nuevo — dejar campos editables para llenar
                 self.pac_id_seleccionado = None
                 self._pac_auto_filled = False
-                self._set_pac_status("🆕 Paciente nuevo — complete los datos y se registrará al guardar",
+                self._set_pac_status("NUEVO — complete los datos y se registrara al guardar",
                                      '#fff3e0', '#e65100')
                 # Mover foco al campo Nombres
                 self.pac_nombres.focus_set()
@@ -5099,7 +4981,7 @@ class MainApplication:
                 pass
 
         nombre = f"{pac.get('Nombres', '')} {pac.get('Apellidos', '')}".strip()
-        self._set_pac_status(f"✅ Paciente encontrado: {nombre}{edad_str}",
+        self._set_pac_status(f"OK — Paciente encontrado: {nombre}{edad_str}",
                              '#e8f5e9', '#2e7d32')
 
     def _limpiar_campos_paciente(self):
@@ -5127,6 +5009,165 @@ class MainApplication:
         """Actualiza el indicador de estado del paciente."""
         self.pac_status_frame.config(bg=bg_color)
         self.lbl_pac_status.config(text=texto, bg=bg_color, fg=fg_color)
+
+    def _agregar_perfil(self):
+        """Agrega todas las pruebas de un perfil al listado de seleccionadas."""
+        perfil_sel = self.combo_perfil.get()
+        if not perfil_sel or perfil_sel not in self._perfil_map:
+            messagebox.showwarning("Perfil", "Seleccione un perfil de la lista")
+            return
+
+        perfil_id = self._perfil_map[perfil_sel]
+        ids_ya = {p['id'] for p in self.sol_pruebas_seleccionadas}
+
+        try:
+            pruebas = db.query(f"""
+                SELECT p.PruebaID, p.CodigoPrueba, p.NombrePrueba, p.Precio
+                FROM PruebasEnPerfil pp
+                INNER JOIN Pruebas p ON pp.PruebaID = p.PruebaID
+                WHERE pp.PerfilID = {perfil_id} AND p.Activo = True
+                ORDER BY p.NombrePrueba
+            """)
+            if not pruebas:
+                messagebox.showinfo("Perfil", "Este perfil no tiene pruebas asignadas")
+                return
+
+            agregadas = 0
+            for p in pruebas:
+                if p['PruebaID'] in ids_ya:
+                    continue
+                precio = float(p.get('Precio') or 0)
+                self.sol_pruebas_seleccionadas.append({
+                    'id': p['PruebaID'], 'codigo': p['CodigoPrueba'],
+                    'nombre': p['NombrePrueba'], 'precio': precio
+                })
+                ids_ya.add(p['PruebaID'])
+                agregadas += 1
+
+            self._refrescar_lista_seleccionadas()
+            self.calcular_totales()
+            if agregadas > 0:
+                self._set_pac_status(f"Perfil agregado: {agregadas} pruebas anadidas", '#e8f5e9', '#2e7d32')
+            else:
+                self._set_pac_status("Todas las pruebas del perfil ya estaban seleccionadas", '#fff3e0', '#e65100')
+        except Exception as e:
+            _log.error("Error agregando perfil: %s", e)
+            messagebox.showerror("Error", f"No se pudo cargar el perfil: {e}")
+
+    def _agregar_primera_coincidencia(self):
+        """Busca pruebas por nombre/codigo y agrega la primera coincidencia (o popup si hay varias)."""
+        texto = self.entry_buscar_prueba.get().strip()
+        if not texto:
+            return
+
+        ids_ya = {p['id'] for p in self.sol_pruebas_seleccionadas}
+        safe = texto.replace("'", "''")
+
+        try:
+            pruebas = db.query(f"""
+                SELECT PruebaID, CodigoPrueba, NombrePrueba, Precio
+                FROM Pruebas
+                WHERE Activo=True AND (NombrePrueba LIKE '%{safe}%' OR CodigoPrueba LIKE '%{safe}%')
+                ORDER BY NombrePrueba
+            """)
+            if not pruebas:
+                self._set_pac_status(f"No se encontro prueba: '{texto}'", '#ffebee', '#c62828')
+                return
+
+            # Filtrar las ya seleccionadas
+            disponibles = [p for p in pruebas if p['PruebaID'] not in ids_ya]
+            if not disponibles:
+                self._set_pac_status("Todas las coincidencias ya estan seleccionadas", '#fff3e0', '#e65100')
+                return
+
+            if len(disponibles) == 1:
+                elegida = disponibles[0]
+            else:
+                # Popup de seleccion
+                elegida = self._popup_seleccion_prueba(disponibles)
+                if not elegida:
+                    return
+
+            precio = float(elegida.get('Precio') or 0)
+            self.sol_pruebas_seleccionadas.append({
+                'id': elegida['PruebaID'], 'codigo': elegida['CodigoPrueba'],
+                'nombre': elegida['NombrePrueba'], 'precio': precio
+            })
+            self._refrescar_lista_seleccionadas()
+            self.calcular_totales()
+            self.entry_buscar_prueba.delete(0, 'end')
+            self.entry_buscar_prueba.focus_set()
+        except Exception as e:
+            _log.error("Error buscando prueba: %s", e)
+
+    def _popup_seleccion_prueba(self, pruebas):
+        """Muestra popup para elegir entre varias pruebas coincidentes. Retorna dict o None."""
+        popup = tk.Toplevel(self.sol_win)
+        popup.title("Seleccionar Prueba")
+        popup.configure(bg='#f0f0f0')
+        popup.grab_set()
+        popup.transient(self.sol_win)
+        hacer_ventana_responsiva(popup, 500, 350, min_ancho=400, min_alto=250)
+
+        tk.Label(popup, text=f"{len(pruebas)} coincidencias — seleccione una:",
+                 font=('Segoe UI', 9, 'bold'), bg='#f0f0f0', fg='#333').pack(padx=10, pady=(10, 5), anchor='w')
+
+        frame_tree = tk.Frame(popup, bg='#f0f0f0')
+        frame_tree.pack(fill='both', expand=True, padx=10, pady=5)
+
+        cols = ('Codigo', 'Nombre', 'Precio')
+        tree = ttk.Treeview(frame_tree, columns=cols, show='headings', height=10)
+        tree.heading('Codigo', text='Codigo')
+        tree.heading('Nombre', text='Nombre')
+        tree.heading('Precio', text='Precio')
+        tree.column('Codigo', width=70)
+        tree.column('Nombre', width=300)
+        tree.column('Precio', width=70, anchor='e')
+
+        vsb = ttk.Scrollbar(frame_tree, orient='vertical', command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+        tree.pack(side='left', fill='both', expand=True)
+        vsb.pack(side='right', fill='y')
+
+        data_map = {}
+        for p in pruebas:
+            precio = float(p.get('Precio') or 0)
+            iid = tree.insert('', 'end', values=(p['CodigoPrueba'] or '', p['NombrePrueba'] or '', f"${precio:,.2f}"))
+            data_map[iid] = p
+
+        resultado = [None]
+
+        def _seleccionar(event=None):
+            sel = tree.selection()
+            if sel:
+                resultado[0] = data_map[sel[0]]
+            popup.destroy()
+
+        tree.bind('<Double-1>', _seleccionar)
+        btn_frame = tk.Frame(popup, bg='#f0f0f0')
+        btn_frame.pack(fill='x', padx=10, pady=8)
+        tk.Button(btn_frame, text="Seleccionar", font=('Segoe UI', 9), bg='#1565c0', fg='white',
+                  command=_seleccionar, padx=12).pack(side='left')
+        tk.Button(btn_frame, text="Cancelar", font=('Segoe UI', 9), bg='#e0e0e0',
+                  command=popup.destroy, padx=12).pack(side='right')
+
+        popup.wait_window()
+        return resultado[0]
+
+    def _refrescar_lista_seleccionadas(self):
+        """Reconstruye el treeview unico de pruebas seleccionadas."""
+        for item in self.tree_pruebas_sel.get_children():
+            self.tree_pruebas_sel.delete(item)
+        for i, p in enumerate(self.sol_pruebas_seleccionadas, 1):
+            precio = float(p.get('precio') or 0)
+            self.tree_pruebas_sel.insert('', 'end', values=(
+                i, p.get('codigo', ''), p.get('nombre', ''), f"${precio:,.2f}"
+            ))
+        # Actualizar barra resumen
+        n = len(self.sol_pruebas_seleccionadas)
+        subtotal = sum(float(p.get('precio', 0)) for p in self.sol_pruebas_seleccionadas)
+        if hasattr(self, 'lbl_resumen_pruebas'):
+            self.lbl_resumen_pruebas.config(text=f"{n} prueba{'s' if n != 1 else ''} | Subtotal: ${subtotal:,.2f}")
 
     def _verificar_solicitudes_existentes(self, paciente):
         """Verifica si el paciente tiene solicitudes activas del mismo día."""
@@ -5182,8 +5223,8 @@ class MainApplication:
                     self.solicitud_existente_id
                 )
                 if pruebas_existentes:
-                    info = f"📋 Agregando pruebas a {num_sol} ({len(pruebas_existentes)} pruebas existentes)"
-                    self._set_pac_status(f"✅ {nombre} — {info}", '#fff3e0', '#e65100')
+                    info = f"Agregando pruebas a {num_sol} ({len(pruebas_existentes)} pruebas existentes)"
+                    self._set_pac_status(f"OK — {nombre} | {info}", '#fff3e0', '#e65100')
 
             elif dialogo.resultado == 'nueva':
                 self.modo_solicitud = 'nueva'
@@ -5253,7 +5294,7 @@ class MainApplication:
             if pac:
                 self.pac_id_seleccionado = pac['PacienteID']
                 self._pac_auto_filled = True
-                self._set_pac_status(f"✅ Paciente {nombres} {apellidos} registrado exitosamente",
+                self._set_pac_status(f"OK — Paciente {nombres} {apellidos} registrado exitosamente",
                                      '#e8f5e9', '#2e7d32')
                 return pac['PacienteID']
         except Exception as e:
@@ -5670,11 +5711,11 @@ class MainApplication:
 
         tipo_var = tk.StringVar(value='recibo')
 
-        tk.Radiobutton(options_frame, text="📄 Recibo (Documento interno)",
+        tk.Radiobutton(options_frame, text="Recibo (Documento interno)",
                       variable=tipo_var, value='recibo', font=('Segoe UI', 10), bg='white').pack(anchor='w', pady=3)
-        tk.Radiobutton(options_frame, text="🧾 Factura Fiscal",
+        tk.Radiobutton(options_frame, text="Factura Fiscal",
                       variable=tipo_var, value='factura', font=('Segoe UI', 10), bg='white').pack(anchor='w', pady=3)
-        tk.Radiobutton(options_frame, text="❌ Sin documento (Solo guardar solicitud)",
+        tk.Radiobutton(options_frame, text="Sin documento (Solo guardar solicitud)",
                       variable=tipo_var, value='sin_documento', font=('Segoe UI', 10), bg='white').pack(anchor='w', pady=3)
 
         # Botones - usar side='bottom' para asegurar visibilidad
@@ -5689,12 +5730,12 @@ class MainApplication:
             resultado[0] = None
             dialog.destroy()
 
-        btn_continuar = tk.Button(btn_frame, text="✅ GUARDAR", font=('Segoe UI', 11, 'bold'),
+        btn_continuar = tk.Button(btn_frame, text="GUARDAR", font=('Segoe UI', 11, 'bold'),
                  bg=COLORS['success'], fg='white', relief='flat', padx=25, pady=10,
                  cursor='hand2', command=aceptar)
         btn_continuar.pack(side='left', padx=10)
 
-        btn_cancelar = tk.Button(btn_frame, text="❌ Cancelar", font=('Segoe UI', 11),
+        btn_cancelar = tk.Button(btn_frame, text="Cancelar", font=('Segoe UI', 11),
                  bg='#e74c3c', fg='white', relief='flat', padx=25, pady=10,
                  cursor='hand2', command=cancelar)
         btn_cancelar.pack(side='right', padx=10)
@@ -15129,6 +15170,34 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
                                 "Ejecute: scripts/crear_tablas_administrativo.py")
             return
         self.ventana_admin.show_gastos(self)
+
+    def show_inventario(self):
+        """Inventario de Insumos y Reactivos"""
+        if not self.ventana_admin:
+            messagebox.showerror("Error", "Módulo administrativo no disponible.")
+            return
+        self.ventana_admin.show_inventario(self)
+
+    def show_equipos(self):
+        """Equipos de Laboratorio"""
+        if not self.ventana_admin:
+            messagebox.showerror("Error", "Módulo administrativo no disponible.")
+            return
+        self.ventana_admin.show_equipos(self)
+
+    def show_etiquetas(self):
+        """Etiquetas de Muestras"""
+        if not self.ventana_admin:
+            messagebox.showerror("Error", "Módulo administrativo no disponible.")
+            return
+        self.ventana_admin.show_etiquetas(self)
+
+    def show_hojas_trabajo(self):
+        """Hojas de Trabajo por Área"""
+        if not self.ventana_admin:
+            messagebox.showerror("Error", "Módulo administrativo no disponible.")
+            return
+        self.ventana_admin.show_hojas_trabajo(self)
 
     # ============================================================
     # MÓDULO VETERINARIO

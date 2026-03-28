@@ -31,6 +31,31 @@ try:
 except ImportError:
     raise ImportError("Se requiere modulos.modulo_administrativo para la ventana administrativa")
 
+# Importar módulos opcionales
+try:
+    from modulos.inventario import GestorInventario, crear_gestor_inventario
+    INVENTARIO_DISPONIBLE = True
+except ImportError:
+    INVENTARIO_DISPONIBLE = False
+
+try:
+    from modulos.equipos import GestorEquipos, crear_gestor_equipos
+    EQUIPOS_DISPONIBLE = True
+except ImportError:
+    EQUIPOS_DISPONIBLE = False
+
+try:
+    from modulos.etiquetas import GeneradorEtiquetas, crear_generador_etiquetas
+    ETIQUETAS_DISPONIBLE = True
+except ImportError:
+    ETIQUETAS_DISPONIBLE = False
+
+try:
+    from modulos.hojas_trabajo import GeneradorHojasTrabajo, crear_generador_hojas
+    HOJAS_TRABAJO_DISPONIBLE = True
+except ImportError:
+    HOJAS_TRABAJO_DISPONIBLE = False
+
 
 # Colores consistentes con ANgesLAB.pyw
 COLORS = {
@@ -61,6 +86,32 @@ class VentanaAdministrativa:
         self.gestor_cxp = GestorCuentasPorPagar(db)
         self.gestor_gastos = GestorGastos(db)
         self.resumen = ResumenFinanciero(db)
+
+        # Módulos opcionales
+        self.gestor_inventario = None
+        self.gestor_equipos = None
+        self.generador_etiquetas = None
+        self.generador_hojas = None
+        try:
+            if INVENTARIO_DISPONIBLE:
+                self.gestor_inventario = crear_gestor_inventario(db)
+        except Exception:
+            pass
+        try:
+            if EQUIPOS_DISPONIBLE:
+                self.gestor_equipos = crear_gestor_equipos(db)
+        except Exception:
+            pass
+        try:
+            if ETIQUETAS_DISPONIBLE:
+                self.generador_etiquetas = crear_generador_etiquetas(db)
+        except Exception:
+            pass
+        try:
+            if HOJAS_TRABAJO_DISPONIBLE:
+                self.generador_hojas = crear_generador_hojas(db)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Helpers de permisos
@@ -979,6 +1030,514 @@ class VentanaAdministrativa:
             tk.Label(main_frame, text="Sin gastos registrados",
                      font=('Segoe UI', 10), bg=COLORS['bg'],
                      fg=COLORS['text_light']).pack(anchor='w', padx=10)
+
+    # ==================================================================
+    # INVENTARIO
+    # ==================================================================
+
+    def show_inventario(self, app):
+        """Vista de gestion de inventario de insumos y reactivos."""
+        if not self._puede_acceder():
+            messagebox.showwarning("Acceso Denegado", "No tiene permisos.")
+            return
+        if not self.gestor_inventario:
+            messagebox.showinfo("No Disponible", "Modulo de inventario no disponible.")
+            return
+
+        app.clear_content()
+        app.set_title("Inventario de Insumos")
+        scrollable = app.setup_scrollable_content()
+        main_frame = tk.Frame(scrollable, bg=COLORS['bg'])
+        main_frame.pack(fill='both', expand=True, padx=20, pady=10)
+
+        # Alertas
+        alertas = self.gestor_inventario.obtener_todas_alertas()
+        n_stock = len(alertas.get('stock_bajo', []))
+        n_venc = len(alertas.get('proximos_vencer', []))
+        if n_stock or n_venc:
+            alerta_f = tk.Frame(main_frame, bg='#fef2f2', highlightbackground=COLORS['danger'],
+                                highlightthickness=1)
+            alerta_f.pack(fill='x', pady=(0, 10))
+            txt = []
+            if n_stock:
+                txt.append(f"{n_stock} insumo(s) con stock bajo")
+            if n_venc:
+                txt.append(f"{n_venc} lote(s) proximo(s) a vencer")
+            tk.Label(alerta_f, text="  ALERTAS: " + " | ".join(txt),
+                     font=('Segoe UI', 11, 'bold'), bg='#fef2f2', fg=COLORS['danger']).pack(pady=8)
+
+        # Botones
+        btn_frame = tk.Frame(main_frame, bg=COLORS['bg'])
+        btn_frame.pack(fill='x', pady=(0, 10))
+
+        def nuevo_insumo():
+            w = tk.Toplevel(app.root)
+            w.title("Nuevo Insumo")
+            w.geometry("450x500")
+            w.grab_set()
+            campos = [
+                ('Nombre', 'nombre'), ('Codigo', 'codigo'),
+                ('Tipo (Reactivo/Consumible/Material)', 'tipo'),
+                ('Unidad de Medida', 'unidad_medida'),
+                ('Stock Minimo', 'stock_minimo'),
+                ('Stock Actual', 'stock_actual'),
+                ('Costo Unitario ($)', 'costo_unitario'),
+                ('Proveedor', 'proveedor'),
+                ('Ubicacion', 'ubicacion'),
+            ]
+            entries = {}
+            for label, key in campos:
+                f = tk.Frame(w, bg='white')
+                f.pack(fill='x', padx=15, pady=3)
+                tk.Label(f, text=label + ":", font=('Segoe UI', 10), bg='white',
+                         width=30, anchor='w').pack(side='left')
+                e = ttk.Entry(f, font=('Segoe UI', 10), width=25)
+                e.pack(side='left', padx=5)
+                entries[key] = e
+            entries['tipo'].insert(0, 'Reactivo')
+
+            def guardar():
+                datos = {}
+                datos['Nombre'] = entries['nombre'].get().strip()
+                datos['Codigo'] = entries['codigo'].get().strip()
+                datos['Tipo'] = entries['tipo'].get().strip()
+                datos['UnidadMedida'] = entries['unidad_medida'].get().strip()
+                try:
+                    datos['StockMinimo'] = float(entries['stock_minimo'].get() or '0')
+                except ValueError:
+                    datos['StockMinimo'] = 0
+                try:
+                    datos['StockActual'] = float(entries['stock_actual'].get() or '0')
+                except ValueError:
+                    datos['StockActual'] = 0
+                try:
+                    datos['CostoUnitario'] = float(entries['costo_unitario'].get() or '0')
+                except ValueError:
+                    datos['CostoUnitario'] = 0
+                datos['Proveedor'] = entries['proveedor'].get().strip()
+                datos['Ubicacion'] = entries['ubicacion'].get().strip()
+                if not datos['Nombre']:
+                    messagebox.showwarning("Requerido", "El nombre es obligatorio.")
+                    return
+                try:
+                    self.gestor_inventario.crear_insumo(datos)
+                    messagebox.showinfo("Exito", f"Insumo '{datos['Nombre']}' creado.")
+                    w.destroy()
+                    cargar_tabla()
+                except Exception as ex:
+                    messagebox.showerror("Error", str(ex))
+
+            tk.Button(w, text="Guardar", font=('Segoe UI', 11, 'bold'),
+                      bg=COLORS['primary'], fg='white', relief='flat', padx=20, pady=8,
+                      command=guardar).pack(pady=15)
+
+        def registrar_mov():
+            sel = tree.selection()
+            if not sel:
+                messagebox.showwarning("Seleccione", "Seleccione un insumo.")
+                return
+            insumo_id = int(sel[0])
+            w = tk.Toplevel(app.root)
+            w.title("Registrar Movimiento")
+            w.geometry("400x300")
+            w.grab_set()
+
+            tk.Label(w, text="Tipo:", font=('Segoe UI', 10)).pack(anchor='w', padx=15, pady=(10,0))
+            combo_tipo = ttk.Combobox(w, values=['Entrada', 'Salida', 'Ajuste'],
+                                       state='readonly', font=('Segoe UI', 10))
+            combo_tipo.pack(fill='x', padx=15, pady=3)
+            combo_tipo.set('Entrada')
+
+            tk.Label(w, text="Cantidad:", font=('Segoe UI', 10)).pack(anchor='w', padx=15, pady=(5,0))
+            e_cant = ttk.Entry(w, font=('Segoe UI', 10))
+            e_cant.pack(fill='x', padx=15, pady=3)
+
+            tk.Label(w, text="Motivo:", font=('Segoe UI', 10)).pack(anchor='w', padx=15, pady=(5,0))
+            e_motivo = ttk.Entry(w, font=('Segoe UI', 10))
+            e_motivo.pack(fill='x', padx=15, pady=3)
+
+            def guardar_mov():
+                try:
+                    cant = float(e_cant.get())
+                except ValueError:
+                    messagebox.showwarning("Error", "Cantidad invalida.")
+                    return
+                try:
+                    self.gestor_inventario.registrar_movimiento(
+                        insumo_id, combo_tipo.get(), cant,
+                        motivo=e_motivo.get().strip(),
+                        usuario=self.user.get('NombreCompleto', ''))
+                    messagebox.showinfo("Exito", "Movimiento registrado.")
+                    w.destroy()
+                    cargar_tabla()
+                except Exception as ex:
+                    messagebox.showerror("Error", str(ex))
+
+            tk.Button(w, text="Registrar", font=('Segoe UI', 11, 'bold'),
+                      bg=COLORS['success'], fg='white', relief='flat', padx=20, pady=8,
+                      command=guardar_mov).pack(pady=15)
+
+        tk.Button(btn_frame, text="+ Nuevo Insumo", font=('Segoe UI', 11, 'bold'),
+                  bg=COLORS['primary'], fg='white', relief='flat', padx=20, pady=8,
+                  cursor='hand2', command=nuevo_insumo).pack(side='left', padx=5)
+        tk.Button(btn_frame, text="Movimiento", font=('Segoe UI', 11, 'bold'),
+                  bg=COLORS['success'], fg='white', relief='flat', padx=20, pady=8,
+                  cursor='hand2', command=registrar_mov).pack(side='left', padx=5)
+
+        # Tabla
+        cols = ('ID', 'Codigo', 'Nombre', 'Tipo', 'Stock', 'Minimo', 'Costo', 'Ubicacion')
+        tree = self._crear_tabla(main_frame, cols, (50, 80, 200, 100, 80, 80, 100, 120))
+
+        def cargar_tabla():
+            for item in tree.get_children():
+                tree.delete(item)
+            insumos = self.gestor_inventario.listar_insumos()
+            for ins in insumos:
+                stock = float(ins.get('StockActual', 0) or 0)
+                minimo = float(ins.get('StockMinimo', 0) or 0)
+                costo = float(ins.get('CostoUnitario', 0) or 0)
+                tag = 'bajo' if stock <= minimo and minimo > 0 else ''
+                tree.insert('', 'end', iid=str(ins['InsumoID']),
+                            values=(ins['InsumoID'], ins.get('Codigo', ''),
+                                    ins.get('Nombre', ''), ins.get('Tipo', ''),
+                                    f"{stock:.1f}", f"{minimo:.1f}", f"${costo:,.2f}",
+                                    ins.get('Ubicacion', '')),
+                            tags=(tag,))
+            tree.tag_configure('bajo', background='#fef2f2')
+
+        cargar_tabla()
+
+        # Valorizacion
+        try:
+            val = self.gestor_inventario.valorizacion_inventario()
+            val_frame = tk.Frame(main_frame, bg='white', highlightbackground=COLORS['border'],
+                                 highlightthickness=1)
+            val_frame.pack(fill='x', pady=(15, 5))
+            total_val = float(val.get('total', 0) or 0)
+            n_items = int(val.get('items', 0) or 0)
+            tk.Label(val_frame, text=f"  Valorizacion Total: ${total_val:,.2f}  |  {n_items} items activos",
+                     font=('Segoe UI', 11, 'bold'), bg='white', fg=COLORS['primary']).pack(pady=8)
+        except Exception:
+            pass
+
+    # ==================================================================
+    # EQUIPOS
+    # ==================================================================
+
+    def show_equipos(self, app):
+        """Vista de gestion de equipos de laboratorio."""
+        if not self._puede_acceder():
+            messagebox.showwarning("Acceso Denegado", "No tiene permisos.")
+            return
+        if not self.gestor_equipos:
+            messagebox.showinfo("No Disponible", "Modulo de equipos no disponible.")
+            return
+
+        app.clear_content()
+        app.set_title("Equipos de Laboratorio")
+        scrollable = app.setup_scrollable_content()
+        main_frame = tk.Frame(scrollable, bg=COLORS['bg'])
+        main_frame.pack(fill='both', expand=True, padx=20, pady=10)
+
+        # Alertas mantenimiento
+        try:
+            alertas = self.gestor_equipos.obtener_alertas_mantenimiento()
+            if alertas:
+                alerta_f = tk.Frame(main_frame, bg='#fffbeb', highlightbackground=COLORS['warning'],
+                                    highlightthickness=1)
+                alerta_f.pack(fill='x', pady=(0, 10))
+                tk.Label(alerta_f, text=f"  {len(alertas)} equipo(s) con mantenimiento vencido o proximo",
+                         font=('Segoe UI', 11, 'bold'), bg='#fffbeb', fg=COLORS['warning']).pack(pady=8)
+        except Exception:
+            pass
+
+        # Botones
+        btn_frame = tk.Frame(main_frame, bg=COLORS['bg'])
+        btn_frame.pack(fill='x', pady=(0, 10))
+
+        def nuevo_equipo():
+            w = tk.Toplevel(app.root)
+            w.title("Nuevo Equipo")
+            w.geometry("450x550")
+            w.grab_set()
+            campos = [
+                ('Nombre', 'nombre'), ('Marca', 'marca'), ('Modelo', 'modelo'),
+                ('Numero de Serie', 'numero_serie'),
+                ('Area (HEM/QUI/COA/etc)', 'area'),
+                ('Ubicacion', 'ubicacion'),
+                ('Estado (Operativo/Mantenimiento/Fuera)', 'estado'),
+                ('Dias entre Mantenimientos', 'frecuencia_mantenimiento'),
+            ]
+            entries = {}
+            for label, key in campos:
+                f = tk.Frame(w, bg='white')
+                f.pack(fill='x', padx=15, pady=3)
+                tk.Label(f, text=label + ":", font=('Segoe UI', 10), bg='white',
+                         width=28, anchor='w').pack(side='left')
+                e = ttk.Entry(f, font=('Segoe UI', 10), width=25)
+                e.pack(side='left', padx=5)
+                entries[key] = e
+            entries['estado'].insert(0, 'Operativo')
+            entries['frecuencia_mantenimiento'].insert(0, '90')
+
+            def guardar():
+                datos = {
+                    'Nombre': entries['nombre'].get().strip(),
+                    'Marca': entries['marca'].get().strip(),
+                    'Modelo': entries['modelo'].get().strip(),
+                    'NumeroSerie': entries['numero_serie'].get().strip(),
+                    'AreaAsignada': entries['area'].get().strip(),
+                    'Ubicacion': entries['ubicacion'].get().strip(),
+                    'Estado': entries['estado'].get().strip(),
+                }
+                try:
+                    datos['FrecuenciaMantenimiento'] = int(entries['frecuencia_mantenimiento'].get() or '90')
+                except ValueError:
+                    datos['FrecuenciaMantenimiento'] = 90
+                if not datos['Nombre']:
+                    messagebox.showwarning("Requerido", "El nombre es obligatorio.")
+                    return
+                try:
+                    self.gestor_equipos.crear_equipo(datos)
+                    messagebox.showinfo("Exito", f"Equipo '{datos['Nombre']}' creado.")
+                    w.destroy()
+                    cargar_tabla()
+                except Exception as ex:
+                    messagebox.showerror("Error", str(ex))
+
+            tk.Button(w, text="Guardar", font=('Segoe UI', 11, 'bold'),
+                      bg=COLORS['primary'], fg='white', relief='flat', padx=20, pady=8,
+                      command=guardar).pack(pady=15)
+
+        def registrar_mant():
+            sel = tree.selection()
+            if not sel:
+                messagebox.showwarning("Seleccione", "Seleccione un equipo.")
+                return
+            equipo_id = int(sel[0])
+            w = tk.Toplevel(app.root)
+            w.title("Registrar Mantenimiento")
+            w.geometry("450x350")
+            w.grab_set()
+
+            tk.Label(w, text="Tipo:", font=('Segoe UI', 10)).pack(anchor='w', padx=15, pady=(10,0))
+            combo_tipo = ttk.Combobox(w, values=['Preventivo', 'Correctivo', 'Calibracion'],
+                                       state='readonly', font=('Segoe UI', 10))
+            combo_tipo.pack(fill='x', padx=15, pady=3)
+            combo_tipo.set('Preventivo')
+
+            tk.Label(w, text="Descripcion:", font=('Segoe UI', 10)).pack(anchor='w', padx=15, pady=(5,0))
+            e_desc = ttk.Entry(w, font=('Segoe UI', 10))
+            e_desc.pack(fill='x', padx=15, pady=3)
+
+            tk.Label(w, text="Tecnico:", font=('Segoe UI', 10)).pack(anchor='w', padx=15, pady=(5,0))
+            e_tec = ttk.Entry(w, font=('Segoe UI', 10))
+            e_tec.pack(fill='x', padx=15, pady=3)
+
+            tk.Label(w, text="Costo ($):", font=('Segoe UI', 10)).pack(anchor='w', padx=15, pady=(5,0))
+            e_costo = ttk.Entry(w, font=('Segoe UI', 10))
+            e_costo.pack(fill='x', padx=15, pady=3)
+            e_costo.insert(0, '0')
+
+            def guardar_mant():
+                datos = {
+                    'TipoMantenimiento': combo_tipo.get(),
+                    'Descripcion': e_desc.get().strip(),
+                    'Tecnico': e_tec.get().strip(),
+                }
+                try:
+                    datos['Costo'] = float(e_costo.get() or '0')
+                except ValueError:
+                    datos['Costo'] = 0
+                try:
+                    self.gestor_equipos.registrar_mantenimiento(equipo_id, datos)
+                    messagebox.showinfo("Exito", "Mantenimiento registrado.")
+                    w.destroy()
+                    cargar_tabla()
+                except Exception as ex:
+                    messagebox.showerror("Error", str(ex))
+
+            tk.Button(w, text="Registrar", font=('Segoe UI', 11, 'bold'),
+                      bg=COLORS['success'], fg='white', relief='flat', padx=20, pady=8,
+                      command=guardar_mant).pack(pady=15)
+
+        tk.Button(btn_frame, text="+ Nuevo Equipo", font=('Segoe UI', 11, 'bold'),
+                  bg=COLORS['primary'], fg='white', relief='flat', padx=20, pady=8,
+                  cursor='hand2', command=nuevo_equipo).pack(side='left', padx=5)
+        tk.Button(btn_frame, text="Mantenimiento", font=('Segoe UI', 11, 'bold'),
+                  bg=COLORS['warning'], fg='white', relief='flat', padx=20, pady=8,
+                  cursor='hand2', command=registrar_mant).pack(side='left', padx=5)
+
+        # Tabla
+        cols = ('ID', 'Nombre', 'Marca', 'Modelo', 'Serie', 'Estado', 'Ult.Mant.', 'Prox.Mant.')
+        tree = self._crear_tabla(main_frame, cols, (50, 180, 100, 100, 120, 100, 100, 100))
+
+        def cargar_tabla():
+            for item in tree.get_children():
+                tree.delete(item)
+            equipos = self.gestor_equipos.listar_equipos()
+            for eq in equipos:
+                ult = eq.get('UltimoMantenimiento', '')
+                prox = eq.get('ProximoMantenimiento', '')
+                if ult and hasattr(ult, 'strftime'):
+                    ult = ult.strftime('%d/%m/%Y')
+                if prox and hasattr(prox, 'strftime'):
+                    prox = prox.strftime('%d/%m/%Y')
+                estado = eq.get('Estado', '')
+                tag = 'alerta' if estado != 'Operativo' else ''
+                tree.insert('', 'end', iid=str(eq['EquipoID']),
+                            values=(eq['EquipoID'], eq.get('Nombre', ''),
+                                    eq.get('Marca', ''), eq.get('Modelo', ''),
+                                    eq.get('NumeroSerie', ''), estado,
+                                    str(ult), str(prox)),
+                            tags=(tag,))
+            tree.tag_configure('alerta', background='#fffbeb')
+
+        cargar_tabla()
+
+    # ==================================================================
+    # ETIQUETAS
+    # ==================================================================
+
+    def show_etiquetas(self, app):
+        """Vista de generacion de etiquetas de muestras."""
+        if not self.generador_etiquetas:
+            messagebox.showinfo("No Disponible", "Modulo de etiquetas no disponible.")
+            return
+
+        app.clear_content()
+        app.set_title("Etiquetas de Muestras")
+        scrollable = app.setup_scrollable_content()
+        main_frame = tk.Frame(scrollable, bg=COLORS['bg'])
+        main_frame.pack(fill='both', expand=True, padx=20, pady=10)
+
+        # Buscar solicitud
+        search_f = tk.Frame(main_frame, bg='white', highlightbackground=COLORS['border'],
+                            highlightthickness=1)
+        search_f.pack(fill='x', pady=(0, 15))
+
+        tk.Label(search_f, text="  Numero de Solicitud:", font=('Segoe UI', 12),
+                 bg='white').pack(side='left', padx=(10, 5), pady=10)
+        entry_sol = ttk.Entry(search_f, font=('Segoe UI', 12), width=15)
+        entry_sol.pack(side='left', padx=5, pady=10)
+
+        lbl_status = tk.Label(main_frame, text="", font=('Segoe UI', 11),
+                              bg=COLORS['bg'], fg=COLORS['text_light'])
+        lbl_status.pack(pady=5)
+
+        def generar():
+            sol_txt = entry_sol.get().strip()
+            if not sol_txt:
+                messagebox.showwarning("Requerido", "Ingrese un numero de solicitud.")
+                return
+            try:
+                sol_id = int(sol_txt)
+            except ValueError:
+                messagebox.showwarning("Error", "Numero de solicitud invalido.")
+                return
+            lbl_status.config(text="Generando etiquetas...", fg=COLORS['primary'])
+            app.root.update()
+            try:
+                ruta = self.generador_etiquetas.generar_etiquetas_solicitud(sol_id)
+                if ruta:
+                    lbl_status.config(text=f"Etiquetas generadas: {ruta}", fg=COLORS['success'])
+                    import os
+                    os.startfile(ruta)
+                else:
+                    lbl_status.config(text="No se pudieron generar las etiquetas.", fg=COLORS['danger'])
+            except Exception as ex:
+                lbl_status.config(text=f"Error: {ex}", fg=COLORS['danger'])
+
+        tk.Button(search_f, text="Generar Etiquetas", font=('Segoe UI', 11, 'bold'),
+                  bg=COLORS['primary'], fg='white', relief='flat', padx=20, pady=6,
+                  cursor='hand2', command=generar).pack(side='left', padx=15, pady=10)
+
+        # Info
+        info_f = tk.Frame(main_frame, bg='#f0f9ff', highlightbackground=COLORS['info'],
+                          highlightthickness=1)
+        info_f.pack(fill='x', pady=10)
+        tk.Label(info_f, text="  Las etiquetas incluyen: codigo de barras, nombre del paciente, CI, sexo, edad,\n"
+                 "  numero de solicitud y color por area clinica (30 etiquetas por pagina).",
+                 font=('Segoe UI', 10), bg='#f0f9ff', fg=COLORS['text'], justify='left').pack(pady=10)
+
+    # ==================================================================
+    # HOJAS DE TRABAJO
+    # ==================================================================
+
+    def show_hojas_trabajo(self, app):
+        """Vista de generacion de hojas de trabajo por area."""
+        if not self.generador_hojas:
+            messagebox.showinfo("No Disponible", "Modulo de hojas de trabajo no disponible.")
+            return
+
+        app.clear_content()
+        app.set_title("Hojas de Trabajo")
+        scrollable = app.setup_scrollable_content()
+        main_frame = tk.Frame(scrollable, bg=COLORS['bg'])
+        main_frame.pack(fill='both', expand=True, padx=20, pady=10)
+
+        areas_info = [
+            (1, 'Hematologia'), (2, 'Quimica'), (5, 'Coagulacion'),
+            (6, 'Uroanalisis'), (7, 'Parasitologia'), (8, 'Tiroides/Hormonas'),
+            (9, 'Serologia'), (10, 'Microbiologia'), (29, 'General'),
+        ]
+
+        # Selector de area
+        sel_f = tk.Frame(main_frame, bg='white', highlightbackground=COLORS['border'],
+                         highlightthickness=1)
+        sel_f.pack(fill='x', pady=(0, 15))
+
+        tk.Label(sel_f, text="  Area:", font=('Segoe UI', 12), bg='white').pack(
+            side='left', padx=(10, 5), pady=10)
+        area_values = ['Todas las areas'] + [f"{a[0]} - {a[1]}" for a in areas_info]
+        combo_area = ttk.Combobox(sel_f, values=area_values, state='readonly',
+                                   font=('Segoe UI', 11), width=25)
+        combo_area.pack(side='left', padx=5, pady=10)
+        combo_area.set('Todas las areas')
+
+        lbl_status = tk.Label(main_frame, text="", font=('Segoe UI', 11),
+                              bg=COLORS['bg'], fg=COLORS['text_light'])
+        lbl_status.pack(pady=5)
+
+        def generar():
+            sel = combo_area.get()
+            lbl_status.config(text="Generando hoja de trabajo...", fg=COLORS['primary'])
+            app.root.update()
+            try:
+                if sel == 'Todas las areas':
+                    rutas = self.generador_hojas.generar_todas_areas()
+                    if rutas:
+                        lbl_status.config(text=f"Generadas {len(rutas)} hojas de trabajo.",
+                                          fg=COLORS['success'])
+                        import os
+                        for r in rutas:
+                            os.startfile(r)
+                    else:
+                        lbl_status.config(text="No hay solicitudes pendientes.", fg=COLORS['warning'])
+                else:
+                    area_id = int(sel.split(' - ')[0])
+                    ruta = self.generador_hojas.generar_hoja_area(area_id)
+                    if ruta:
+                        lbl_status.config(text=f"Hoja generada: {ruta}", fg=COLORS['success'])
+                        import os
+                        os.startfile(ruta)
+                    else:
+                        lbl_status.config(text="No hay solicitudes pendientes para esta area.",
+                                          fg=COLORS['warning'])
+            except Exception as ex:
+                lbl_status.config(text=f"Error: {ex}", fg=COLORS['danger'])
+
+        tk.Button(sel_f, text="Generar Hoja", font=('Segoe UI', 11, 'bold'),
+                  bg=COLORS['primary'], fg='white', relief='flat', padx=20, pady=6,
+                  cursor='hand2', command=generar).pack(side='left', padx=15, pady=10)
+
+        # Info
+        info_f = tk.Frame(main_frame, bg='#f0f9ff', highlightbackground=COLORS['info'],
+                          highlightthickness=1)
+        info_f.pack(fill='x', pady=10)
+        tk.Label(info_f, text="  Las hojas de trabajo listan los pacientes del dia con sus pruebas por area,\n"
+                 "  con espacios para anotar resultados manualmente. Formato horizontal (landscape).",
+                 font=('Segoe UI', 10), bg='#f0f9ff', fg=COLORS['text'], justify='left').pack(pady=10)
 
 
 # ======================================================================
@@ -2097,6 +2656,159 @@ def _inicializar_tablas_administrativas(db):
                 Tasa          DOUBLE NOT NULL,
                 FuenteAPI     TEXT(50) DEFAULT 'BCV',
                 FechaConsulta DATETIME
+            )
+        """),
+
+        # ── Tablas de Inventario ──
+        ('Insumos', """
+            CREATE TABLE Insumos (
+                InsumoID      AUTOINCREMENT PRIMARY KEY,
+                Nombre        TEXT(200) NOT NULL,
+                Tipo          TEXT(20) DEFAULT 'Reactivo',
+                Unidad        TEXT(20) DEFAULT 'Und',
+                CodigoInterno TEXT(50),
+                Marca         TEXT(100),
+                StockActual   DOUBLE DEFAULT 0,
+                StockMinimo   DOUBLE DEFAULT 0,
+                CostoUnitario DOUBLE DEFAULT 0,
+                ProveedorID   INTEGER,
+                AreaID        INTEGER,
+                Ubicacion     TEXT(100),
+                Observaciones MEMO,
+                Activo        YESNO DEFAULT TRUE,
+                FechaCreacion DATETIME
+            )
+        """),
+        ('MovimientosInventario', """
+            CREATE TABLE MovimientosInventario (
+                MovimientoID    AUTOINCREMENT PRIMARY KEY,
+                InsumoID        INTEGER NOT NULL,
+                TipoMovimiento  TEXT(20) NOT NULL,
+                Cantidad        DOUBLE NOT NULL,
+                StockAnterior   DOUBLE DEFAULT 0,
+                StockResultante DOUBLE DEFAULT 0,
+                CostoUnitario   DOUBLE DEFAULT 0,
+                Lote            TEXT(50),
+                Motivo          MEMO,
+                UsuarioID       INTEGER,
+                FechaMovimiento DATETIME
+            )
+        """),
+        ('LotesInsumo', """
+            CREATE TABLE LotesInsumo (
+                LoteID           AUTOINCREMENT PRIMARY KEY,
+                InsumoID         INTEGER NOT NULL,
+                NumeroLote       TEXT(50) NOT NULL,
+                FechaVencimiento DATETIME,
+                CantidadInicial  DOUBLE DEFAULT 0,
+                CantidadActual   DOUBLE DEFAULT 0,
+                ProveedorID      INTEGER,
+                Estado           TEXT(20) DEFAULT 'Vigente',
+                FechaRegistro    DATETIME
+            )
+        """),
+
+        # ── Tablas de Equipos ──
+        ('Equipos', """
+            CREATE TABLE Equipos (
+                EquipoID                    AUTOINCREMENT PRIMARY KEY,
+                Nombre                      TEXT(200) NOT NULL,
+                Marca                       TEXT(100),
+                Modelo                      TEXT(100),
+                NumeroSerie                 TEXT(100),
+                AreaID                      INTEGER,
+                Estado                      TEXT(30) DEFAULT 'Operativo',
+                FechaAdquisicion            DATETIME,
+                UltimoMantenimiento         DATETIME,
+                ProximoMantenimiento        DATETIME,
+                FrecuenciaMantenimientoDias INTEGER DEFAULT 90,
+                Ubicacion                   TEXT(100),
+                Observaciones               MEMO,
+                Activo                      YESNO DEFAULT TRUE,
+                FechaRegistro               DATETIME
+            )
+        """),
+        ('MantenimientosEquipo', """
+            CREATE TABLE MantenimientosEquipo (
+                MantenimientoID    AUTOINCREMENT PRIMARY KEY,
+                EquipoID           INTEGER NOT NULL,
+                TipoMantenimiento  TEXT(30) DEFAULT 'Preventivo',
+                FechaRealizado     DATETIME,
+                Descripcion        MEMO,
+                RealizadoPor       TEXT(200),
+                Costo              DOUBLE DEFAULT 0,
+                Observaciones      MEMO
+            )
+        """),
+
+        # ── Tablas de Proveedores ──
+        ('Proveedores', """
+            CREATE TABLE Proveedores (
+                ProveedorID       AUTOINCREMENT PRIMARY KEY,
+                RazonSocial       TEXT(200) NOT NULL,
+                RIF               TEXT(50),
+                Direccion         MEMO,
+                Telefono          TEXT(50),
+                Email             TEXT(100),
+                Contacto          TEXT(200),
+                TipoContribuyente TEXT(20) DEFAULT 'Ordinario',
+                Observaciones     MEMO,
+                Activo            YESNO DEFAULT TRUE,
+                FechaCreacion     DATETIME
+            )
+        """),
+
+        # ── Tablas de Seguros / Convenios ──
+        ('Seguros', """
+            CREATE TABLE Seguros (
+                SeguroID            AUTOINCREMENT PRIMARY KEY,
+                Nombre              TEXT(200) NOT NULL,
+                RIF                 TEXT(50),
+                Telefono            TEXT(50),
+                Email               TEXT(100),
+                Contacto            TEXT(200),
+                DescuentoPorcentaje DOUBLE DEFAULT 0,
+                ListaPreciosID      INTEGER,
+                Observaciones       MEMO,
+                Activo              YESNO DEFAULT TRUE,
+                FechaCreacion       DATETIME
+            )
+        """),
+
+        # ── Tablas de Listas de Precios ──
+        ('ListasPrecios', """
+            CREATE TABLE ListasPrecios (
+                ListaPreciosID AUTOINCREMENT PRIMARY KEY,
+                Nombre         TEXT(100) NOT NULL,
+                Descripcion    TEXT(200),
+                Moneda         TEXT(10) DEFAULT 'USD',
+                Activo         YESNO DEFAULT TRUE,
+                FechaCreacion  DATETIME
+            )
+        """),
+        ('PreciosLista', """
+            CREATE TABLE PreciosLista (
+                PrecioListaID  AUTOINCREMENT PRIMARY KEY,
+                ListaPreciosID INTEGER NOT NULL,
+                PruebaID       INTEGER NOT NULL,
+                Precio         DOUBLE DEFAULT 0
+            )
+        """),
+
+        # ── Retenciones ISLR ──
+        ('RetencionesISLR', """
+            CREATE TABLE RetencionesISLR (
+                RetencionID       AUTOINCREMENT PRIMARY KEY,
+                ProveedorID       INTEGER,
+                NumeroDocumento   TEXT(50),
+                FechaDocumento    DATETIME,
+                MontoDocumento    DOUBLE DEFAULT 0,
+                TipoActividad     TEXT(50),
+                TasaRetencion     DOUBLE DEFAULT 0,
+                MontoRetencion    DOUBLE DEFAULT 0,
+                NumeroComprobante TEXT(50),
+                Periodo           TEXT(10),
+                FechaRegistro     DATETIME
             )
         """),
     ]

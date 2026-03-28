@@ -198,6 +198,12 @@ Source: "..\modulos\ventana_config_numeracion.py"; DestDir: "{app}\modulos"; Com
 Source: "..\modulos\ventana_configuracion_completa.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\veterinario.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 
+; --- Modulos de Inventario, Equipos, Etiquetas, Hojas de Trabajo ---
+Source: "..\modulos\inventario.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
+Source: "..\modulos\equipos.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
+Source: "..\modulos\etiquetas.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
+Source: "..\modulos\hojas_trabajo.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
+
 ; --- Modulos de IA e Historial Avanzado ---
 Source: "..\modulos\graficas_historial.py"; DestDir: "{app}\modulos"; Components: ia; Flags: ignoreversion; \
   AfterInstall: SetProgressMessage('Instalando modulo de graficas clinicas...')
