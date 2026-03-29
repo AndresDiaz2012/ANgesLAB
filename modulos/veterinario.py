@@ -480,7 +480,6 @@ class GestorVeterinario:
             logging.getLogger("angeslab.veterinario").debug("[VET] Solicitud %s creada con ID %s", numero, sol_id)
             return sol_id
         except Exception as e:
-            import logging
             logging.getLogger('angeslab.vet').error("Error creando solicitud: %s", e, exc_info=True)
             return None
 
