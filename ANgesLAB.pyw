@@ -5560,19 +5560,71 @@ class MainApplication:
             except Exception as _e_caja:
                 print(f"Advertencia: No se pudo registrar en caja: {_e_caja}")
 
-        # Mostrar mensaje de éxito
+        # Mostrar mensaje de éxito con opcion de imprimir etiquetas
         abonado = float(self.entry_abonado.get() or 0) if hasattr(self, 'entry_abonado') else 0
-        messagebox.showinfo(
-            "Éxito",
-            f"Solicitud {numero} guardada correctamente\n\n"
-            f"Total: ${total:,.2f}\n"
-            f"Abonado: ${abonado:,.2f}\n"
-            f"Saldo: ${total - abonado:,.2f}{doc_mensaje}"
-        )
-
-        win.destroy()
+        self._mostrar_exito_solicitud(win, sol_id, numero, total, abonado, doc_mensaje)
         self.cargar_solicitudes()
         return True
+
+    def _mostrar_exito_solicitud(self, win_solicitud, sol_id, numero, total, abonado, doc_mensaje):
+        """Muestra dialogo de exito con opcion de imprimir etiquetas."""
+        win_solicitud.destroy()
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Solicitud Guardada")
+        dlg.configure(bg='white')
+        dlg.resizable(False, False)
+        ancho, alto = 420, 300
+        x = (dlg.winfo_screenwidth() - ancho) // 2
+        y = (dlg.winfo_screenheight() - alto) // 2
+        dlg.geometry(f"{ancho}x{alto}+{x}+{y}")
+        dlg.grab_set()
+
+        # Icono de exito
+        tk.Label(dlg, text="Solicitud guardada correctamente",
+                 font=('Segoe UI', 13, 'bold'), bg='white',
+                 fg='#2e7d32').pack(pady=(20, 5))
+
+        tk.Label(dlg, text=numero, font=('Segoe UI', 16, 'bold'),
+                 bg='white', fg=COLORS['primary']).pack(pady=(0, 10))
+
+        saldo = total - abonado
+        info_text = f"Total: ${total:,.2f}   |   Abonado: ${abonado:,.2f}   |   Saldo: ${saldo:,.2f}"
+        if doc_mensaje:
+            info_text += f"\n{doc_mensaje.strip()}"
+        tk.Label(dlg, text=info_text, font=('Segoe UI', 10), bg='white',
+                 fg=COLORS['text'], justify='center').pack(pady=(0, 15))
+
+        # Botones
+        btn_frame = tk.Frame(dlg, bg='white')
+        btn_frame.pack(pady=10)
+
+        def _imprimir_etiquetas():
+            dlg.destroy()
+            try:
+                if hasattr(self, 'ventana_admin') and self.ventana_admin and self.ventana_admin.generador_etiquetas:
+                    ruta = self.ventana_admin.generador_etiquetas.generar_etiquetas_solicitud(sol_id)
+                    if ruta:
+                        import os
+                        os.startfile(ruta)
+                else:
+                    messagebox.showinfo("Info", "Modulo de etiquetas no disponible.")
+            except Exception as ex:
+                messagebox.showerror("Error", f"Error generando etiquetas: {ex}")
+
+        tk.Button(btn_frame, text="Imprimir Etiquetas",
+                  font=('Segoe UI', 11, 'bold'),
+                  bg='#1565c0', fg='white', relief='flat',
+                  padx=20, pady=8, cursor='hand2',
+                  command=_imprimir_etiquetas).pack(side='left', padx=8)
+
+        tk.Button(btn_frame, text="Cerrar",
+                  font=('Segoe UI', 11),
+                  bg='#e0e0e0', fg=COLORS['text'], relief='flat',
+                  padx=20, pady=8, cursor='hand2',
+                  command=dlg.destroy).pack(side='left', padx=8)
+
+        dlg.bind('<Escape>', lambda e: dlg.destroy())
 
     def _guardar_solicitud_legacy(self, win, pruebas, total, desc_pct, iva_pct, abonado):
         """Método legacy para guardar solicitud sin el gestor (fallback)"""
@@ -8274,8 +8326,8 @@ Forma de Pago: {self.combo_forma_pago.get()}
                         entry = param_data['entry']
                         valor_actual = entry.get().strip()
 
-                        # Solo actualizar si está vacío o es un valor calculado
-                        if not valor_actual or param_data.get('es_calculado'):
+                        # Actualizar si vacío, es campo con formula DB, o es destino del módulo
+                        if not valor_actual or param_data.get('es_calculado') or nombre_norm in resultados:
                             entry.delete(0, 'end')
                             entry.insert(0, str(valor_calculado))
                             calculos_aplicados += 1
