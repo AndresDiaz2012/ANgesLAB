@@ -1053,7 +1053,7 @@ class VentanaAdministrativa:
         # Alertas
         alertas = self.gestor_inventario.obtener_todas_alertas()
         n_stock = len(alertas.get('stock_bajo', []))
-        n_venc = len(alertas.get('proximos_vencer', []))
+        n_venc = len(alertas.get('vencimiento', []))
         if n_stock or n_venc:
             alerta_f = tk.Frame(main_frame, bg='#fef2f2', highlightbackground=COLORS['danger'],
                                 highlightthickness=1)
@@ -1166,7 +1166,7 @@ class VentanaAdministrativa:
                     self.gestor_inventario.registrar_movimiento(
                         insumo_id, combo_tipo.get(), cant,
                         motivo=e_motivo.get().strip(),
-                        usuario=self.user.get('NombreCompleto', ''))
+                        usuario=self.user.get('NombreCompleto', '') if self.user else '')
                     messagebox.showinfo("Exito", "Movimiento registrado.")
                     w.destroy()
                     cargar_tabla()
@@ -1191,17 +1191,17 @@ class VentanaAdministrativa:
         def cargar_tabla():
             for item in tree.get_children():
                 tree.delete(item)
-            insumos = self.gestor_inventario.listar_insumos()
-            for ins in insumos:
-                stock = float(ins.get('StockActual', 0) or 0)
-                minimo = float(ins.get('StockMinimo', 0) or 0)
-                costo = float(ins.get('CostoUnitario', 0) or 0)
+            productos = self.gestor_inventario.listar_insumos()
+            for ins in productos:
+                stock = float(ins.get('ExistenciaActual', 0) or 0)
+                minimo = float(ins.get('ExistenciaMinima', 0) or 0)
+                costo = float(ins.get('UltimoPrecioCompra', 0) or 0)
                 tag = 'bajo' if stock <= minimo and minimo > 0 else ''
-                tree.insert('', 'end', iid=str(ins['InsumoID']),
-                            values=(ins['InsumoID'], ins.get('Codigo', ''),
-                                    ins.get('Nombre', ''), ins.get('Tipo', ''),
+                tree.insert('', 'end', iid=str(ins['ProductoID']),
+                            values=(ins['ProductoID'], ins.get('CodigoProducto', ''),
+                                    ins.get('NombreProducto', ''), ins.get('TipoProducto', ''),
                                     f"{stock:.1f}", f"{minimo:.1f}", f"${costo:,.2f}",
-                                    ins.get('Ubicacion', '')),
+                                    ins.get('Descripcion', '')),
                             tags=(tag,))
             tree.tag_configure('bajo', background='#fef2f2')
 
@@ -1213,8 +1213,8 @@ class VentanaAdministrativa:
             val_frame = tk.Frame(main_frame, bg='white', highlightbackground=COLORS['border'],
                                  highlightthickness=1)
             val_frame.pack(fill='x', pady=(15, 5))
-            total_val = float(val.get('total', 0) or 0)
-            n_items = int(val.get('items', 0) or 0)
+            total_val = float(val.get('valor_total', 0) or 0)
+            n_items = int(val.get('total_items', 0) or 0)
             tk.Label(val_frame, text=f"  Valorizacion Total: ${total_val:,.2f}  |  {n_items} items activos",
                      font=('Segoe UI', 11, 'bold'), bg='white', fg=COLORS['primary']).pack(pady=8)
         except Exception:
@@ -1411,36 +1411,17 @@ class VentanaAdministrativa:
         main_frame = tk.Frame(scrollable, bg=COLORS['bg'])
         main_frame.pack(fill='both', expand=True, padx=20, pady=10)
 
-        # Buscar solicitud
-        search_f = tk.Frame(main_frame, bg='white', highlightbackground=COLORS['border'],
-                            highlightthickness=1)
-        search_f.pack(fill='x', pady=(0, 15))
-
-        tk.Label(search_f, text="  Numero de Solicitud:", font=('Segoe UI', 12),
-                 bg='white').pack(side='left', padx=(10, 5), pady=10)
-        entry_sol = ttk.Entry(search_f, font=('Segoe UI', 12), width=15)
-        entry_sol.pack(side='left', padx=5, pady=10)
-
         lbl_status = tk.Label(main_frame, text="", font=('Segoe UI', 11),
                               bg=COLORS['bg'], fg=COLORS['text_light'])
-        lbl_status.pack(pady=5)
 
-        def generar():
-            sol_txt = entry_sol.get().strip()
-            if not sol_txt:
-                messagebox.showwarning("Requerido", "Ingrese un numero de solicitud.")
-                return
-            try:
-                sol_id = int(sol_txt)
-            except ValueError:
-                messagebox.showwarning("Error", "Numero de solicitud invalido.")
-                return
+        # --- Funcion para generar etiquetas por SolicitudID ---
+        def _generar_etiquetas(sol_id):
             lbl_status.config(text="Generando etiquetas...", fg=COLORS['primary'])
             app.root.update()
             try:
-                ruta = self.generador_etiquetas.generar_etiquetas_solicitud(sol_id)
+                ruta = self.generador_etiquetas.generar_etiquetas_solicitud(int(sol_id))
                 if ruta:
-                    lbl_status.config(text=f"Etiquetas generadas: {ruta}", fg=COLORS['success'])
+                    lbl_status.config(text=f"Etiquetas generadas correctamente.", fg=COLORS['success'])
                     import os
                     os.startfile(ruta)
                 else:
@@ -1448,16 +1429,166 @@ class VentanaAdministrativa:
             except Exception as ex:
                 lbl_status.config(text=f"Error: {ex}", fg=COLORS['danger'])
 
-        tk.Button(search_f, text="Generar Etiquetas", font=('Segoe UI', 11, 'bold'),
-                  bg=COLORS['primary'], fg='white', relief='flat', padx=20, pady=6,
-                  cursor='hand2', command=generar).pack(side='left', padx=15, pady=10)
+        # === Seccion 1: Solicitudes del dia ===
+        from datetime import date, timedelta
+        hoy = date.today()
+        hoy_str = hoy.strftime('%m/%d/%Y')
+        manana_str = (hoy + timedelta(days=1)).strftime('%m/%d/%Y')
+
+        solicitudes_hoy = []
+        try:
+            solicitudes_hoy = self.db.query(
+                f"SELECT s.SolicitudID, s.NumeroSolicitud, s.FechaSolicitud, "
+                f"s.EstadoSolicitud, p.Nombres, p.Apellidos, p.NumeroDocumento "
+                f"FROM [Solicitudes] AS s "
+                f"INNER JOIN [Pacientes] AS p ON s.PacienteID = p.PacienteID "
+                f"WHERE s.FechaSolicitud >= #{hoy_str}# "
+                f"AND s.FechaSolicitud < #{manana_str}# "
+                f"ORDER BY s.SolicitudID DESC"
+            ) or []
+        except Exception:
+            pass
+
+        tk.Label(main_frame, text=f"Solicitudes del dia ({hoy.strftime('%d/%m/%Y')})",
+                 font=('Segoe UI', 13, 'bold'), bg=COLORS['bg'],
+                 fg=COLORS['text']).pack(anchor='w', pady=(0, 8))
+
+        if solicitudes_hoy:
+            # Tabla de solicitudes
+            tree_f = tk.Frame(main_frame, bg=COLORS['bg'])
+            tree_f.pack(fill='both', expand=True, pady=(0, 10))
+
+            cols = ('SolicitudID', 'Numero', 'Paciente', 'Documento', 'Estado')
+            tree = ttk.Treeview(tree_f, columns=cols, show='headings', height=12,
+                                selectmode='extended')
+            tree.heading('SolicitudID', text='ID')
+            tree.heading('Numero', text='No. Solicitud')
+            tree.heading('Paciente', text='Paciente')
+            tree.heading('Documento', text='Documento')
+            tree.heading('Estado', text='Estado')
+            tree.column('SolicitudID', width=50, anchor='center')
+            tree.column('Numero', width=140, anchor='center')
+            tree.column('Paciente', width=250, anchor='w')
+            tree.column('Documento', width=120, anchor='center')
+            tree.column('Estado', width=100, anchor='center')
+
+            scroll = ttk.Scrollbar(tree_f, orient='vertical', command=tree.yview)
+            tree.configure(yscrollcommand=scroll.set)
+            tree.pack(side='left', fill='both', expand=True)
+            scroll.pack(side='right', fill='y')
+
+            for sol in solicitudes_hoy:
+                sid = sol.get('SolicitudID', '')
+                num = sol.get('NumeroSolicitud', '')
+                nombre = f"{sol.get('Nombres', '')} {sol.get('Apellidos', '')}".strip()
+                doc = sol.get('NumeroDocumento', '')
+                estado = sol.get('EstadoSolicitud', '')
+                tree.insert('', 'end', iid=str(sid),
+                            values=(sid, num, nombre, doc, estado))
+
+            # Botones para la tabla
+            btn_f = tk.Frame(main_frame, bg=COLORS['bg'])
+            btn_f.pack(fill='x', pady=(0, 10))
+
+            def generar_seleccionadas():
+                sel = tree.selection()
+                if not sel:
+                    messagebox.showwarning("Seleccione", "Seleccione una o mas solicitudes de la lista.")
+                    return
+                if len(sel) == 1:
+                    _generar_etiquetas(int(sel[0]))
+                else:
+                    # Batch: multiples solicitudes
+                    ids = [int(s) for s in sel]
+                    lbl_status.config(text="Generando etiquetas...", fg=COLORS['primary'])
+                    app.root.update()
+                    try:
+                        ruta = self.generador_etiquetas.generar_etiquetas_batch(ids)
+                        if ruta:
+                            lbl_status.config(text=f"Etiquetas generadas ({len(ids)} solicitudes).",
+                                              fg=COLORS['success'])
+                            import os
+                            os.startfile(ruta)
+                        else:
+                            lbl_status.config(text="Error generando etiquetas.", fg=COLORS['danger'])
+                    except Exception as ex:
+                        lbl_status.config(text=f"Error: {ex}", fg=COLORS['danger'])
+
+            def seleccionar_todas():
+                for item in tree.get_children():
+                    tree.selection_add(item)
+
+            tk.Button(btn_f, text="Imprimir Etiquetas (seleccionadas)",
+                      font=('Segoe UI', 11, 'bold'),
+                      bg=COLORS['primary'], fg='white', relief='flat', padx=20, pady=8,
+                      cursor='hand2', command=generar_seleccionadas).pack(side='left', padx=5)
+            tk.Button(btn_f, text="Seleccionar Todas",
+                      font=('Segoe UI', 10),
+                      bg=COLORS['bg_card'], fg=COLORS['text'], relief='flat', padx=15, pady=8,
+                      cursor='hand2', command=seleccionar_todas).pack(side='left', padx=5)
+
+            # Doble-click genera directo
+            tree.bind('<Double-1>', lambda e: generar_seleccionadas())
+        else:
+            tk.Label(main_frame, text="No hay solicitudes registradas hoy.",
+                     font=('Segoe UI', 11), bg=COLORS['bg'],
+                     fg=COLORS['text_light']).pack(anchor='w', pady=5)
+
+        # === Seccion 2: Busqueda manual (fallback) ===
+        sep = tk.Frame(main_frame, bg=COLORS['border'], height=1)
+        sep.pack(fill='x', pady=15)
+
+        search_f = tk.Frame(main_frame, bg='white', highlightbackground=COLORS['border'],
+                            highlightthickness=1)
+        search_f.pack(fill='x', pady=(0, 10))
+
+        tk.Label(search_f, text="  Buscar por No. Solicitud:",
+                 font=('Segoe UI', 11), bg='white').pack(side='left', padx=(10, 5), pady=10)
+        entry_sol = ttk.Entry(search_f, font=('Segoe UI', 11), width=15)
+        entry_sol.pack(side='left', padx=5, pady=10)
+
+        def generar_manual():
+            sol_txt = entry_sol.get().strip()
+            if not sol_txt:
+                messagebox.showwarning("Requerido", "Ingrese un numero de solicitud.")
+                return
+            # Intentar como ID numerico o como NumeroSolicitud
+            sol_id = None
+            try:
+                sol_id = int(sol_txt)
+            except ValueError:
+                # Buscar por NumeroSolicitud
+                try:
+                    safe = sol_txt.replace("'", "''")
+                    row = self.db.query_one(
+                        f"SELECT SolicitudID FROM [Solicitudes] "
+                        f"WHERE NumeroSolicitud='{safe}'"
+                    )
+                    if row:
+                        sol_id = row['SolicitudID']
+                except Exception:
+                    pass
+            if not sol_id:
+                messagebox.showwarning("No encontrada",
+                                       f"No se encontro la solicitud '{sol_txt}'.")
+                return
+            _generar_etiquetas(sol_id)
+
+        entry_sol.bind('<Return>', lambda e: generar_manual())
+
+        tk.Button(search_f, text="Generar", font=('Segoe UI', 10, 'bold'),
+                  bg=COLORS['primary'], fg='white', relief='flat', padx=15, pady=6,
+                  cursor='hand2', command=generar_manual).pack(side='left', padx=10, pady=10)
+
+        lbl_status.pack(pady=5)
 
         # Info
         info_f = tk.Frame(main_frame, bg='#f0f9ff', highlightbackground=COLORS['info'],
                           highlightthickness=1)
         info_f.pack(fill='x', pady=10)
-        tk.Label(info_f, text="  Las etiquetas incluyen: codigo de barras, nombre del paciente, CI, sexo, edad,\n"
-                 "  numero de solicitud y color por area clinica (30 etiquetas por pagina).",
+        tk.Label(info_f, text="  Seleccione una o varias solicitudes y presione 'Imprimir Etiquetas'.\n"
+                 "  Incluyen: codigo de barras, nombre del paciente, CI, sexo, edad,\n"
+                 "  numero de solicitud y color por area clinica. Doble-click para imprimir directo.",
                  font=('Segoe UI', 10), bg='#f0f9ff', fg=COLORS['text'], justify='left').pack(pady=10)
 
     # ==================================================================
