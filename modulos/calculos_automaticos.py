@@ -288,7 +288,8 @@ class CalculadorLaboratorio:
         ],
         'proteinuria_24h': [
             'proteinuria 24h calculada', 'proteinuria 24h',
-            'proteinuria calculada', 'prot 24h calculada'
+            'proteinuria calculada', 'prot 24h calculada',
+            'proteinuria de 24 horas', 'proteinuria de 18 horas'
         ],
         'clasificacion_erc': [
             'clasificacion erc', 'clasificación erc', 'estadio erc',
@@ -472,8 +473,7 @@ class CalculadorLaboratorio:
         ],
         'proteinas_orina': [
             'proteinas orina', 'proteinuria', 'proteinas en orina',
-            'proteinuria de 24 horas', 'proteinuria de 18 horas',
-            'proteinas'
+            'proteinas en orina parcial', 'prot orina', 'proteinas urinarias'
         ],
         'calcio_orina': [
             'calcio orina', 'calciuria', 'calcio en orina', 'calcio en orina palcial',
