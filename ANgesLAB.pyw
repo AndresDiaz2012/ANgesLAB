@@ -7839,7 +7839,10 @@ Forma de Pago: {self.combo_forma_pago.get()}
                                 if resultado_guardado and resultado_guardado.get('Valor'):
                                     entry_param.insert(0, resultado_guardado['Valor'])
                             else:
-                                entry_param = ttk.Combobox(param_row, font=('Segoe UI', 9), width=14,
+                                # Ancho dinámico: mínimo 14, máximo 50, basado en opción más larga
+                                max_len = max((len(str(o)) for o in opciones_param), default=10)
+                                combo_width = max(14, min(50, max_len + 2))
+                                entry_param = ttk.Combobox(param_row, font=('Segoe UI', 9), width=combo_width,
                                                           values=opciones_param)
                                 entry_param.pack(side='left', padx=5, pady=2)
                                 if resultado_guardado and resultado_guardado.get('Valor'):
