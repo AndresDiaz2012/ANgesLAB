@@ -522,6 +522,13 @@ class VentanaConfigAdministrativa:
 
             if 'USD' in tasas:
                 self.label_tasa_usd.config(text=f"Bs. {tasas['USD']:,.4f}")
+                # Guardar tasa USD/Bs en ConfiguracionAdministrativa para uso global
+                try:
+                    self.configurador.actualizar_configuracion_tasas({
+                        'TasaCambio': tasas['USD']
+                    })
+                except Exception:
+                    pass
             if 'EUR' in tasas:
                 self.label_tasa_eur.config(text=f"Bs. {tasas['EUR']:,.4f}")
 

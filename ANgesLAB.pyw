@@ -4585,15 +4585,16 @@ class MainApplication:
         tk.Label(tasas_inner, text="1 USD =", font=('Segoe UI', 8), bg=S['frame'], fg=S['label']).pack(side='left')
         self.entry_tasa_bs = tk.Entry(tasas_inner, font=('Segoe UI', 9), width=9, relief='solid', bg=S['input'], bd=1, justify='right')
         self.entry_tasa_bs.pack(side='left', padx=3, ipady=2)
-        self.entry_tasa_bs.insert(0, '50.00')
         self.entry_tasa_bs.bind('<KeyRelease>', lambda e: self.calcular_totales())
         tk.Label(tasas_inner, text="Bs", font=('Segoe UI', 8, 'bold'), bg=S['frame'], fg='#e65100').pack(side='left', padx=(0, 8))
         tk.Label(tasas_inner, text="=", font=('Segoe UI', 8), bg=S['frame'], fg=S['label']).pack(side='left')
         self.entry_tasa_cop = tk.Entry(tasas_inner, font=('Segoe UI', 9), width=9, relief='solid', bg=S['input'], bd=1, justify='right')
         self.entry_tasa_cop.pack(side='left', padx=3, ipady=2)
-        self.entry_tasa_cop.insert(0, '4200.00')
         self.entry_tasa_cop.bind('<KeyRelease>', lambda e: self.calcular_totales())
         tk.Label(tasas_inner, text="COP", font=('Segoe UI', 8, 'bold'), bg=S['frame'], fg='#1565c0').pack(side='left')
+
+        # Cargar tasas desde BD (BCV y manual)
+        self._cargar_tasas_solicitud()
 
         tk.Frame(right_col, bg=S['border'], height=1).pack(fill='x', padx=8, pady=4)
 
@@ -4798,6 +4799,48 @@ class MainApplication:
 
         self._refrescar_lista_seleccionadas()
         self.calcular_totales()
+
+    def _cargar_tasas_solicitud(self):
+        """Carga tasas de cambio desde la BD al formulario de solicitud."""
+        tasa_usd_bs = 0
+        tasa_cop_usd = 0
+
+        # 1. Intentar desde TasasCambio (tasas BCV actualizadas)
+        try:
+            from modulos.tasas_cambio import GestorTasasCambio
+            gestor = GestorTasasCambio(db)
+            tasa_usd_bs = gestor.get_tasa_actual('USD')
+            tasa_cop = gestor.get_tasa_actual('COP_USD')
+            if tasa_cop and tasa_cop != 1.0:
+                tasa_cop_usd = tasa_cop
+        except Exception:
+            pass
+
+        # 2. Fallback: ConfiguracionAdministrativa
+        if not tasa_usd_bs or tasa_usd_bs == 1.0:
+            try:
+                config = db.query_one(
+                    "SELECT TasaCambio FROM ConfiguracionAdministrativa")
+                if config and config.get('TasaCambio'):
+                    tasa_usd_bs = float(config['TasaCambio'])
+            except Exception:
+                pass
+
+        if not tasa_cop_usd or tasa_cop_usd == 0:
+            try:
+                config = db.query_one(
+                    "SELECT TasaCOP_USD FROM ConfiguracionAdministrativa")
+                if config and config.get('TasaCOP_USD'):
+                    tasa_cop_usd = float(config['TasaCOP_USD'])
+            except Exception:
+                pass
+
+        # Aplicar valores (fallback a defaults si no hay nada en BD)
+        self.entry_tasa_bs.delete(0, 'end')
+        self.entry_tasa_bs.insert(0, f"{tasa_usd_bs:.2f}" if tasa_usd_bs and tasa_usd_bs != 1.0 else '1.00')
+
+        self.entry_tasa_cop.delete(0, 'end')
+        self.entry_tasa_cop.insert(0, f"{tasa_cop_usd:.2f}" if tasa_cop_usd else '1.00')
 
     def calcular_totales(self):
         """Calcula subtotal, descuento, IVA, total y saldo"""
