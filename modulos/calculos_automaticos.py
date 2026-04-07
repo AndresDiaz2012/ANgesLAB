@@ -477,11 +477,19 @@ class CalculadorLaboratorio:
         ],
         'calcio_orina': [
             'calcio orina', 'calciuria', 'calcio en orina', 'calcio en orina palcial',
-            'ca en orina', 'calcio urinario'
+            'calcio en orina parcial', 'ca en orina', 'calcio urinario',
+            'calcio en orina de 24 horas', 'calcio orina 24h'
         ],
         'acido_urico_orina': [
             'acido urico orina', 'uricosuria', 'acido urico en orina 24 h',
-            'acido urico en orina parcial', 'ac. urico orina'
+            'acido urico en orina parcial', 'ac. urico orina',
+            'acido urico en orina de 24 horas', 'acido urico en orina',
+            'acido urico urinario'
+        ],
+        'fosforo_orina': [
+            'fosforo orina', 'fosforo en orina', 'fosforo en orina parcial',
+            'fosforo en orina 24 horas', 'fosforo en orina 24 h',
+            'fosforo urinario', 'fosfaturia', 'p en orina'
         ],
         'potasio_orina': [
             'potasio orina', 'kaliuria', 'potasio en orina', 'potasio en orina 24h.',
@@ -502,7 +510,12 @@ class CalculadorLaboratorio:
         ],
         'relacion_acido_urico_cr': [
             'relacion acido urico /  creatinina', 'relacion acido urico/creatinina',
-            'au/cr'
+            'relación acido urico/creatinina', 'indice au/cr', 'au/cr'
+        ],
+        'relacion_fosforo_cr': [
+            'relacion fosforo / creatinina', 'relacion fosforo/creatinina',
+            'relación fosforo/creatinina', 'relacion  fosforo /creatinina',
+            'indice p/cr', 'p/cr'
         ],
 
         # =====================================================================
@@ -1763,6 +1776,58 @@ class CalculadorLaboratorio:
 
         return self._redondear(ca / cr, 3)
 
+    def calcular_relacion_acido_urico_creatinina(self, acido_urico_orina: float,
+                                                   creatinina_orina: float) -> Optional[float]:
+        """
+        Calcula la relación ácido úrico/creatinina en orina.
+
+        Valores de referencia (adultos):
+        - Normal: 0.21 - 0.59 mg/mg
+        - Nefropatía aguda por ácido úrico: > 1.0 mg/mg
+        Fuente: Mayo Clinic Labs, Harrison's
+
+        Args:
+            acido_urico_orina: Ácido úrico en orina en mg/dL
+            creatinina_orina: Creatinina en orina en mg/dL
+
+        Returns:
+            Relación AU/Cr en mg/mg
+        """
+        au = self._to_float(acido_urico_orina)
+        cr = self._to_float(creatinina_orina)
+
+        if au is None or cr is None or cr == 0:
+            return None
+
+        return self._redondear(au / cr, 3)
+
+    def calcular_relacion_fosforo_creatinina(self, fosforo_orina: float,
+                                               creatinina_orina: float) -> Optional[float]:
+        """
+        Calcula la relación fósforo/creatinina en orina.
+
+        Valores de referencia (adultos):
+        - Normal: 0.1 - 1.0 mg/mg
+        - Niños 0-2 años: 0.8 - 2.0
+        - Niños 3-10 años: 0.4 - 1.3
+        - Adolescentes 11-17: 0.2 - 0.9
+        Fuente: Mayo Clinic Labs, KDIGO
+
+        Args:
+            fosforo_orina: Fósforo en orina en mg/dL
+            creatinina_orina: Creatinina en orina en mg/dL
+
+        Returns:
+            Relación P/Cr en mg/mg
+        """
+        p = self._to_float(fosforo_orina)
+        cr = self._to_float(creatinina_orina)
+
+        if p is None or cr is None or cr == 0:
+            return None
+
+        return self._redondear(p / cr, 3)
+
     def calcular_relacion_proteina_creatinina(self, proteinas_orina: float,
                                                creatinina_orina: float) -> Optional[float]:
         """
@@ -2298,17 +2363,30 @@ class CalculadorLaboratorio:
 
         # Orina - Relaciones
         if all(k in valores_norm for k in ['calcio_orina', 'creatinina_orina']):
-            calculos.append(('Relación Ca/Cr', 'relacion_ca_cr', lambda: self.calcular_relacion_calcio_creatinina(
-                valores_norm.get('calcio_orina'), valores_norm.get('creatinina_orina'))))
+            calculos.append(('Relación Ca/Cr', 'relacion_ca_cr',
+                lambda ca=valores_norm.get('calcio_orina'), cr=valores_norm.get('creatinina_orina'):
+                    self.calcular_relacion_calcio_creatinina(ca, cr)))
+
+        if all(k in valores_norm for k in ['acido_urico_orina', 'creatinina_orina']):
+            calculos.append(('Relación AU/Cr', 'relacion_acido_urico_cr',
+                lambda au=valores_norm.get('acido_urico_orina'), cr=valores_norm.get('creatinina_orina'):
+                    self.calcular_relacion_acido_urico_creatinina(au, cr)))
+
+        if all(k in valores_norm for k in ['fosforo_orina', 'creatinina_orina']):
+            calculos.append(('Relación P/Cr', 'relacion_fosforo_cr',
+                lambda p=valores_norm.get('fosforo_orina'), cr=valores_norm.get('creatinina_orina'):
+                    self.calcular_relacion_fosforo_creatinina(p, cr)))
 
         if all(k in valores_norm for k in ['proteinas_orina', 'creatinina_orina']):
-            calculos.append(('Relación Prot/Cr', 'relacion_prot_cr', lambda: self.calcular_relacion_proteina_creatinina(
-                valores_norm.get('proteinas_orina'), valores_norm.get('creatinina_orina'))))
+            calculos.append(('Relación Prot/Cr', 'relacion_prot_cr',
+                lambda prot=valores_norm.get('proteinas_orina'), cr=valores_norm.get('creatinina_orina'):
+                    self.calcular_relacion_proteina_creatinina(prot, cr)))
 
         # ACR - Relación Albúmina/Creatinina
         if all(k in valores_norm for k in ['microalbuminuria', 'creatinina_orina']):
-            calculos.append(('Relación Alb/Cr (ACR)', 'relacion_alb_cr', lambda: self.calcular_relacion_albumina_creatinina(
-                valores_norm.get('microalbuminuria'), valores_norm.get('creatinina_orina'))))
+            calculos.append(('Relación Alb/Cr (ACR)', 'relacion_alb_cr',
+                lambda alb=valores_norm.get('microalbuminuria'), cr=valores_norm.get('creatinina_orina'):
+                    self.calcular_relacion_albumina_creatinina(alb, cr)))
 
         return calculos
 
@@ -2360,6 +2438,18 @@ class CalculadorLaboratorio:
         },
         'relacion_alb_cr': {
             None: '< 30 mg/g',
+        },
+        'relacion_ca_cr': {
+            None: '< 0.20 mg/mg',
+        },
+        'relacion_acido_urico_cr': {
+            None: '0.21 - 0.59 mg/mg',
+        },
+        'relacion_fosforo_cr': {
+            None: '0.1 - 1.0 mg/mg',
+        },
+        'relacion_prot_cr': {
+            None: '< 0.2 mg/mg',
         },
     }
 
