@@ -1054,7 +1054,7 @@ class GestorSolicitudes:
             try:
                 self._crear_tabla_recibos()
             except Exception as e:
-                print(f"Advertencia: No se pudo crear tabla Recibos: {e}")
+                logging.getLogger("angeslab.gestor_solicitudes").warning("No se pudo crear tabla Recibos: %s", e)
 
     def _crear_tabla_recibos(self):
         """Crea la tabla Recibos si no existe."""
@@ -1084,7 +1084,7 @@ class GestorSolicitudes:
                 )
             """
             self.db.execute(sql_create)
-            print("Tabla Recibos creada exitosamente")
+            logging.getLogger("angeslab.gestor_solicitudes").info("Tabla Recibos creada exitosamente")
         except Exception as e:
             # Si falla el CREATE, puede que ya exista parcialmente
             # Intentar agregar columnas faltantes

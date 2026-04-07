@@ -92,7 +92,7 @@ class FlujoTrabajo:
         try:
             self.config_numeracion = ConfiguradorNumeracion(db)
         except Exception as e:
-            print(f"Advertencia: No se pudo inicializar configurador de numeración: {e}")
+            logging.getLogger("angeslab.flujo_trabajo").warning("No se pudo inicializar configurador de numeración: %s", e)
             self.config_numeracion = None
 
     # -------------------------------------------------------------------------

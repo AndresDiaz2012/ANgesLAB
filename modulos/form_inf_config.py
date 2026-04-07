@@ -18,6 +18,7 @@ Autor: Sistema ANgesLAB
 
 from datetime import datetime
 import json
+import logging
 import os
 
 # ============================================================================
@@ -543,15 +544,16 @@ class FormInfConfig:
         """
         Carga los formularios por defecto en la base de datos
         """
-        print("Inicializando formularios por defecto...")
+        logger = logging.getLogger("angeslab.form_inf_config")
+        logger.info("Inicializando formularios por defecto...")
 
         for codigo, config in CONFIGURACIONES_DEFECTO.items():
             existente = self.obtener_configuracion(codigo)
             if not existente or existente == config:  # Es el default, no de BD
                 self.guardar_configuracion(codigo, config)
-                print(f"  - {codigo}: OK")
+                logger.debug("  - %s: OK", codigo)
 
-        print("Formularios inicializados.")
+        logger.info("Formularios inicializados.")
 
     # -------------------------------------------------------------------------
     # EXPORTACION E IMPORTACION

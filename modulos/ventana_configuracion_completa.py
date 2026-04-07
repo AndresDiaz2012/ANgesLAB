@@ -2279,7 +2279,7 @@ class VentanaConfiguracionCompleta:
             )
             return True
         except Exception as e:
-            print(f"No se pudo crear tabla Bioanalistas: {e}")
+            logging.getLogger("angeslab.ventana_configuracion").warning("No se pudo crear tabla Bioanalistas: %s", e)
             return False
 
     def _cargar_bioanalistas(self):

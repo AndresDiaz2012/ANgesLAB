@@ -51,7 +51,7 @@ class ConfiguradorNumeracion:
                     (TipoNumeracion, UltimoNumero, FechaUltimoReseteo, FormatoNumero, LongitudNumero, FechaCreacion)
                     VALUES ('anual', 0, {fecha_actual}, 'AAAA-NNNNNN', 6, {fecha_actual})
                 """)
-                print("Configuración de numeración inicializada en modo anual")
+                logging.getLogger("angeslab.config_numeracion").info("Configuración de numeración inicializada en modo anual")
         except Exception as e:
             logging.getLogger("angeslab.config_numeracion").warning("Error al inicializar configuración: %s", e)
 

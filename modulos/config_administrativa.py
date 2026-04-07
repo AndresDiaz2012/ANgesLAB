@@ -97,7 +97,7 @@ class ConfiguradorAdministrativo:
                     pass
                 config = self.obtener_configuracion()
                 if not config:
-                    print("Advertencia: No hay configuración administrativa.")
+                    logging.getLogger("angeslab.config_administrativa").warning("No hay configuración administrativa.")
                     return
 
             # Verificar y agregar columnas faltantes
