@@ -373,7 +373,7 @@ class GeneradorPDF:
                 if ruta_abs_firma and os.path.exists(ruta_abs_firma):
                     try:
                         from reportlab.platypus import Image as RLImage
-                        firma_img_elem = RLImage(ruta_abs_firma, width=2.5*cm, height=0.9*cm)
+                        firma_img_elem = RLImage(ruta_abs_firma, width=4.5*cm, height=1.8*cm)
                         firma_img_elem.hAlign = 'CENTER'
                     except Exception:
                         firma_img_elem = ''

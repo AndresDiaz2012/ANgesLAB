@@ -395,8 +395,8 @@ def generar_pdf_gtt(db, detalle_id, filename, config_lab=None,
                 ruta_abs = os.path.join(base_dir, '..', ruta_firma)
                 if os.path.exists(ruta_abs):
                     try:
-                        fw = 1.2 * inch
-                        fh = 0.4 * inch
+                        fw = 2.2 * inch
+                        fh = 0.8 * inch
                         canvas.drawImage(ruta_abs, bx_bio - fw / 2, y_pos,
                                          width=fw, height=fh,
                                          preserveAspectRatio=True, mask='auto')
