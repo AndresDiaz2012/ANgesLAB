@@ -4388,84 +4388,92 @@ class MainApplication:
         pac_frame = tk.Frame(sec_paciente, bg=S['frame'])
         pac_frame.pack(fill='x', padx=12, pady=6)
 
-        # Status bar
-        self.pac_status_frame = tk.Frame(pac_frame, bg='#e0e0e0', height=26)
-        self.pac_status_frame.pack(fill='x', pady=(0, 6))
-        self.pac_status_frame.pack_propagate(False)
-        self.lbl_pac_status = tk.Label(self.pac_status_frame, text="Ingrese la cedula para buscar o registrar paciente",
-                                        font=('Segoe UI', 8), bg='#e0e0e0', fg='#555')
-        self.lbl_pac_status.pack(anchor='w', padx=8, pady=3)
+        # ── Tarjeta resumen del paciente (siempre visible) ──
+        self.pac_status_frame = tk.Frame(pac_frame, bg='#eceff1', bd=1, relief='solid', highlightthickness=0)
+        self.pac_status_frame.pack(fill='x', pady=(0, 10))
+
+        card_row = tk.Frame(self.pac_status_frame, bg='#eceff1')
+        card_row.pack(fill='x', padx=10, pady=8)
+
+        self.pac_card_avatar = tk.Label(card_row, text="👤", font=('Segoe UI Emoji', 20),
+                                         bg='#eceff1', fg='#546e7a', width=2)
+        self.pac_card_avatar.pack(side='left', padx=(0, 10))
+
+        card_text = tk.Frame(card_row, bg='#eceff1')
+        card_text.pack(side='left', fill='x', expand=True)
+        self.lbl_pac_status = tk.Label(card_text, text="Ingrese la cédula para buscar o registrar paciente",
+                                        font=('Segoe UI', 9, 'bold'), bg='#eceff1', fg='#455a64', anchor='w')
+        self.lbl_pac_status.pack(fill='x', anchor='w')
+        self.lbl_pac_nombre = tk.Label(card_text, text="—", font=('Segoe UI', 12, 'bold'),
+                                        bg='#eceff1', fg='#263238', anchor='w')
+        self.lbl_pac_nombre.pack(fill='x', anchor='w', pady=(1, 2))
+        self.lbl_pac_meta = tk.Label(card_text, text="", font=('Segoe UI', 8),
+                                      bg='#eceff1', fg='#607d8b', anchor='w')
+        self.lbl_pac_meta.pack(fill='x', anchor='w')
+
+        # Chip de edad — SIEMPRE visible con placeholder
+        self.lbl_edad_calc = tk.Label(card_row, text="— años", font=('Segoe UI', 10, 'bold'),
+                                       bg='#cfd8dc', fg='#455a64', padx=14, pady=7,
+                                       relief='flat', borderwidth=0)
+        self.lbl_edad_calc.pack(side='right', padx=(10, 0))
 
         self.pac_id_seleccionado = None
         self._pac_auto_filled = False
 
-        # Fila cedula
+        # ── Fila 1: Documento ──
         row_ced = tk.Frame(pac_frame, bg=S['frame'])
-        row_ced.pack(fill='x', pady=2)
-        tk.Label(row_ced, text="Tipo Doc:", font=('Segoe UI', 9), bg=S['frame'], fg=S['label'], width=9, anchor='w').pack(side='left')
-        self.pac_tipo_doc = ttk.Combobox(row_ced, font=('Segoe UI', 9), width=4, values=['V', 'E', 'P', 'J', 'G'])
+        row_ced.pack(fill='x', pady=3)
+        tk.Label(row_ced, text="Tipo:", font=('Segoe UI', 9), bg=S['frame'], fg=S['label']).pack(side='left')
+        self.pac_tipo_doc = ttk.Combobox(row_ced, font=('Segoe UI', 9), width=4,
+                                          values=['V', 'E', 'P', 'J', 'G'], state='readonly')
         self.pac_tipo_doc.set('V')
-        self.pac_tipo_doc.pack(side='left', ipady=2, padx=(0, 8))
-        tk.Label(row_ced, text="Cedula / Doc*:", font=('Segoe UI', 9, 'bold'), bg=S['frame'], fg=S['label'], anchor='w').pack(side='left')
-        self.pac_cedula = tk.Entry(row_ced, font=('Segoe UI', 11, 'bold'), width=16, relief='solid', bg=S['ced_bg'], bd=1)
-        self.pac_cedula.pack(side='left', ipady=4, padx=(4, 8))
+        self.pac_tipo_doc.pack(side='left', ipady=2, padx=(6, 12))
+        tk.Label(row_ced, text="Cédula / Doc*:", font=('Segoe UI', 9, 'bold'), bg=S['frame'], fg=S['label']).pack(side='left')
+        self.pac_cedula = tk.Entry(row_ced, font=('Segoe UI', 11, 'bold'), width=18,
+                                    relief='solid', bg=S['ced_bg'], bd=1)
+        self.pac_cedula.pack(side='left', ipady=4, padx=(6, 10))
         self.pac_cedula.bind('<Return>', lambda e: self._buscar_paciente_por_cedula())
         self.pac_cedula.bind('<FocusOut>', lambda e: self._buscar_paciente_por_cedula())
-        self.btn_buscar_pac = tk.Button(row_ced, text="Buscar", font=('Segoe UI', 8),
-                                        bg=S['btn_act'], fg=S['btn_act_fg'], relief='raised', padx=6,
-                                        cursor='hand2', command=self._buscar_paciente_por_cedula)
+        self.btn_buscar_pac = tk.Button(row_ced, text="🔍  Buscar", font=('Segoe UI', 8, 'bold'),
+                                        bg=S['btn_act'], fg=S['btn_act_fg'], relief='flat',
+                                        padx=10, pady=3, cursor='hand2',
+                                        command=self._buscar_paciente_por_cedula)
         self.btn_buscar_pac.pack(side='left', padx=(0, 4))
-        tk.Button(row_ced, text="Limpiar", font=('Segoe UI', 8), bg=S['btn'], fg=S['btn_fg'],
-                 relief='raised', padx=6, cursor='hand2',
+        tk.Button(row_ced, text="✕  Limpiar", font=('Segoe UI', 8), bg=S['btn'], fg=S['btn_fg'],
+                 relief='flat', padx=10, pady=3, cursor='hand2',
                  command=self._limpiar_campos_paciente).pack(side='left')
 
-        # Fila nombres
+        # ── Fila 2: Nombres / Apellidos ──
         row_nom = tk.Frame(pac_frame, bg=S['frame'])
-        row_nom.pack(fill='x', pady=2)
-        tk.Label(row_nom, text="Nombres*:", font=('Segoe UI', 9), bg=S['frame'], fg=S['label'], width=9, anchor='w').pack(side='left')
+        row_nom.pack(fill='x', pady=3)
+        tk.Label(row_nom, text="Nombres*:", font=('Segoe UI', 9), bg=S['frame'], fg=S['label'], width=10, anchor='w').pack(side='left')
         self.pac_nombres = tk.Entry(row_nom, font=('Segoe UI', 9), relief='solid', bg=S['input'], bd=1)
-        self.pac_nombres.pack(side='left', fill='x', expand=True, ipady=3, padx=(0, 8))
-        tk.Label(row_nom, text="Apellidos*:", font=('Segoe UI', 9), bg=S['frame'], fg=S['label'], anchor='w').pack(side='left')
+        self.pac_nombres.pack(side='left', fill='x', expand=True, ipady=3, padx=(0, 10))
+        tk.Label(row_nom, text="Apellidos*:", font=('Segoe UI', 9), bg=S['frame'], fg=S['label']).pack(side='left')
         self.pac_apellidos = tk.Entry(row_nom, font=('Segoe UI', 9), relief='solid', bg=S['input'], bd=1)
-        self.pac_apellidos.pack(side='left', fill='x', expand=True, ipady=3)
+        self.pac_apellidos.pack(side='left', fill='x', expand=True, ipady=3, padx=(6, 0))
 
-        # Fila extra
+        # ── Fila 3: Fecha Nac / Sexo / Teléfono ──
         row_extra = tk.Frame(pac_frame, bg=S['frame'])
-        row_extra.pack(fill='x', pady=2)
-        tk.Label(row_extra, text="Fecha Nac:", font=('Segoe UI', 9), bg=S['frame'], fg=S['label'], width=9, anchor='w').pack(side='left')
-        self.pac_fecha_nac = tk.Entry(row_extra, font=('Segoe UI', 9), width=11, relief='solid', bg=S['input'], bd=1)
-        self.pac_fecha_nac.pack(side='left', ipady=3, padx=(0, 3))
-        self.lbl_edad_calc = tk.Label(row_extra, text="", font=('Segoe UI', 10, 'bold'), bg=S['frame'], fg='#0d47a1')
-        self.lbl_edad_calc.pack(side='left', padx=(0, 8))
+        row_extra.pack(fill='x', pady=3)
+        tk.Label(row_extra, text="Fecha Nac:", font=('Segoe UI', 9), bg=S['frame'], fg=S['label'], width=10, anchor='w').pack(side='left')
+        self.pac_fecha_nac = tk.Entry(row_extra, font=('Segoe UI', 9), width=12, relief='solid', bg=S['input'], bd=1)
+        self.pac_fecha_nac.pack(side='left', ipady=3, padx=(0, 14))
+        tk.Label(row_extra, text="Sexo:", font=('Segoe UI', 9), bg=S['frame'], fg=S['label']).pack(side='left')
+        self.pac_sexo = ttk.Combobox(row_extra, font=('Segoe UI', 9), width=13,
+                                      values=['M - Masculino', 'F - Femenino'], state='readonly')
+        self.pac_sexo.pack(side='left', ipady=2, padx=(6, 14))
+        tk.Label(row_extra, text="Teléfono:", font=('Segoe UI', 9), bg=S['frame'], fg=S['label']).pack(side='left')
+        self.pac_telefono = tk.Entry(row_extra, font=('Segoe UI', 9), width=16, relief='solid', bg=S['input'], bd=1)
+        self.pac_telefono.pack(side='left', ipady=3, padx=(6, 0))
 
-        def _actualizar_edad_desde_fecha(*args):
-            fecha_str = self.pac_fecha_nac.get().strip()
-            if len(fecha_str) >= 10:
-                try:
-                    fn = datetime.strptime(fecha_str[:10], '%d/%m/%Y')
-                    hoy = datetime.now()
-                    anios = hoy.year - fn.year - ((hoy.month, hoy.day) < (fn.month, fn.day))
-                    if anios < 2:
-                        dias = (hoy - fn).days
-                        meses = dias // 30
-                        txt = f"Edad: {dias}d" if meses < 1 else f"Edad: {meses}m"
-                    else:
-                        txt = f"Edad: {anios} anos"
-                    self.lbl_edad_calc.config(text=txt, bg='#e3f2fd', relief='groove', borderwidth=1, padx=6, pady=1)
-                except ValueError:
-                    self.lbl_edad_calc.config(text="", bg=S['frame'], relief='flat', borderwidth=0)
-            else:
-                self.lbl_edad_calc.config(text="", bg=S['frame'], relief='flat', borderwidth=0)
-
-        self.pac_fecha_nac.bind('<KeyRelease>', _actualizar_edad_desde_fecha)
-        self.pac_fecha_nac.bind('<FocusOut>', _actualizar_edad_desde_fecha)
-
-        tk.Label(row_extra, text="Sexo:", font=('Segoe UI', 9), bg=S['frame'], fg=S['label'], anchor='w').pack(side='left')
-        self.pac_sexo = ttk.Combobox(row_extra, font=('Segoe UI', 9), width=12, values=['M - Masculino', 'F - Femenino'])
-        self.pac_sexo.pack(side='left', ipady=2, padx=(3, 8))
-        tk.Label(row_extra, text="Telefono:", font=('Segoe UI', 9), bg=S['frame'], fg=S['label'], anchor='w').pack(side='left')
-        self.pac_telefono = tk.Entry(row_extra, font=('Segoe UI', 9), width=15, relief='solid', bg=S['input'], bd=1)
-        self.pac_telefono.pack(side='left', ipady=3, padx=(3, 0))
+        self.pac_fecha_nac.bind('<KeyRelease>', self._actualizar_edad_desde_fecha)
+        self.pac_fecha_nac.bind('<FocusOut>', self._actualizar_edad_desde_fecha)
+        # Refrescar chips del card cuando cambien inputs
+        self.pac_sexo.bind('<<ComboboxSelected>>', lambda e: self._refrescar_card_paciente())
+        self.pac_telefono.bind('<FocusOut>', lambda e: self._refrescar_card_paciente())
+        self.pac_nombres.bind('<FocusOut>', lambda e: self._refrescar_card_paciente())
+        self.pac_apellidos.bind('<FocusOut>', lambda e: self._refrescar_card_paciente())
 
         self.pac_cedula.focus_set()
 
@@ -4496,32 +4504,62 @@ class MainApplication:
         pruebas_container = tk.Frame(sec_pruebas, bg=S['frame'])
         pruebas_container.pack(fill='both', expand=True, padx=12, pady=8)
 
-        # -- Fila 1: Perfil
-        row_perfil = tk.Frame(pruebas_container, bg=S['frame'])
-        row_perfil.pack(fill='x', pady=(0, 4))
-        tk.Label(row_perfil, text="Perfil:", font=('Segoe UI', 9, 'bold'), bg=S['frame'], fg=S['label']).pack(side='left')
-        self.combo_perfil = ttk.Combobox(row_perfil, font=('Segoe UI', 9), width=40, state='readonly')
-        self.combo_perfil.pack(side='left', padx=6)
+        # -- Toolbar unificada (Perfil + Buscar + Contador) --
+        toolbar_pruebas = tk.Frame(pruebas_container, bg='#f5f5f5', bd=1, relief='solid', highlightthickness=0)
+        toolbar_pruebas.pack(fill='x', pady=(0, 8))
+        toolbar_inner = tk.Frame(toolbar_pruebas, bg='#f5f5f5')
+        toolbar_inner.pack(fill='x', padx=8, pady=6)
+
+        # Perfil
+        tk.Label(toolbar_inner, text="🧪  Perfil:", font=('Segoe UI', 9, 'bold'),
+                 bg='#f5f5f5', fg=S['label']).pack(side='left')
+        self.combo_perfil = ttk.Combobox(toolbar_inner, font=('Segoe UI', 9), width=30, state='readonly')
+        self.combo_perfil.pack(side='left', padx=(6, 4), ipady=2)
         try:
             perfiles = db.query("SELECT PerfilID, CodigoPerfil, NombrePerfil FROM Perfiles WHERE Activo=True ORDER BY NombrePerfil")
             self._perfil_map = {f"{p['CodigoPerfil']} - {p['NombrePerfil']}": p['PerfilID'] for p in (perfiles or [])}
         except Exception:
             self._perfil_map = {}
         self.combo_perfil['values'] = [''] + list(self._perfil_map.keys())
-        tk.Button(row_perfil, text="Agregar Perfil", font=('Segoe UI', 8, 'bold'), bg=S['btn_ok'], fg='white',
-                 relief='raised', padx=8, cursor='hand2', command=self._agregar_perfil).pack(side='left', padx=4)
+        tk.Button(toolbar_inner, text="＋  Perfil", font=('Segoe UI', 8, 'bold'),
+                 bg=S['btn_ok'], fg='white', relief='flat', padx=10, pady=3,
+                 cursor='hand2', command=self._agregar_perfil).pack(side='left', padx=(2, 14))
 
-        # -- Fila 2: Busqueda individual
-        row_buscar = tk.Frame(pruebas_container, bg=S['frame'])
-        row_buscar.pack(fill='x', pady=(0, 6))
-        tk.Label(row_buscar, text="Buscar:", font=('Segoe UI', 9, 'bold'), bg=S['frame'], fg=S['label']).pack(side='left')
-        self.entry_buscar_prueba = tk.Entry(row_buscar, font=('Segoe UI', 9), width=35, relief='solid', bg=S['input'], bd=1)
+        # Separador visual
+        tk.Frame(toolbar_inner, bg='#cfd8dc', width=1).pack(side='left', fill='y', padx=4, pady=2)
+
+        # Búsqueda individual
+        tk.Label(toolbar_inner, text="🔍  Buscar:", font=('Segoe UI', 9, 'bold'),
+                 bg='#f5f5f5', fg=S['label']).pack(side='left', padx=(10, 0))
+        self.entry_buscar_prueba = tk.Entry(toolbar_inner, font=('Segoe UI', 9), width=28,
+                                             relief='solid', bg=S['input'], bd=1)
         self.entry_buscar_prueba.pack(side='left', padx=6, ipady=3)
         self.entry_buscar_prueba.bind('<Return>', lambda e: self._agregar_primera_coincidencia())
-        tk.Button(row_buscar, text="Agregar", font=('Segoe UI', 8), bg=S['btn_act'], fg=S['btn_act_fg'],
-                 relief='raised', padx=8, cursor='hand2', command=self._agregar_primera_coincidencia).pack(side='left', padx=4)
-        tk.Button(row_buscar, text="Quitar Seleccionada", font=('Segoe UI', 8), bg=S['btn_del'], fg='white',
-                 relief='raised', padx=8, cursor='hand2', command=self.quitar_prueba_sol).pack(side='right')
+        self.entry_buscar_prueba.bind('<KeyRelease>', self._autocomplete_prueba_update)
+        self.entry_buscar_prueba.bind('<Down>', self._autocomplete_focus_listbox)
+        self.entry_buscar_prueba.bind('<Escape>', lambda e: self._autocomplete_cerrar())
+        self.entry_buscar_prueba.bind('<FocusOut>', lambda e: self.entry_buscar_prueba.after(200, self._autocomplete_cerrar_si_no_focus))
+        self._autocomplete_win = None
+        self._autocomplete_listbox = None
+        self._autocomplete_data = []
+        tk.Button(toolbar_inner, text="＋  Agregar", font=('Segoe UI', 8, 'bold'),
+                 bg=S['btn_act'], fg=S['btn_act_fg'], relief='flat', padx=10, pady=3,
+                 cursor='hand2', command=self._agregar_primera_coincidencia).pack(side='left', padx=(2, 8))
+
+        # Pill contador (derecha)
+        self.pill_contador = tk.Label(toolbar_inner, text=" 0 pruebas ",
+                                       font=('Segoe UI', 9, 'bold'),
+                                       bg='#9e9e9e', fg='white', padx=10, pady=4)
+        self.pill_contador.pack(side='right')
+
+        # -- Barra secundaria con acciones sobre selección --
+        row_acciones = tk.Frame(pruebas_container, bg=S['frame'])
+        row_acciones.pack(fill='x', pady=(0, 4))
+        tk.Label(row_acciones, text="Pruebas seleccionadas",
+                 font=('Segoe UI', 9, 'bold'), bg=S['frame'], fg=S['sec_fg']).pack(side='left')
+        tk.Button(row_acciones, text="🗑  Quitar seleccionada", font=('Segoe UI', 8),
+                 bg=S['btn_del'], fg='white', relief='flat', padx=10, pady=2,
+                 cursor='hand2', command=self.quitar_prueba_sol).pack(side='right')
 
         # -- Treeview unico: pruebas seleccionadas
         tree_frame = tk.Frame(pruebas_container, bg=S['frame'])
@@ -4976,6 +5014,31 @@ class MainApplication:
         except Exception as e:
             _log.error("Error buscando paciente: %s", e)
 
+    def _actualizar_edad_desde_fecha(self, *args):
+        """Calcula y muestra la edad a partir del campo de fecha de nacimiento."""
+        if not hasattr(self, 'pac_fecha_nac') or not hasattr(self, 'lbl_edad_calc'):
+            return
+        try:
+            fecha_str = self.pac_fecha_nac.get().strip()
+        except Exception:
+            return
+        if len(fecha_str) >= 10:
+            try:
+                fn = datetime.strptime(fecha_str[:10], '%d/%m/%Y')
+                hoy = datetime.now()
+                anios = hoy.year - fn.year - ((hoy.month, hoy.day) < (fn.month, fn.day))
+                if anios < 2:
+                    dias = (hoy - fn).days
+                    meses = dias // 30
+                    txt = f"{dias} días" if meses < 1 else f"{meses} meses"
+                else:
+                    txt = f"{anios} años"
+                self.lbl_edad_calc.config(text=txt, bg='#e3f2fd', fg='#0d47a1')
+                return
+            except ValueError:
+                pass
+        self.lbl_edad_calc.config(text="— años", bg='#cfd8dc', fg='#455a64')
+
     def _llenar_campos_paciente(self, pac):
         """Llena los campos inline con datos del paciente encontrado."""
         self.pac_id_seleccionado = pac['PacienteID']
@@ -5000,8 +5063,8 @@ class MainApplication:
                 self.pac_fecha_nac.insert(0, pac['FechaNacimiento'].strftime('%d/%m/%Y'))
             except Exception:
                 pass
-            # Actualizar label de edad
-            self.pac_fecha_nac.event_generate('<KeyRelease>')
+        # Actualizar label de edad directamente
+        self._actualizar_edad_desde_fecha()
 
         # Sexo
         if pac.get('Sexo'):
@@ -5012,20 +5075,10 @@ class MainApplication:
         self.pac_telefono.delete(0, 'end')
         self.pac_telefono.insert(0, pac.get('Telefono1') or '')
 
-        # Calcular edad para el status
-        edad_str = ""
-        if pac.get('FechaNacimiento'):
-            try:
-                fn = pac['FechaNacimiento']
-                hoy = datetime.now()
-                edad = hoy.year - fn.year - ((hoy.month, hoy.day) < (fn.month, fn.day))
-                edad_str = f" | {edad} años"
-            except Exception:
-                pass
-
         nombre = f"{pac.get('Nombres', '')} {pac.get('Apellidos', '')}".strip()
-        self._set_pac_status(f"OK — Paciente encontrado: {nombre}{edad_str}",
-                             '#e8f5e9', '#2e7d32')
+        self._set_pac_status(f"✓  Paciente encontrado en el sistema",
+                             '#e8f5e9', '#1b5e20')
+        self._refrescar_card_paciente()
 
     def _limpiar_campos_paciente(self):
         """Limpia todos los campos del paciente para ingresar uno nuevo."""
@@ -5039,19 +5092,78 @@ class MainApplication:
         self.pac_nombres.delete(0, 'end')
         self.pac_apellidos.delete(0, 'end')
         self.pac_fecha_nac.delete(0, 'end')
-        self.lbl_edad_calc.config(text="", bg='white', relief='flat', borderwidth=0)
+        self.lbl_edad_calc.config(text="— años", bg='#cfd8dc', fg='#455a64')
         self.pac_sexo.set('')
         self.pac_telefono.delete(0, 'end')
 
         self.lbl_numero.config(text="(Se generará al guardar)", fg='#7f8c8d')
         self._set_pac_status("Ingrese la cédula para buscar o registrar paciente",
-                             '#e8f5e9', '#555')
+                             '#eceff1', '#455a64')
+        self._refrescar_card_paciente()
         self.pac_cedula.focus_set()
 
     def _set_pac_status(self, texto, bg_color, fg_color):
-        """Actualiza el indicador de estado del paciente."""
-        self.pac_status_frame.config(bg=bg_color)
-        self.lbl_pac_status.config(text=texto, bg=bg_color, fg=fg_color)
+        """Actualiza el indicador de estado del paciente (card completo)."""
+        try:
+            self.pac_status_frame.config(bg=bg_color)
+            self.lbl_pac_status.config(text=texto, bg=bg_color, fg=fg_color)
+            # Aplicar color de fondo al resto del card para que sea coherente
+            if hasattr(self, 'lbl_pac_nombre'):
+                self.lbl_pac_nombre.config(bg=bg_color)
+                self.lbl_pac_meta.config(bg=bg_color)
+                self.pac_card_avatar.config(bg=bg_color)
+                # Recorrer frames hijos para mantener bg coherente
+                for child in self.pac_status_frame.winfo_children():
+                    try:
+                        child.config(bg=bg_color)
+                        for sub in child.winfo_children():
+                            try:
+                                if isinstance(sub, tk.Frame):
+                                    sub.config(bg=bg_color)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    def _refrescar_card_paciente(self):
+        """Actualiza nombre + meta + avatar del card con los datos actuales de los entries."""
+        if not hasattr(self, 'lbl_pac_nombre'):
+            return
+        try:
+            nom = (self.pac_nombres.get() or '').strip()
+            ape = (self.pac_apellidos.get() or '').strip()
+            ced = (self.pac_cedula.get() or '').strip()
+            tdoc = (self.pac_tipo_doc.get() or '').strip()
+            tel = (self.pac_telefono.get() or '').strip()
+            sexo_raw = (self.pac_sexo.get() or '').strip()
+            sexo_corto = sexo_raw.split(' - ')[-1] if sexo_raw else ''
+
+            nombre_completo = f"{nom} {ape}".strip()
+            self.lbl_pac_nombre.config(text=nombre_completo if nombre_completo else "—")
+
+            # Meta: chips separados por punto medio
+            meta_parts = []
+            if tdoc and ced:
+                meta_parts.append(f"{tdoc}-{ced}")
+            elif ced:
+                meta_parts.append(ced)
+            if sexo_corto:
+                meta_parts.append(sexo_corto)
+            if tel:
+                meta_parts.append(f"☎ {tel}")
+            self.lbl_pac_meta.config(text="   ·   ".join(meta_parts))
+
+            # Avatar según sexo
+            if 'Fem' in sexo_raw:
+                self.pac_card_avatar.config(text="👩")
+            elif 'Mas' in sexo_raw:
+                self.pac_card_avatar.config(text="👨")
+            else:
+                self.pac_card_avatar.config(text="👤")
+        except Exception:
+            pass
 
     def _agregar_perfil(self):
         """Agrega todas las pruebas de un perfil al listado de seleccionadas."""
@@ -5110,7 +5222,7 @@ class MainApplication:
             pruebas = db.query(f"""
                 SELECT PruebaID, CodigoPrueba, NombrePrueba, Precio
                 FROM Pruebas
-                WHERE Activo=True AND (NombrePrueba LIKE '%{safe}%' OR CodigoPrueba LIKE '%{safe}%')
+                WHERE Activo=True AND NombrePrueba LIKE '%{safe}%'
                 ORDER BY NombrePrueba
             """)
             if not pruebas:
@@ -5139,9 +5251,152 @@ class MainApplication:
             self._refrescar_lista_seleccionadas()
             self.calcular_totales()
             self.entry_buscar_prueba.delete(0, 'end')
+            self._autocomplete_cerrar()
             self.entry_buscar_prueba.focus_set()
         except Exception as e:
             _log.error("Error buscando prueba: %s", e)
+
+    def _autocomplete_prueba_update(self, event=None):
+        """Refresca el popup de autocompletado al escribir en el entry de busqueda."""
+        if event is not None and getattr(event, 'keysym', '') in (
+            'Up', 'Down', 'Return', 'Escape', 'Left', 'Right', 'Tab',
+            'Shift_L', 'Shift_R', 'Control_L', 'Control_R', 'Alt_L', 'Alt_R'
+        ):
+            return
+        try:
+            texto = self.entry_buscar_prueba.get().strip()
+        except Exception:
+            return
+        if len(texto) < 1:
+            self._autocomplete_cerrar()
+            return
+        ids_ya = {p['id'] for p in getattr(self, 'sol_pruebas_seleccionadas', [])}
+        safe = texto.replace("'", "''")
+        try:
+            pruebas = db.query(f"""
+                SELECT TOP 15 PruebaID, CodigoPrueba, NombrePrueba, Precio
+                FROM Pruebas
+                WHERE Activo=True AND NombrePrueba LIKE '%{safe}%'
+                ORDER BY NombrePrueba
+            """) or []
+        except Exception as e:
+            _log.error("Error autocompletado pruebas: %s", e)
+            pruebas = []
+        disponibles = [p for p in pruebas if p['PruebaID'] not in ids_ya]
+        if not disponibles:
+            self._autocomplete_cerrar()
+            return
+        self._autocomplete_mostrar(disponibles)
+
+    def _autocomplete_mostrar(self, pruebas):
+        """Crea o actualiza el popup Listbox con las sugerencias debajo del entry."""
+        try:
+            if not self._autocomplete_win or not self._autocomplete_win.winfo_exists():
+                self._autocomplete_win = tk.Toplevel(self.sol_win)
+                try:
+                    self._autocomplete_win.wm_overrideredirect(True)
+                except Exception:
+                    pass
+                self._autocomplete_win.configure(bg='#888')
+                inner = tk.Frame(self._autocomplete_win, bg='#888', bd=1)
+                inner.pack(fill='both', expand=True, padx=1, pady=1)
+                self._autocomplete_listbox = tk.Listbox(
+                    inner, font=('Segoe UI', 10), height=8,
+                    bg='white', fg='#222', activestyle='dotbox',
+                    highlightthickness=0, bd=0, relief='flat',
+                    selectbackground='#1565c0', selectforeground='white'
+                )
+                self._autocomplete_listbox.pack(fill='both', expand=True)
+                self._autocomplete_listbox.bind('<Return>', self._autocomplete_seleccionar)
+                self._autocomplete_listbox.bind('<Double-1>', self._autocomplete_seleccionar)
+                self._autocomplete_listbox.bind('<Escape>', lambda e: (self._autocomplete_cerrar(), self.entry_buscar_prueba.focus_set()))
+            else:
+                self._autocomplete_listbox.delete(0, 'end')
+
+            self.entry_buscar_prueba.update_idletasks()
+            x = self.entry_buscar_prueba.winfo_rootx()
+            y = self.entry_buscar_prueba.winfo_rooty() + self.entry_buscar_prueba.winfo_height() + 2
+            w = max(self.entry_buscar_prueba.winfo_width(), 420)
+            self._autocomplete_win.geometry(f"{w}x180+{x}+{y}")
+
+            self._autocomplete_data = []
+            for p in pruebas:
+                precio = float(p.get('Precio') or 0)
+                nombre = p.get('NombrePrueba') or ''
+                self._autocomplete_listbox.insert('end', f"  {nombre}")
+                self._autocomplete_data.append({
+                    'id': p['PruebaID'],
+                    'codigo': p.get('CodigoPrueba') or '',
+                    'nombre': nombre,
+                    'precio': precio,
+                })
+
+            try:
+                self._autocomplete_win.lift()
+            except Exception:
+                pass
+        except Exception as e:
+            _log.error("Error mostrando autocompletado: %s", e)
+
+    def _autocomplete_cerrar(self):
+        """Cierra el popup de autocompletado si existe."""
+        try:
+            if self._autocomplete_win and self._autocomplete_win.winfo_exists():
+                self._autocomplete_win.destroy()
+        except Exception:
+            pass
+        self._autocomplete_win = None
+        self._autocomplete_listbox = None
+        self._autocomplete_data = []
+
+    def _autocomplete_cerrar_si_no_focus(self):
+        """Cierra el popup si el foco salio del entry y del listbox."""
+        try:
+            focused = self.sol_win.focus_get() if hasattr(self, 'sol_win') and self.sol_win.winfo_exists() else None
+            if focused is self.entry_buscar_prueba:
+                return
+            if self._autocomplete_listbox is not None and focused is self._autocomplete_listbox:
+                return
+        except Exception:
+            pass
+        self._autocomplete_cerrar()
+
+    def _autocomplete_focus_listbox(self, event=None):
+        """Pasa el foco al listbox de sugerencias (tecla flecha abajo)."""
+        if self._autocomplete_listbox and self._autocomplete_listbox.size() > 0:
+            self._autocomplete_listbox.focus_set()
+            self._autocomplete_listbox.selection_clear(0, 'end')
+            self._autocomplete_listbox.selection_set(0)
+            self._autocomplete_listbox.activate(0)
+            return 'break'
+
+    def _autocomplete_seleccionar(self, event=None):
+        """Agrega la prueba elegida del listbox a la solicitud."""
+        if not self._autocomplete_listbox:
+            return
+        sel = self._autocomplete_listbox.curselection()
+        if not sel:
+            return
+        idx = sel[0]
+        if idx >= len(self._autocomplete_data):
+            return
+        data = self._autocomplete_data[idx]
+        ids_ya = {p['id'] for p in getattr(self, 'sol_pruebas_seleccionadas', [])}
+        if data['id'] in ids_ya:
+            self._set_pac_status("La prueba ya esta seleccionada", '#fff3e0', '#e65100')
+        else:
+            self.sol_pruebas_seleccionadas.append(data)
+            self._refrescar_lista_seleccionadas()
+            self.calcular_totales()
+        try:
+            self.entry_buscar_prueba.delete(0, 'end')
+        except Exception:
+            pass
+        self._autocomplete_cerrar()
+        try:
+            self.entry_buscar_prueba.focus_set()
+        except Exception:
+            pass
 
     def _popup_seleccion_prueba(self, pruebas):
         """Muestra popup para elegir entre varias pruebas coincidentes. Retorna dict o None."""
@@ -5211,6 +5466,11 @@ class MainApplication:
         subtotal = sum(float(p.get('precio', 0)) for p in self.sol_pruebas_seleccionadas)
         if hasattr(self, 'lbl_resumen_pruebas'):
             self.lbl_resumen_pruebas.config(text=f"{n} prueba{'s' if n != 1 else ''} | Subtotal: ${subtotal:,.2f}")
+        # Actualizar pill contador
+        if hasattr(self, 'pill_contador'):
+            txt = f" {n} prueba{'s' if n != 1 else ''} "
+            color = '#1a237e' if n > 0 else '#9e9e9e'
+            self.pill_contador.config(text=txt, bg=color)
 
     def _verificar_solicitudes_existentes(self, paciente):
         """Verifica si el paciente tiene solicitudes activas del mismo día."""
