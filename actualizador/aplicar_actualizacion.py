@@ -217,7 +217,8 @@ def resetear_developer(install: Path, argv):
     Retorna: True (aplicado), False (error), None (omitido).
     """
     env_pwd = os.environ.get('ANGESLAB_NEW_DEV_PWD', '').strip()
-    forzar = ('--dev' in argv[1:]) or bool(env_pwd)
+    forzar = (('--dev' in argv[1:]) or ('--solo-dev' in argv[1:])
+              or bool(env_pwd))
     auto_si = any(a in ('--si', '--yes', '-y') for a in argv[1:])
 
     if not forzar:
@@ -346,6 +347,27 @@ def main(argv):
     bd = install / 'ANgesLAB.accdb'
     log(f"Base de datos:             {bd}  "
         f"({'existe' if bd.exists() else 'NO existe'})")
+
+    # ---- MODO ATAJO: solo restablecer acceso developer (no toca el codigo) ----
+    if '--solo-dev' in argv[1:]:
+        log("")
+        log("MODO ACCESO DEVELOPER: solo se restablece la contrasena del")
+        log("usuario 'developer'. NO se modifica el codigo ni la migracion.")
+        log("IMPORTANTE: ANgesLAB debe estar CERRADO.")
+        log("\n[1/2] Respaldando base de datos del cliente...")
+        respaldar_bd(install)
+        log("\n[2/2] Acceso del usuario 'developer'...")
+        dev = resetear_developer(install, argv)
+        registrar_bitacora(install, 0, False, dev)
+        estado = {True: 'developer actualizado', False: 'developer con ERROR',
+                  None: 'developer sin cambios'}.get(dev, 'sin cambios')
+        log("\n" + "=" * 66)
+        log(f"   FINALIZADO  -  {estado}")
+        log("=" * 66)
+        if dev:
+            log("Ya puede iniciar sesion como 'developer' con la contrasena indicada.")
+        return 0
+
     log("")
     log("Se actualizara SOLO el codigo (ANgesLAB.pyw + modulos) y se agregara")
     log("el Indice TyG. NO se modifican datos, configuracion, logos ni firmas.")
