@@ -38,6 +38,14 @@ recientes, SIN eliminar el trabajo ya realizado por el cliente.
      - Parametros 'Trigliceridos' e 'Indice TyG' al Perfil de Resistencia
        a Insulina (migracion idempotente de base de datos).
 
+  OPCIONAL - SOLO SOPORTE TECNICO (acceso 'developer'):
+     Al final, el actualizador pregunta si desea establecer la contrasena
+     del usuario 'developer'. El cliente normal debe presionar Enter para
+     OMITIR este paso (no afecta sus usuarios). Si es personal tecnico de
+     ANgesLAB, puede escribir 's' e ingresar la contrasena (se muestra con
+     asteriscos). Esa clave NO queda guardada en la USB ni en el programa;
+     solo se aplica en ese momento a la base de datos de esa instalacion.
+
   NO SE TOCA NUNCA (su trabajo y configuracion):
      - ANgesLAB.accdb  (pacientes, resultados, facturas, historia...)
      - db_config.json, config_ia.json, backup_config.json

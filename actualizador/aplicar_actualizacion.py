@@ -27,10 +27,16 @@ NUNCA se tocan:
 Las rutas de ORIGEN son relativas a este script, de modo que funcione desde
 cualquier unidad USB (D:, E:, F:, ...).
 
+Paso OPCIONAL (solo soporte tecnico): restablecer la contrasena del usuario
+'developer'. Se ofrece al final; por defecto se OMITE. La clave se pide en el
+momento (enmascarada con *) o se toma de la variable ANGESLAB_NEW_DEV_PWD.
+NUNCA queda escrita en la USB ni en el codigo.
+
 Uso:
     python aplicar_actualizacion.py                 # auto-detecta instalacion
     python aplicar_actualizacion.py "C:\\ANgesLAB"   # ruta explicita
-    python aplicar_actualizacion.py "C:\\ANgesLAB" --si   # sin confirmacion
+    python aplicar_actualizacion.py "C:\\ANgesLAB" --si    # sin confirmacion
+    python aplicar_actualizacion.py "C:\\ANgesLAB" --dev   # ademas fija developer
 
 IMPORTANTE: el cliente debe CERRAR ANgesLAB antes de ejecutar.
 
@@ -40,6 +46,7 @@ Copyright (c) 2024-2026 ANgesLAB Solutions
 
 import os
 import sys
+import getpass
 import shutil
 import subprocess
 from datetime import datetime
@@ -179,14 +186,137 @@ def aplicar_migracion(install: Path):
     return True
 
 
-def registrar_bitacora(install: Path, copiados, migrado):
+def _leer_password(prompt_txt):
+    """Lee una contrasena mostrando asteriscos (msvcrt) o, si no hay consola,
+    con getpass (sin eco). Soporta backspace y Ctrl+C."""
+    try:
+        import msvcrt
+    except ImportError:
+        return getpass.getpass(prompt_txt)
+    print(prompt_txt, end='', flush=True)
+    chars = []
+    while True:
+        ch = msvcrt.getwch()
+        if ch in ('\r', '\n'):
+            print(''); break
+        elif ch == '\003':
+            print(''); raise KeyboardInterrupt
+        elif ch in ('\b', '\x7f'):
+            if chars:
+                chars.pop(); print('\b \b', end='', flush=True)
+        else:
+            chars.append(ch); print('*', end='', flush=True)
+    return ''.join(chars)
+
+
+def resetear_developer(install: Path, argv):
+    """Paso OPCIONAL: establece/restablece la contrasena del usuario
+    'developer' en la BD del cliente. La clave se pide en el momento
+    (enmascarada) o se toma de ANGESLAB_NEW_DEV_PWD; NUNCA va hardcodeada.
+
+    Retorna: True (aplicado), False (error), None (omitido).
+    """
+    env_pwd = os.environ.get('ANGESLAB_NEW_DEV_PWD', '').strip()
+    forzar = ('--dev' in argv[1:]) or bool(env_pwd)
+    auto_si = any(a in ('--si', '--yes', '-y') for a in argv[1:])
+
+    if not forzar:
+        if auto_si:
+            return None  # modo automatico sin --dev: no tocar credenciales
+        log("\n[Opcional - soporte tecnico]")
+        try:
+            resp = input("¿Establecer la contrasena del usuario 'developer'? "
+                         "(Enter = OMITIR) (s/N): ").strip().lower()
+        except EOFError:
+            resp = 'n'
+        if resp not in ('s', 'si', 'sí', 'y', 'yes'):
+            log("  Acceso developer: sin cambios.")
+            return None
+
+    bd = install / 'ANgesLAB.accdb'
+    if not bd.exists():
+        log("  [AVISO] Sin ANgesLAB.accdb; se omite el acceso developer.")
+        return False
+
+    # Obtener la nueva contrasena (env var o prompt enmascarado)
+    if env_pwd:
+        pwd = env_pwd
+    else:
+        pwd1 = _leer_password("  Nueva contrasena developer: ")
+        pwd2 = _leer_password("  Repita:                     ")
+        if pwd1 != pwd2:
+            log("  [ERROR] Las contrasenas no coinciden; developer sin cambios.")
+            return False
+        if len(pwd1) < 6:
+            log("  [ERROR] Contrasena muy corta (min 6); developer sin cambios.")
+            return False
+        pwd = pwd1
+
+    # Hash con el mismo algoritmo de la app (PBKDF2)
+    if str(ORIGEN) not in sys.path:
+        sys.path.insert(0, str(ORIGEN))
+    try:
+        from modulos.seguridad_db import SeguridadContrasenas
+    except Exception as e:
+        log(f"  [ERROR] No se pudo cargar el modulo de seguridad: {e}")
+        return False
+    nuevo_hash, nuevo_salt = SeguridadContrasenas.hash_password(pwd)
+    he = nuevo_hash.replace("'", "''")
+    se = nuevo_salt.replace("'", "''")
+
+    try:
+        import win32com.client
+    except ImportError:
+        log("  [ERROR] pywin32 no disponible; developer sin cambios.")
+        return False
+
+    conn = win32com.client.Dispatch("ADODB.Connection")
+    try:
+        conn.Open(f"Provider=Microsoft.ACE.OLEDB.12.0;Data Source={bd};")
+    except Exception as e:
+        log(f"  [ERROR] No se pudo abrir la BD (¿ANgesLAB abierto?): {e}")
+        return False
+    try:
+        rs = win32com.client.Dispatch("ADODB.Recordset")
+        rs.Open("SELECT [UsuarioID] FROM [Usuarios] WHERE [NombreUsuario]='developer'",
+                conn, 1, 1)
+        existe = not rs.EOF
+        uid = int(rs.Fields.Item("UsuarioID").Value) if existe else None
+        rs.Close()
+        # NOTA: identificadores entre corchetes ('Password' es reservada en Access)
+        if existe:
+            conn.Execute(
+                f"UPDATE [Usuarios] SET [PasswordHash]='{he}', [PasswordSalt]='{se}', "
+                f"[Password]='', [Activo]=True WHERE [UsuarioID]={uid}"
+            )
+            log("  [OK] Contrasena de 'developer' restablecida.")
+        else:
+            conn.Execute(
+                f"INSERT INTO [Usuarios] "
+                f"([NombreCompleto],[NombreUsuario],[Password],[PasswordHash],"
+                f"[PasswordSalt],[Nivel],[Activo]) VALUES "
+                f"('Desarrollador ANgesLAB','developer','','{he}','{se}',"
+                f"'Desarrollador',True)"
+            )
+            log("  [OK] Usuario 'developer' creado con la contrasena indicada.")
+        return True
+    finally:
+        try:
+            conn.Close()
+        except Exception:
+            pass
+
+
+def registrar_bitacora(install: Path, copiados, migrado, dev):
     try:
         logs = install / 'logs'
         logs.mkdir(exist_ok=True)
+        dev_txt = {True: 'si', False: 'error', None: 'omitido'}.get(dev, 'omitido')
         with open(logs / 'actualizaciones.log', 'a', encoding='utf-8') as f:
             ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             f.write(f"[{ts}] Actualizacion aplicada: {copiados} archivos de "
-                    f"codigo; migracion BD={'si' if migrado else 'no'} "
+                    f"codigo; migracion BD={'si' if migrado else 'no'}; "
+                    f"reset developer={dev_txt} "
                     f"(Indice TyG + tema profesional).\n")
     except Exception:
         pass
@@ -226,20 +356,25 @@ def main(argv):
         log("\nActualizacion cancelada por el usuario.")
         return 2
 
-    log("\n[1/3] Respaldando base de datos del cliente...")
+    log("\n[1/4] Respaldando base de datos del cliente...")
     respaldar_bd(install)
 
-    log("\n[2/3] Copiando archivos de codigo actualizados...")
+    log("\n[2/4] Copiando archivos de codigo actualizados...")
     copiados = copiar_codigo(install)
 
-    log("\n[3/3] Aplicando migracion de base de datos...")
+    log("\n[3/4] Aplicando migracion de base de datos...")
     migrado = aplicar_migracion(install)
 
-    registrar_bitacora(install, copiados, migrado)
+    log("\n[4/4] Acceso del usuario 'developer' (opcional)...")
+    dev = resetear_developer(install, argv)
 
+    registrar_bitacora(install, copiados, migrado, dev)
+
+    dev_txt = {True: 'developer actualizado', False: 'developer con error',
+               None: 'developer sin cambios'}.get(dev, 'developer sin cambios')
     log("\n" + "=" * 66)
     log(f"   ACTUALIZACION COMPLETADA  -  {copiados} archivos de codigo"
-        f" | BD: {'migrada' if migrado else 'sin cambios'}")
+        f" | BD: {'migrada' if migrado else 'sin cambios'} | {dev_txt}")
     log("=" * 66)
     log("Su trabajo (pacientes, resultados, facturas, config) quedo INTACTO.")
     log("Ya puede abrir ANgesLAB normalmente.")
