@@ -17374,16 +17374,27 @@ def _asegurar_usuario_admin():
             return
 
         # Paso 3: Crear usuarios iniciales o migrar existentes
-        # NOTA: La contraseña del desarrollador se lee de variable de entorno
-        # ANGESLAB_DEV_PWD. Si no está definida, se genera una aleatoria.
+        # CLAVE DE SOPORTE DEL DESARROLLADOR (acceso fijo en cada instalacion):
+        # Por seguridad NO se guarda la contrasena en texto plano en el codigo;
+        # se embebe su hash PBKDF2 precomputado. El login del usuario
+        # 'developer' es siempre la misma clave de soporte conocida por el
+        # proveedor. Puede sobreescribirse por instalacion definiendo la
+        # variable de entorno ANGESLAB_DEV_PWD antes del primer arranque.
+        _DEV_HASH_FIJO = ('pbkdf2:db41d7e93d1c1f226040ff203bef09c7'
+                          '20ead7a4a1d62b1d172c5ab7602fe87f')
+        _DEV_SALT_FIJO = ('b2b1c1d71e809ed7a4899365a1e10c5a'
+                          'df01ab8c9fbb0a40ebb9740119edaa37')
+
         _dev_pwd = os.environ.get('ANGESLAB_DEV_PWD', '')
-        if not _dev_pwd:
-            _dev_pwd = SeguridadContrasenas.generar_password_temporal()
+        if _dev_pwd:
+            _dev_hash_fijo, _dev_salt_fijo = SeguridadContrasenas.hash_password(_dev_pwd)
+        else:
+            _dev_hash_fijo, _dev_salt_fijo = _DEV_HASH_FIJO, _DEV_SALT_FIJO
 
         total = db.count('Usuarios')
         if total == 0:
-            # BD vacia: crear developer y admin con contraseñas seguras
-            dev_hash, dev_salt = SeguridadContrasenas.hash_password(_dev_pwd)
+            # BD vacia: crear developer (clave fija de soporte) y admin
+            dev_hash, dev_salt = _dev_hash_fijo, _dev_salt_fijo
             db.insert('Usuarios', {
                 'NombreCompleto': 'Desarrollador ANgesLAB',
                 'NombreUsuario': 'developer',
@@ -17412,7 +17423,7 @@ def _asegurar_usuario_admin():
                     "SELECT [UsuarioID], [PasswordHash] FROM [Usuarios] WHERE [NombreUsuario]='developer'"
                 )
                 if not dev_existe:
-                    dev_hash, dev_salt = SeguridadContrasenas.hash_password(_dev_pwd)
+                    dev_hash, dev_salt = _dev_hash_fijo, _dev_salt_fijo
                     db.insert('Usuarios', {
                         'NombreCompleto': 'Desarrollador ANgesLAB',
                         'NombreUsuario': 'developer',
@@ -17426,7 +17437,7 @@ def _asegurar_usuario_admin():
                     # Verificar que tenga hash y migrar a PBKDF2 si es legacy
                     ph = dev_existe.get('PasswordHash', '') or ''
                     if not ph:
-                        dev_hash, dev_salt = SeguridadContrasenas.hash_password(_dev_pwd)
+                        dev_hash, dev_salt = _dev_hash_fijo, _dev_salt_fijo
                         db.execute(
                             f"UPDATE [Usuarios] SET [PasswordHash]='{dev_hash}', "
                             f"[PasswordSalt]='{dev_salt}', [Password]='', "
