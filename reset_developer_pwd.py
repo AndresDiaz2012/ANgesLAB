@@ -135,7 +135,7 @@ def main() -> int:
     try:
         rs = win32com.client.Dispatch("ADODB.Recordset")
         rs.Open(
-            f"SELECT UsuarioID FROM Usuarios WHERE NombreUsuario='{NOMBRE_USUARIO}'",
+            f"SELECT [UsuarioID] FROM [Usuarios] WHERE [NombreUsuario]='{NOMBRE_USUARIO}'",
             conn, 1, 1,
         )
         if rs.EOF:
@@ -149,13 +149,16 @@ def main() -> int:
         hash_sql = nuevo_hash.replace("'", "''")
         salt_sql = nuevo_salt.replace("'", "''")
 
+        # NOTA: Los identificadores van entre corchetes porque 'Password' es
+        # palabra reservada en Microsoft Access SQL; sin corchetes el UPDATE
+        # falla con "Error de sintaxis en la instruccion UPDATE".
         conn.Execute(
-            f"UPDATE Usuarios SET "
-            f"PasswordHash='{hash_sql}', "
-            f"PasswordSalt='{salt_sql}', "
-            f"Password='', "
-            f"Activo=True "
-            f"WHERE UsuarioID={uid}"
+            f"UPDATE [Usuarios] SET "
+            f"[PasswordHash]='{hash_sql}', "
+            f"[PasswordSalt]='{salt_sql}', "
+            f"[Password]='', "
+            f"[Activo]=True "
+            f"WHERE [UsuarioID]={uid}"
         )
         print(f"[OK] Contrasena de '{NOMBRE_USUARIO}' (UsuarioID={uid}) restablecida.")
         print(f"     Ingrese ahora en ANgesLAB con el usuario: {NOMBRE_USUARIO}")
