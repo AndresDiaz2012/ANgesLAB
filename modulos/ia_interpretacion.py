@@ -312,6 +312,11 @@ class MotorReglasClinicas:
         rel_gi = self._obtener_valor(resultados_dict, [
             'relacion glucosa/insulina', 'relación glucosa/insulina',
             'glucosa/insulina', 'relacion g/i', 'relación g/i'])
+        indice_tyg = self._obtener_valor(resultados_dict, [
+            'indice tyg', 'índice tyg', 'tyg', 'ty-g',
+            'indice triglicéridos-glucosa', 'índice triglicéridos-glucosa',
+            'indice trigliceridos-glucosa', 'índice trigliceridos-glucosa',
+            'triglyceride-glucose index'])
 
         # Usar glucosa basal como referencia para HOMA si no hay valor directo
         glu_basal = glucosa  # ya extraída arriba
@@ -378,6 +383,28 @@ class MotorReglasClinicas:
                 obs.append(
                     f"Relación Glucosa/Insulina limítrofe ({rel_gi}, ref: >7.0). "
                     "Sugiere vigilancia metabólica.")
+
+        # Interpretar Índice TyG (Triglicéridos-Glucosa)
+        # Marcador subrogado de resistencia a insulina sin requerir insulinemia.
+        # Fórmula: ln[(TG × Glucosa) / 2]. Corte de referencia: 8.75.
+        if indice_tyg is not None:
+            if indice_tyg >= 9.5:
+                obs.append(
+                    f"Índice TyG muy elevado ({indice_tyg}, ref: <8.75). "
+                    "Alto riesgo cardiometabólico y de síndrome metabólico. "
+                    "Fuerte indicador de resistencia a insulina; correlacionar con "
+                    "perímetro abdominal, presión arterial y HDL/TG.")
+            elif indice_tyg >= 8.75:
+                obs.append(
+                    f"Índice TyG elevado ({indice_tyg}, ref: <8.75). "
+                    "Resistencia a insulina probable por marcador subrogado. "
+                    "Considerar HOMA-IR de confirmación y evaluación de "
+                    "síndrome metabólico.")
+            elif indice_tyg >= 8.5:
+                obs.append(
+                    f"Índice TyG limítrofe ({indice_tyg}, ref: <8.75). "
+                    "Vigilar factores de riesgo cardiometabólico "
+                    "(dislipidemia, obesidad abdominal, hipertensión).")
 
         # Interpretar glucosa post-carga / post-prandial
         if glucosa_post is not None:

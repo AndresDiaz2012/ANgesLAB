@@ -449,6 +449,15 @@ class CalculadorLaboratorio:
             'indice glucosa/insulina', 'índice glucosa/insulina',
             'cociente glucosa/insulina'
         ],
+        'indice_tyg': [
+            'indice tyg', 'índice tyg', 'tyg', 'ty-g', 'ty g',
+            'indice triglicéridos-glucosa', 'índice triglicéridos-glucosa',
+            'indice trigliceridos-glucosa', 'índice trigliceridos-glucosa',
+            'indice trigliceridos glucosa', 'índice trigliceridos glucosa',
+            'tg-glucosa', 'tg glucosa', 'triglyceride-glucose index',
+            'triglyceride glucose index', 'indice tg/glucosa',
+            'índice tg/glucosa', 'indice tg-g', 'índice tg-g'
+        ],
         'hba1c': [
             'hba1c', 'hemoglobina glicosilada', 'hemoglobina glucosilada',
             'hemoglobina glicada', 'a1c', 'hb glicosilada'
@@ -1507,18 +1516,22 @@ class CalculadorLaboratorio:
         return self._redondear(relacion, 2)
 
     def interpretar_panel_homa(self, glucosa_pre: float, insulina_pre: float,
-                                glucosa_post: float = None, insulina_post: float = None) -> Optional[Dict]:
+                                glucosa_post: float = None, insulina_post: float = None,
+                                trigliceridos: float = None) -> Optional[Dict]:
         """
         Genera interpretación clínica completa del panel de resistencia a insulina.
 
-        Calcula HOMA-IR, HOMA-β, QUICKI y Relación G/I a partir de valores PRE (ayunas),
-        y evalúa la respuesta post-carga/post-prandial si están disponibles.
+        Calcula HOMA-IR, HOMA-β, QUICKI, Relación G/I e Índice TyG a partir de
+        valores PRE (ayunas), y evalúa la respuesta post-carga/post-prandial si
+        están disponibles.
 
         Args:
             glucosa_pre: Glucosa en ayunas (mg/dL)
             insulina_pre: Insulina en ayunas (µU/mL)
             glucosa_post: Glucosa post-carga/post-prandial (mg/dL), opcional
             insulina_post: Insulina post-carga/post-prandial (µU/mL), opcional
+            trigliceridos: Triglicéridos en ayunas (mg/dL), opcional. Si se
+                aporta, se calcula e interpreta el índice TyG.
 
         Returns:
             Diccionario con índices calculados e interpretación clínica
@@ -1539,11 +1552,16 @@ class CalculadorLaboratorio:
         homa_beta = self.calcular_homa_beta(glu_pre, ins_pre)
         quicki = self.calcular_quicki(glu_pre, ins_pre)
         rel_gi = self.calcular_relacion_glucosa_insulina(glu_pre, ins_pre)
+        tg_val = self._to_float(trigliceridos)
+        tyg = self.calcular_indice_tyg(tg_val, glu_pre) if tg_val is not None else None
 
         resultado['homa_ir'] = homa_ir
         resultado['homa_beta'] = homa_beta
         resultado['quicki'] = quicki
         resultado['relacion_gi'] = rel_gi
+        if tyg is not None:
+            resultado['trigliceridos'] = tg_val
+            resultado['indice_tyg'] = tyg
 
         # Interpretación HOMA-IR
         if homa_ir is not None:
@@ -1591,6 +1609,22 @@ class CalculadorLaboratorio:
             else:
                 resultado['interpretacion_gi'] = 'Relación G/I baja - compatible con resistencia a insulina'
 
+        # Interpretación Índice TyG (Triglicéridos-Glucosa)
+        if tyg is not None:
+            if tyg < 8.5:
+                resultado['interpretacion_tyg'] = (
+                    'Índice TyG normal - sensibilidad a insulina conservada')
+            elif tyg < 8.75:
+                resultado['interpretacion_tyg'] = (
+                    'Índice TyG limítrofe - vigilar factores de riesgo cardiometabólico')
+            elif tyg < 9.5:
+                resultado['interpretacion_tyg'] = (
+                    'Índice TyG elevado - resistencia a insulina probable')
+            else:
+                resultado['interpretacion_tyg'] = (
+                    'Índice TyG muy elevado - alto riesgo cardiometabólico '
+                    'y de síndrome metabólico')
+
         # Valores post-carga/post-prandial si disponibles
         glu_post = self._to_float(glucosa_post)
         ins_post = self._to_float(insulina_post)
@@ -1633,6 +1667,8 @@ class CalculadorLaboratorio:
             indicadores_ri += 1
         if rel_gi is not None and rel_gi < 4.5:
             indicadores_ri += 1
+        if tyg is not None and tyg >= 8.75:
+            indicadores_ri += 1
 
         if indicadores_ri >= 2:
             resultado['conclusion'] = (
@@ -1653,11 +1689,23 @@ class CalculadorLaboratorio:
         """
         Calcula el índice TyG (Triglicéridos-Glucosa).
 
-        Fórmula: TyG = Ln[(TG × Glucosa) / 2]
+        Marcador subrogado de resistencia a la insulina que no requiere medir
+        insulinemia. Útil como complemento del HOMA-IR y para tamizaje en
+        pacientes sin insulina disponible.
 
-        Donde TG y Glucosa están en mg/dL
+        Fórmula (logaritmo natural):
+            TyG = Ln[(TG × Glucosa) / 2]
 
-        Valor de corte para resistencia a insulina: > 4.5
+        Donde TG y Glucosa están en mg/dL, en ayunas.
+
+        Valores de referencia (Simental-Mendía y col., Guerrero-Romero y col.):
+            < 8.50          Normal — sensibilidad a insulina conservada
+            8.50 – 8.74     Limítrofe — vigilar factores de riesgo
+            ≥ 8.75          Resistencia a insulina probable
+            ≥ 9.50          Alto riesgo cardiometabólico / sindrome metabólico
+
+        Nota: si se emplea la variante log10 el corte equivalente es ~4.49;
+        este método usa ln (natural), por lo que el corte es 8.75.
         """
         import math
 
