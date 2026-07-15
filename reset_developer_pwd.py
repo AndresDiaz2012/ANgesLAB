@@ -63,14 +63,47 @@ def resolver_ruta_db() -> Path:
     return default
 
 
+def _leer_password(prompt_txt: str) -> str:
+    """Lee una contrasena mostrando asteriscos mientras se escribe.
+
+    En Windows usa msvcrt para dar retroalimentacion visual (*). Si no esta
+    disponible, cae a getpass (input oculto, sin eco). Soporta backspace y
+    Ctrl+C.
+    """
+    try:
+        import msvcrt
+    except ImportError:
+        return getpass.getpass(prompt_txt)
+
+    print(prompt_txt, end='', flush=True)
+    chars = []
+    while True:
+        ch = msvcrt.getwch()
+        if ch in ('\r', '\n'):          # Enter
+            print('')
+            break
+        elif ch == '\003':              # Ctrl+C
+            print('')
+            raise KeyboardInterrupt
+        elif ch in ('\b', '\x7f'):      # Backspace
+            if chars:
+                chars.pop()
+                print('\b \b', end='', flush=True)
+        else:
+            chars.append(ch)
+            print('*', end='', flush=True)
+    return ''.join(chars)
+
+
 def obtener_nueva_password() -> str:
     """Obtiene la nueva contrasena desde env var o prompt interactivo."""
     pwd = os.environ.get("ANGESLAB_NEW_DEV_PWD", "").strip()
     if pwd:
         return pwd
-    print(f"Ingrese la nueva contrasena para '{NOMBRE_USUARIO}':")
-    pwd1 = getpass.getpass("  Password: ")
-    pwd2 = getpass.getpass("  Repita:   ")
+    print(f"Ingrese la nueva contrasena para '{NOMBRE_USUARIO}'")
+    print("(por seguridad se mostrara como asteriscos * mientras escribe)")
+    pwd1 = _leer_password("  Password: ")
+    pwd2 = _leer_password("  Repita:   ")
     if pwd1 != pwd2:
         print("[ERROR] Las contrasenas no coinciden.")
         sys.exit(1)
