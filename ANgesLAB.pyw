@@ -322,7 +322,26 @@ COLORS = {
     'white': '#ffffff',
     'border': '#e2e8f0',           # Bordes sutiles
     'accent': '#0d9488',           # Verde azulado (científico)
+    # --- Tokens profesionales derivados (profundidad y superficies) ---
+    'primary_dark': '#0e7490',     # Cyan profundo (hover/pressed)
+    'primary_light': '#22d3ee',    # Cyan brillante (acentos)
+    'primary_soft': '#e0f2fe',     # Cyan muy claro (fondos suaves)
+    'surface': '#ffffff',          # Superficie de tarjetas
+    'surface_alt': '#f1f5f9',      # Superficie alterna / hover suave
+    'row_alt': '#f8fafc',          # Fila alterna en tablas
+    'hover': '#f1f5f9',            # Hover genérico claro
+    'shadow': '#cbd5e1',           # Sombra simulada (bordes suaves)
+    'text_muted': '#94a3b8',       # Texto terciario
 }
+
+# Motor de tema profesional centralizado (estiliza todos los widgets ttk)
+try:
+    from modulos.tema_ui import aplicar_tema_profesional
+    TEMA_PROFESIONAL_DISPONIBLE = True
+except Exception:
+    TEMA_PROFESIONAL_DISPONIBLE = False
+    def aplicar_tema_profesional(colors, root=None):  # fallback no-op
+        return None
 
 # ============================================================
 # ICONO GLOBAL — Se aplica automáticamente a toda ventana Tk/Toplevel
@@ -395,78 +414,93 @@ class LoginWindow:
 
     def setup_ui(self):
         bg_color = COLORS['sidebar']
+        card_bg = '#111c30'      # panel flotante (ligeramente sobre el fondo)
+        field_bg = '#1e293b'     # campos de entrada
+        field_border = '#334155'
+        muted = '#94a3b8'
+
+        # Banda de acento superior (identidad de marca)
+        accent_bar = tk.Frame(self.root, bg=bg_color, height=5)
+        accent_bar.pack(fill='x')
+        tk.Frame(accent_bar, bg=COLORS['primary'], height=5).place(relx=0, rely=0, relwidth=0.5, relheight=1)
+        tk.Frame(accent_bar, bg=COLORS['accent'], height=5).place(relx=0.5, rely=0, relwidth=0.5, relheight=1)
 
         # Frame para el icono oficial ANgesLAB
         logo_frame = tk.Frame(self.root, bg=bg_color)
-        logo_frame.pack(pady=(25, 8))
+        logo_frame.pack(pady=(28, 6))
 
-        self._logo_image = self._cargar_icono_angeslab(size=140)
+        self._logo_image = self._cargar_icono_angeslab(size=132)
         if self._logo_image:
             logo_label = tk.Label(logo_frame, image=self._logo_image, bg=bg_color)
             logo_label.pack()
         else:
-            tk.Label(logo_frame, text="🧪", font=('Segoe UI Emoji', 64),
+            tk.Label(logo_frame, text="🧪", font=('Segoe UI Emoji', 60),
                     bg=bg_color, fg=COLORS['primary']).pack()
 
         # Título
         title_frame = tk.Frame(self.root, bg=bg_color)
-        title_frame.pack(fill='x', pady=(8, 3))
+        title_frame.pack(fill='x', pady=(4, 2))
 
-        tk.Label(title_frame, text="ANgesLAB", font=('Segoe UI', 28, 'bold'),
+        tk.Label(title_frame, text="ANgesLAB", font=('Segoe UI', 30, 'bold'),
                 bg=bg_color, fg='white').pack()
 
         # Línea decorativa
-        line_canvas = tk.Canvas(self.root, width=150, height=4, bg=bg_color, highlightthickness=0)
-        line_canvas.pack(pady=4)
-        line_canvas.create_line(0, 2, 75, 2, fill=COLORS['primary'], width=2)
-        line_canvas.create_line(75, 2, 150, 2, fill=COLORS['accent'], width=2)
+        line_canvas = tk.Canvas(self.root, width=160, height=4, bg=bg_color, highlightthickness=0)
+        line_canvas.pack(pady=5)
+        line_canvas.create_line(0, 2, 80, 2, fill=COLORS['primary'], width=2)
+        line_canvas.create_line(80, 2, 160, 2, fill=COLORS['accent'], width=2)
 
-        tk.Label(title_frame, text="Sistema de Laboratorio Clínico", font=('Segoe UI', 10),
-                bg=bg_color, fg='#94a3b8').pack(pady=(3, 0))
+        tk.Label(title_frame, text="SISTEMA DE LABORATORIO CLÍNICO", font=('Segoe UI', 9, 'bold'),
+                bg=bg_color, fg=muted).pack(pady=(4, 0))
 
-        # Formulario
-        form_frame = tk.Frame(self.root, bg=bg_color)
-        form_frame.pack(fill='x', padx=50, pady=12)
+        # ---- Tarjeta flotante que contiene el formulario ----
+        card = tk.Frame(self.root, bg=card_bg, highlightthickness=1,
+                        highlightbackground=field_border)
+        card.pack(fill='x', padx=40, pady=(18, 10))
+
+        form_frame = tk.Frame(card, bg=card_bg)
+        form_frame.pack(fill='x', padx=28, pady=22)
 
         # Usuario
-        tk.Label(form_frame, text="Usuario", font=('Segoe UI', 10),
-                bg=bg_color, fg='#94a3b8').pack(anchor='w', pady=(8, 4))
+        tk.Label(form_frame, text="USUARIO", font=('Segoe UI', 8, 'bold'),
+                bg=card_bg, fg=muted).pack(anchor='w', pady=(2, 5))
         self.entry_user = tk.Entry(form_frame, font=('Segoe UI', 12), width=30,
-                                   bg='#1e293b', fg='white', insertbackground='white',
+                                   bg=field_bg, fg='white', insertbackground=COLORS['primary_light'],
                                    relief='flat', highlightthickness=1,
-                                   highlightbackground='#334155', highlightcolor=COLORS['primary'])
+                                   highlightbackground=field_border, highlightcolor=COLORS['primary'])
         self.entry_user.pack(fill='x', ipady=10)
 
         # Contraseña
-        tk.Label(form_frame, text="Contraseña", font=('Segoe UI', 10),
-                bg=bg_color, fg='#94a3b8').pack(anchor='w', pady=(12, 4))
+        tk.Label(form_frame, text="CONTRASEÑA", font=('Segoe UI', 8, 'bold'),
+                bg=card_bg, fg=muted).pack(anchor='w', pady=(14, 5))
         self.entry_pass = tk.Entry(form_frame, font=('Segoe UI', 12), width=30, show='●',
-                                   bg='#1e293b', fg='white', insertbackground='white',
+                                   bg=field_bg, fg='white', insertbackground=COLORS['primary_light'],
                                    relief='flat', highlightthickness=1,
-                                   highlightbackground='#334155', highlightcolor=COLORS['primary'])
+                                   highlightbackground=field_border, highlightcolor=COLORS['primary'])
         self.entry_pass.pack(fill='x', ipady=10)
 
         # Botón
-        btn_frame = tk.Frame(self.root, bg=bg_color)
-        btn_frame.pack(fill='x', padx=50, pady=25)
-
-        btn = tk.Button(btn_frame, text="Iniciar Sesión", font=('Segoe UI', 13, 'bold'),
+        btn = tk.Button(form_frame, text="INICIAR SESIÓN", font=('Segoe UI', 12, 'bold'),
                        bg=COLORS['primary'], fg='white', relief='flat', cursor='hand2',
-                       activebackground=COLORS['accent'], activeforeground='white',
+                       activebackground=COLORS['primary_dark'], activeforeground='white',
                        command=self.login)
-        btn.pack(fill='x', ipady=14)
+        btn.pack(fill='x', ipady=13, pady=(22, 2))
 
         # Efecto hover en botón
         def on_enter(e):
-            btn.config(bg=COLORS['accent'])
+            btn.config(bg=COLORS['primary_dark'])
         def on_leave(e):
             btn.config(bg=COLORS['primary'])
         btn.bind('<Enter>', on_enter)
         btn.bind('<Leave>', on_leave)
 
+        # Nota de seguridad discreta
+        tk.Label(self.root, text="🔒  Conexión segura · Acceso protegido",
+                font=('Segoe UI', 8), bg=bg_color, fg='#475569').pack(pady=(4, 0))
+
         # Footer
-        tk.Label(self.root, text="© 2024-2026 ANgesLAB Solutions",
-                font=('Segoe UI', 8), bg=bg_color, fg='#475569').pack(side='bottom', pady=15)
+        tk.Label(self.root, text="© 2024-2026 ANgesLAB Solutions  ·  v2.0",
+                font=('Segoe UI', 8), bg=bg_color, fg='#475569').pack(side='bottom', pady=14)
 
         self.entry_pass.bind('<Return>', lambda e: self.login())
         self.entry_user.focus()
@@ -956,10 +990,19 @@ class MainApplication:
                   command=guardar).pack(side='right')
 
     def setup_styles(self):
-        style = ttk.Style()
-        style.theme_use('clam')
-        style.configure('Treeview', rowheight=28, font=('Segoe UI', 10))
-        style.configure('Treeview.Heading', font=('Segoe UI', 10, 'bold'))
+        # Tema profesional centralizado: estiliza globalmente todos los
+        # widgets ttk (tablas, pestañas, botones, entradas, scrollbars...).
+        style = aplicar_tema_profesional(COLORS, self.root)
+        if style is None:
+            # Fallback mínimo si el motor de tema no está disponible
+            style = ttk.Style()
+            try:
+                style.theme_use('clam')
+            except Exception:
+                pass
+            style.configure('Treeview', rowheight=32, font=('Segoe UI', 10))
+            style.configure('Treeview.Heading', font=('Segoe UI', 10, 'bold'))
+        self.style = style
 
     def _create_menu_button(self, parent, icon, text, command, indent=False):
         """Crea un botón de menú en el sidebar."""
@@ -1219,13 +1262,17 @@ class MainApplication:
         self.main_area.pack(side='right', expand=True, fill='both')
 
         # Header
-        self.header = tk.Frame(self.main_area, bg='white', height=60)
+        self.header = tk.Frame(self.main_area, bg='white', height=64)
         self.header.pack(fill='x')
         self.header.pack_propagate(False)
 
-        self.header_title = tk.Label(self.header, text="Inicio", font=('Segoe UI', 18, 'bold'),
+        # Acento vertical junto al título (barra de marca)
+        title_wrap = tk.Frame(self.header, bg='white')
+        title_wrap.pack(side='left', padx=25, pady=12)
+        tk.Frame(title_wrap, bg=COLORS['primary'], width=4).pack(side='left', fill='y', padx=(0, 12))
+        self.header_title = tk.Label(title_wrap, text="Inicio", font=('Segoe UI', 18, 'bold'),
                                      bg='white', fg=COLORS['text'])
-        self.header_title.pack(side='left', padx=25, pady=12)
+        self.header_title.pack(side='left')
 
         # Información del laboratorio en el header (centro)
         if self.config_lab:
@@ -1250,6 +1297,10 @@ class MainApplication:
         self.time_label = tk.Label(self.header, font=('Segoe UI', 10), bg='white', fg=COLORS['text_light'])
         self.time_label.pack(side='right', padx=25)
         self.update_time()
+
+        # Separador de acento bajo la cabecera (borde sutil + hilo de marca)
+        tk.Frame(self.main_area, bg=COLORS['border'], height=1).pack(fill='x')
+        tk.Frame(self.main_area, bg=COLORS['primary'], height=2).pack(fill='x')
 
         # Contenido
         self.content = tk.Frame(self.main_area, bg=COLORS['bg'])
@@ -1454,8 +1505,13 @@ class MainApplication:
         ]
 
         for icon, label, color, command in shortcuts:
-            card = tk.Frame(shortcuts_frame, bg='white', cursor='hand2')
-            card.pack(side='left', expand=True, fill='both', padx=8, pady=5)
+            # Contenedor con "sombra" simulada para dar profundidad
+            shadow = tk.Frame(shortcuts_frame, bg=COLORS['shadow'])
+            shadow.pack(side='left', expand=True, fill='both', padx=8, pady=5)
+
+            card = tk.Frame(shadow, bg='white', cursor='hand2',
+                            highlightthickness=1, highlightbackground=COLORS['border'])
+            card.pack(fill='both', expand=True, padx=(0, 1), pady=(0, 2))
 
             inner = tk.Frame(card, bg='white', cursor='hand2')
             inner.pack(padx=20, pady=18, fill='both', expand=True)
