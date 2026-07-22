@@ -111,7 +111,7 @@ class ReportesResultados:
         if CONFIG_ADMIN_DISPONIBLE:
             try:
                 self.config_admin = ConfiguradorAdministrativo(db)
-            except:
+            except Exception:
                 self.config_admin = None
         else:
             self.config_admin = None
@@ -167,6 +167,7 @@ class ReportesResultados:
                 SELECT
                     rp.ResultadoParamID, rp.DetalleID, rp.ParametroID, rp.Valor,
                     rp.Estado, rp.FechaCaptura,
+                    rp.ValorReferencia as ValorRefCalculado,
                     param.CodigoParametro,
                     param.NombreParametro,
                     param.Seccion,
@@ -181,6 +182,33 @@ class ReportesResultados:
             prueba['resultados'] = resultados
 
         solicitud['pruebas'] = pruebas
+
+        # Post-proceso: aplicar valores de referencia especificos por edad/sexo
+        # Prioridad: 1) valores_referencia por edad/sexo, 2) ValorRefCalculado
+        #            (guardado al calcular), 3) Parametros.Observaciones (genérico)
+        sexo_pac = solicitud.get('Sexo')
+        fn_pac = solicitud.get('FechaNacimiento')
+
+        # Primero: si hay ValorRefCalculado (parámetros calculados), usarlo
+        for prueba in pruebas:
+            for resultado in (prueba.get('resultados') or []):
+                ref_calc = resultado.get('ValorRefCalculado')
+                if ref_calc and str(ref_calc).strip():
+                    resultado['ValorReferencia'] = ref_calc
+
+        # Segundo: aplicar resolución por edad/sexo del módulo valores_referencia
+        try:
+            from modulos.valores_referencia import obtener_gestor as _obtener_gestor_ref
+            _gestor_ref = _obtener_gestor_ref(self.db)
+            if sexo_pac or fn_pac:
+                for prueba in pruebas:
+                    for resultado in (prueba.get('resultados') or []):
+                        ref_esp = _gestor_ref.resolver_valor_referencia(
+                            resultado['ParametroID'], sexo_pac, fn_pac)
+                        if ref_esp:
+                            resultado['ValorReferencia'] = ref_esp
+        except Exception:
+            pass  # Degradacion gracil si el modulo no esta disponible
 
         return solicitud
 
@@ -765,6 +793,248 @@ class ReportesResultados:
         return solicitudes
 
 
+    # =========================================================================
+    # ESTADISTICAS AVANZADAS
+    # =========================================================================
+
+    def estadisticas_pruebas_solicitadas(self, fecha_desde=None, fecha_hasta=None,
+                                          top_n=20):
+        """
+        Ranking de pruebas más solicitadas en un período.
+
+        Returns:
+            Lista de dicts con PruebaID, NombrePrueba, CodigoPrueba, AreaID,
+            NombreArea, Total
+        """
+        from datetime import date as _date, timedelta as _td
+        if not fecha_desde:
+            fecha_desde = _date.today().replace(day=1)
+        if not fecha_hasta:
+            fecha_hasta = _date.today()
+
+        sql = (
+            f"SELECT TOP {int(top_n)} pr.PruebaID, pr.NombrePrueba, pr.CodigoPrueba, "
+            f"a.NombreArea, COUNT(ds.DetalleSolicitudID) AS Total "
+            f"FROM [DetalleSolicitudes] AS ds "
+            f"INNER JOIN [Pruebas] AS pr ON ds.PruebaID = pr.PruebaID "
+            f"INNER JOIN [Areas] AS a ON pr.AreaID = a.AreaID "
+            f"INNER JOIN [Solicitudes] AS s ON ds.SolicitudID = s.SolicitudID "
+            f"WHERE s.FechaSolicitud >= #{fecha_desde.strftime('%m/%d/%Y')}# "
+            f"AND s.FechaSolicitud < #{(fecha_hasta + _td(days=1)).strftime('%m/%d/%Y')}# "
+            f"GROUP BY pr.PruebaID, pr.NombrePrueba, pr.CodigoPrueba, a.NombreArea "
+            f"ORDER BY COUNT(ds.DetalleSolicitudID) DESC"
+        )
+        return self.db.query(sql) or []
+
+    def estadisticas_por_area(self, fecha_desde=None, fecha_hasta=None):
+        """
+        Solicitudes agrupadas por área clínica.
+
+        Returns:
+            Lista de dicts con AreaID, NombreArea, TotalPruebas
+        """
+        from datetime import date as _date, timedelta as _td
+        if not fecha_desde:
+            fecha_desde = _date.today().replace(day=1)
+        if not fecha_hasta:
+            fecha_hasta = _date.today()
+
+        sql = (
+            f"SELECT a.AreaID, a.NombreArea, COUNT(ds.DetalleSolicitudID) AS TotalPruebas "
+            f"FROM [DetalleSolicitudes] AS ds "
+            f"INNER JOIN [Pruebas] AS pr ON ds.PruebaID = pr.PruebaID "
+            f"INNER JOIN [Areas] AS a ON pr.AreaID = a.AreaID "
+            f"INNER JOIN [Solicitudes] AS s ON ds.SolicitudID = s.SolicitudID "
+            f"WHERE s.FechaSolicitud >= #{fecha_desde.strftime('%m/%d/%Y')}# "
+            f"AND s.FechaSolicitud < #{(fecha_hasta + _td(days=1)).strftime('%m/%d/%Y')}# "
+            f"GROUP BY a.AreaID, a.NombreArea "
+            f"ORDER BY COUNT(ds.DetalleSolicitudID) DESC"
+        )
+        return self.db.query(sql) or []
+
+    def estadisticas_por_medico(self, fecha_desde=None, fecha_hasta=None,
+                                 top_n=15):
+        """
+        Solicitudes y facturación agrupadas por médico referente.
+
+        Returns:
+            Lista de dicts con MedicoID, NombreMedico, TotalSolicitudes, MontoTotal
+        """
+        from datetime import date as _date, timedelta as _td
+        if not fecha_desde:
+            fecha_desde = _date.today().replace(day=1)
+        if not fecha_hasta:
+            fecha_hasta = _date.today()
+
+        sql = (
+            f"SELECT TOP {int(top_n)} m.MedicoID, "
+            f"m.Nombre & ' ' & m.Apellido AS NombreMedico, "
+            f"m.Especialidad, "
+            f"COUNT(s.SolicitudID) AS TotalSolicitudes, "
+            f"SUM(s.MontoTotal) AS MontoTotal "
+            f"FROM [Solicitudes] AS s "
+            f"LEFT JOIN [Medicos] AS m ON s.MedicoID = m.MedicoID "
+            f"WHERE s.FechaSolicitud >= #{fecha_desde.strftime('%m/%d/%Y')}# "
+            f"AND s.FechaSolicitud < #{(fecha_hasta + _td(days=1)).strftime('%m/%d/%Y')}# "
+            f"AND s.MedicoID IS NOT NULL "
+            f"GROUP BY m.MedicoID, m.Nombre, m.Apellido, m.Especialidad "
+            f"ORDER BY COUNT(s.SolicitudID) DESC"
+        )
+        return self.db.query(sql) or []
+
+    def estadisticas_pacientes_periodo(self, fecha_desde=None, fecha_hasta=None):
+        """
+        Pacientes atendidos en un período: nuevos vs. recurrentes.
+
+        Returns:
+            dict con total, nuevos, recurrentes, promedio_por_dia
+        """
+        from datetime import date as _date, timedelta as _td
+        if not fecha_desde:
+            fecha_desde = _date.today().replace(day=1)
+        if not fecha_hasta:
+            fecha_hasta = _date.today()
+
+        sql = (
+            f"SELECT COUNT(DISTINCT s.PacienteID) AS TotalPacientes, "
+            f"COUNT(s.SolicitudID) AS TotalSolicitudes "
+            f"FROM [Solicitudes] AS s "
+            f"WHERE s.FechaSolicitud >= #{fecha_desde.strftime('%m/%d/%Y')}# "
+            f"AND s.FechaSolicitud < #{(fecha_hasta + _td(days=1)).strftime('%m/%d/%Y')}#"
+        )
+        result = self.db.query_one(sql) or {}
+
+        dias = max(1, (fecha_hasta - fecha_desde).days + 1)
+        total_pac = int(result.get('TotalPacientes', 0))
+        total_sol = int(result.get('TotalSolicitudes', 0))
+
+        return {
+            'total_pacientes': total_pac,
+            'total_solicitudes': total_sol,
+            'promedio_pacientes_dia': round(total_pac / dias, 1),
+            'promedio_solicitudes_dia': round(total_sol / dias, 1),
+            'dias_periodo': dias,
+        }
+
+    # =========================================================================
+    # REPORTE DE VENTAS
+    # =========================================================================
+
+    def reporte_ventas_periodo(self, fecha_desde=None, fecha_hasta=None):
+        """
+        Reporte detallado de ventas/facturación por período.
+
+        Returns:
+            dict con totales, desglose_forma_pago, detalle_diario
+        """
+        from datetime import date as _date, timedelta as _td
+        if not fecha_desde:
+            fecha_desde = _date.today().replace(day=1)
+        if not fecha_hasta:
+            fecha_hasta = _date.today()
+
+        # Totales generales
+        sql_totales = (
+            f"SELECT COUNT(*) AS TotalFacturas, "
+            f"SUM(IIF(Anulada=False, MontoTotal, 0)) AS TotalVentas, "
+            f"SUM(IIF(Anulada=False, MontoCobrado, 0)) AS TotalCobrado, "
+            f"SUM(IIF(Anulada=False, MontoIVA, 0)) AS TotalIVA, "
+            f"SUM(IIF(Anulada=True, 1, 0)) AS Anuladas "
+            f"FROM [Facturas] "
+            f"WHERE FechaEmision >= #{fecha_desde.strftime('%m/%d/%Y')}# "
+            f"AND FechaEmision < #{(fecha_hasta + _td(days=1)).strftime('%m/%d/%Y')}#"
+        )
+        totales = self.db.query_one(sql_totales) or {}
+
+        # Desglose por forma de pago
+        sql_formas = (
+            f"SELECT fp.Nombre AS FormaPago, COUNT(c.CobroID) AS Cantidad, "
+            f"SUM(c.MontoCobrado) AS Total "
+            f"FROM [Cobros] AS c "
+            f"LEFT JOIN [FormasPago] AS fp ON c.FormaPagoID = fp.FormaPagoID "
+            f"WHERE c.FechaCobro >= #{fecha_desde.strftime('%m/%d/%Y')}# "
+            f"AND c.FechaCobro < #{(fecha_hasta + _td(days=1)).strftime('%m/%d/%Y')}# "
+            f"GROUP BY fp.Nombre "
+            f"ORDER BY SUM(c.MontoCobrado) DESC"
+        )
+        formas_pago = self.db.query(sql_formas) or []
+
+        # Detalle diario
+        sql_diario = (
+            f"SELECT CDATE(INT(FechaEmision)) AS Dia, "
+            f"COUNT(*) AS Facturas, "
+            f"SUM(IIF(Anulada=False, MontoTotal, 0)) AS Ventas, "
+            f"SUM(IIF(Anulada=False, MontoCobrado, 0)) AS Cobrado "
+            f"FROM [Facturas] "
+            f"WHERE FechaEmision >= #{fecha_desde.strftime('%m/%d/%Y')}# "
+            f"AND FechaEmision < #{(fecha_hasta + _td(days=1)).strftime('%m/%d/%Y')}# "
+            f"GROUP BY CDATE(INT(FechaEmision)) "
+            f"ORDER BY CDATE(INT(FechaEmision)) ASC"
+        )
+        try:
+            detalle_diario = self.db.query(sql_diario) or []
+        except Exception:
+            detalle_diario = []
+
+        return {
+            'periodo_desde': fecha_desde,
+            'periodo_hasta': fecha_hasta,
+            'total_facturas': int(totales.get('TotalFacturas', 0)),
+            'total_ventas': float(totales.get('TotalVentas', 0) or 0),
+            'total_cobrado': float(totales.get('TotalCobrado', 0) or 0),
+            'total_iva': float(totales.get('TotalIVA', 0) or 0),
+            'total_anuladas': int(totales.get('Anuladas', 0)),
+            'pendiente_cobro': float((totales.get('TotalVentas', 0) or 0) - (totales.get('TotalCobrado', 0) or 0)),
+            'formas_pago': formas_pago,
+            'detalle_diario': detalle_diario,
+        }
+
+    def reporte_corte_caja_pdf_data(self, fecha=None):
+        """
+        Datos para generar PDF de corte de caja diario.
+
+        Returns:
+            dict con apertura, movimientos, cierre, desglose
+        """
+        from datetime import date as _date, timedelta as _td
+        fecha = fecha or _date.today()
+        fecha_str = fecha.strftime('%m/%d/%Y')
+        fecha_sig = (fecha + _td(days=1)).strftime('%m/%d/%Y')
+
+        # Caja del día
+        caja = self.db.query_one(
+            f"SELECT * FROM [CajaChica] "
+            f"WHERE FechaApertura >= #{fecha_str}# "
+            f"AND FechaApertura < #{fecha_sig}# "
+            f"ORDER BY CajaID DESC"
+        ) or {}
+
+        caja_id = caja.get('CajaID')
+        movimientos = []
+        if caja_id:
+            movimientos = self.db.query(
+                f"SELECT m.*, fp.Nombre AS FormaPago "
+                f"FROM [MovimientosCaja] AS m "
+                f"LEFT JOIN [FormasPago] AS fp ON m.FormaPagoID = fp.FormaPagoID "
+                f"WHERE m.CajaID={caja_id} AND m.Anulado=False "
+                f"ORDER BY m.Fecha ASC"
+            ) or []
+
+        total_ingresos = sum(float(m.get('Monto', 0)) for m in movimientos if m.get('Tipo') == 'Ingreso')
+        total_egresos = sum(float(m.get('Monto', 0)) for m in movimientos if m.get('Tipo') == 'Egreso')
+
+        return {
+            'fecha': fecha,
+            'caja': caja,
+            'movimientos': movimientos,
+            'total_ingresos': total_ingresos,
+            'total_egresos': total_egresos,
+            'balance': total_ingresos - total_egresos,
+            'monto_apertura': float(caja.get('MontoApertura', 0)),
+            'estado_caja': caja.get('Estado', 'Sin caja'),
+        }
+
+
 # ============================================================================
 # EJEMPLO DE USO
 # ============================================================================
@@ -782,3 +1052,8 @@ if __name__ == "__main__":
     print("  - generar_reporte_serologia(solicitud_id)")
     print("  - generar_reporte_diario(fecha)")
     print("  - generar_reporte_paciente(paciente_id)")
+    print("  - estadisticas_pruebas_solicitadas()")
+    print("  - estadisticas_por_area()")
+    print("  - estadisticas_por_medico()")
+    print("  - reporte_ventas_periodo()")
+    print("  - reporte_corte_caja_pdf_data()")

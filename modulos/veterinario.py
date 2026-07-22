@@ -11,10 +11,11 @@ Funcionalidades:
 - Valores de referencia por especie
 - Generacion de PDF con datos adaptados
 
-Copyright 2024-2025 ANgesLAB Solutions
+Copyright 2024-2026 ANgesLAB Solutions
 ================================================================================
 """
 
+import logging
 from datetime import datetime, date
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -238,7 +239,7 @@ class GestorVeterinario:
         for nombre, ddl in tablas_ordenadas:
             try:
                 self.db.execute(ddl)
-                print(f"[VET] Tabla {nombre} creada")
+                logging.getLogger("angeslab.veterinario").debug("[VET] Tabla %s creada", nombre)
             except Exception as e:
                 # La tabla ya existe - esto es normal
                 pass
@@ -248,9 +249,9 @@ class GestorVeterinario:
             config = self.db.query_one("SELECT * FROM ConfiguracionVet")
             if not config:
                 self.db.execute("INSERT INTO ConfiguracionVet (UltimoNumeroSolicitud) VALUES (0)")
-                print("[VET] ConfiguracionVet inicializada")
+                logging.getLogger("angeslab.veterinario").debug("[VET] ConfiguracionVet inicializada")
         except Exception as e:
-            print(f"[VET] Error inicializando ConfiguracionVet: {e}")
+            logging.getLogger("angeslab.veterinario").warning("[VET] Error inicializando ConfiguracionVet: %s", e)
 
         # Inicializar pruebas y parametros veterinarios si estan vacios
         self._inicializar_pruebas_vet()
@@ -262,7 +263,7 @@ class GestorVeterinario:
             if count > 0:
                 return  # Ya hay pruebas
         except Exception as e:
-            print(f"[VET] Error verificando PruebasVet: {e}")
+            logging.getLogger("angeslab.veterinario").warning("[VET] Error verificando PruebasVet: %s", e)
             return
 
         parametros_hematologia = [
@@ -325,9 +326,9 @@ class GestorVeterinario:
                         VALUES ({qc_id}, '{nombre_safe}', '{unidad}', {seq}, {calc_val})
                     """)
 
-            print("[VET] Pruebas y parametros veterinarios inicializados")
+            logging.getLogger("angeslab.veterinario").debug("[VET] Pruebas y parametros veterinarios inicializados")
         except Exception as e:
-            print(f"[VET] Error inicializando pruebas: {e}")
+            logging.getLogger("angeslab.veterinario").warning("[VET] Error inicializando pruebas: %s", e)
 
     # ========================================================================
     # NUMERACION
@@ -350,7 +351,7 @@ class GestorVeterinario:
             self.db.execute(f"UPDATE ConfiguracionVet SET UltimoNumeroSolicitud = {nuevo}")
             return f"VET-{nuevo:04d}"
         except Exception as e:
-            print(f"[VET] Error generando numero: {e}")
+            logging.getLogger("angeslab.veterinario").warning("[VET] Error generando numero: %s", e)
             # Fallback: usar timestamp
             return f"VET-{datetime.now().strftime('%H%M%S')}"
 
@@ -373,14 +374,14 @@ class GestorVeterinario:
                 ORDER BY PacienteVetID DESC
             """)
         except Exception as e:
-            print(f"[VET] Error buscando pacientes: {e}")
+            logging.getLogger("angeslab.veterinario").warning("[VET] Error buscando pacientes: %s", e)
             return []
 
     def obtener_paciente(self, paciente_id):
         """Obtiene un paciente por ID."""
         try:
             return self.db.query_one(f"SELECT * FROM PacientesVet WHERE PacienteVetID = {paciente_id}")
-        except:
+        except Exception:
             return None
 
     def guardar_paciente(self, datos, paciente_id=None):
@@ -392,7 +393,7 @@ class GestorVeterinario:
             try:
                 count = self.db.count('PacientesVet')
                 datos['CodigoPaciente'] = f"PVET-{count + 1:04d}"
-            except:
+            except Exception:
                 datos['CodigoPaciente'] = f"PVET-{datetime.now().strftime('%H%M%S')}"
             datos['FechaRegistro'] = datetime.now()
 
@@ -424,7 +425,7 @@ class GestorVeterinario:
                 ORDER BY Categoria, NombrePrueba
             """)
         except Exception as e:
-            print(f"[VET] Error obteniendo pruebas: {e}")
+            logging.getLogger("angeslab.veterinario").warning("[VET] Error obteniendo pruebas: %s", e)
             # Fallback sin filtro de activo
             try:
                 return self.db.query("""
@@ -432,7 +433,7 @@ class GestorVeterinario:
                     FROM PruebasVet
                     ORDER BY Categoria, NombrePrueba
                 """)
-            except:
+            except Exception:
                 return []
 
     def crear_solicitud(self, paciente_id, pruebas_ids):
@@ -455,7 +456,7 @@ class GestorVeterinario:
                 ORDER BY SolicitudVetID DESC
             """)
             if not sol:
-                print("[VET] No se pudo recuperar la solicitud creada")
+                logging.getLogger("angeslab.veterinario").debug("[VET] No se pudo recuperar la solicitud creada")
                 return None
 
             sol_id = sol['SolicitudVetID']
@@ -476,12 +477,10 @@ class GestorVeterinario:
             if monto_total > 0:
                 self.db.execute(f"UPDATE SolicitudesVet SET MontoTotal = {monto_total} WHERE SolicitudVetID = {sol_id}")
 
-            print(f"[VET] Solicitud {numero} creada con ID {sol_id}")
+            logging.getLogger("angeslab.veterinario").debug("[VET] Solicitud %s creada con ID %s", numero, sol_id)
             return sol_id
         except Exception as e:
-            print(f"[VET] Error creando solicitud: {e}")
-            import traceback
-            traceback.print_exc()
+            logging.getLogger('angeslab.vet').error("Error creando solicitud: %s", e, exc_info=True)
             return None
 
     def buscar_solicitudes(self, filtro=""):
@@ -502,7 +501,7 @@ class GestorVeterinario:
                 {where} ORDER BY s.SolicitudVetID DESC
             """)
         except Exception as e:
-            print(f"[VET] Error buscando solicitudes: {e}")
+            logging.getLogger("angeslab.veterinario").warning("[VET] Error buscando solicitudes: %s", e)
             return []
 
     def obtener_solicitud(self, solicitud_id):
@@ -517,7 +516,7 @@ class GestorVeterinario:
                 LEFT JOIN PacientesVet p ON s.PacienteVetID = p.PacienteVetID
                 WHERE s.SolicitudVetID = {solicitud_id}
             """)
-        except:
+        except Exception:
             return None
 
     def obtener_detalles_solicitud(self, solicitud_id):
@@ -529,7 +528,7 @@ class GestorVeterinario:
                 WHERE d.SolicitudVetID = {solicitud_id}
                 ORDER BY d.DetalleVetID
             """)
-        except:
+        except Exception:
             return []
 
     def obtener_parametros_prueba(self, prueba_vet_id):
@@ -541,7 +540,7 @@ class GestorVeterinario:
                 WHERE PruebaVetID = {prueba_vet_id}
                 ORDER BY Secuencia
             """)
-        except:
+        except Exception:
             return []
 
     # ========================================================================
@@ -606,7 +605,7 @@ class GestorVeterinario:
                 """)
             return True
         except Exception as e:
-            print(f"[VET] Error guardando resultado: {e}")
+            logging.getLogger("angeslab.veterinario").warning("[VET] Error guardando resultado: %s", e)
             return False
 
     def obtener_resultado(self, detalle_vet_id, parametro_vet_id):
@@ -616,7 +615,7 @@ class GestorVeterinario:
                 SELECT Valor FROM ResultadosVet
                 WHERE DetalleVetID = {detalle_vet_id} AND ParametroVetID = {parametro_vet_id}
             """)
-        except:
+        except Exception:
             return None
 
     def ejecutar_calculos_hematologia(self, detalle_vet_id):
@@ -641,7 +640,7 @@ class GestorVeterinario:
                 if res and res.get('Valor'):
                     try:
                         valores[nombre] = float(res['Valor'])
-                    except:
+                    except Exception:
                         pass
 
             calculados = 0
@@ -672,7 +671,7 @@ class GestorVeterinario:
 
             return calculados
         except Exception as e:
-            print(f"[VET] Error en calculos hematologia: {e}")
+            logging.getLogger("angeslab.veterinario").warning("[VET] Error en calculos hematologia: %s", e)
             return 0
 
     def validar_resultados(self, detalle_vet_id):
@@ -687,7 +686,7 @@ class GestorVeterinario:
             }, f"DetalleVetID = {detalle_vet_id}")
             return True
         except Exception as e:
-            print(f"[VET] Error validando: {e}")
+            logging.getLogger("angeslab.veterinario").warning("[VET] Error validando: %s", e)
             return False
 
     def solicitudes_pendientes(self):
@@ -701,7 +700,7 @@ class GestorVeterinario:
                 WHERE s.EstadoSolicitud IN ('Pendiente', 'En Proceso')
                 ORDER BY s.SolicitudVetID DESC
             """)
-        except:
+        except Exception:
             return []
 
 

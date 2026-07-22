@@ -14,6 +14,7 @@ IMPORTANTE: Toda interpretacion es ORIENTATIVA para el personal medico.
 import re
 import json
 import socket
+import logging
 from datetime import datetime
 
 # Requests para Ollama y verificacion de internet (sin dependencia critica)
@@ -88,27 +89,32 @@ class MotorReglasClinicas:
 
         hb = self._obtener_valor(resultados_dict, ['hemoglobina', 'hb', 'hgb'])
         hto = self._obtener_valor(resultados_dict, ['hematocrito', 'hto', 'hct'])
+        rbc = self._obtener_valor(resultados_dict, ['eritrocitos', 'rbc', 'glóbulos rojos', 'globulos rojos', 'hematies', 'hematíes'])
         mcv = self._obtener_valor(resultados_dict, ['mcv', 'vcm', 'volumen corpuscular medio'])
         mch = self._obtener_valor(resultados_dict, ['mch', 'hcm', 'hemoglobina corpuscular media'])
+        mchc = self._obtener_valor(resultados_dict, ['mchc', 'chcm', 'concentracion hemoglobina corpuscular media', 'ccmh'])
         wbc = self._obtener_valor(resultados_dict, ['leucocitos', 'wbc', 'glóbulos blancos', 'globulos blancos'])
         plt = self._obtener_valor(resultados_dict, ['plaquetas', 'plt', 'trombocitos'])
-        rdw = self._obtener_valor(resultados_dict, ['rdw', 'ancho de distribucion eritrocitaria'])
+        rdw = self._obtener_valor(resultados_dict, ['rdw', 'ancho de distribucion eritrocitaria', 'ide'])
         neut = self._obtener_valor(resultados_dict, ['neutrófilos', 'neutrofilos', 'neutrophils', 'neutrofilo %', 'neutrofilos %'])
         linf = self._obtener_valor(resultados_dict, ['linfocitos', 'lymphocytes', 'linfocito %', 'linfocitos %'])
+        eos = self._obtener_valor(resultados_dict, ['eosinófilos', 'eosinofilos', 'eosinophils', 'eosinofilo %'])
+        mono = self._obtener_valor(resultados_dict, ['monocitos', 'monocytes', 'monocito %'])
 
         # Determinar umbral de anemia segun sexo (OMS)
         es_masculino = str(sexo).strip().upper() in ('M', 'MASCULINO', 'MALE')
         umbral_hb = self.HB_ANEMIA_H if es_masculino else self.HB_ANEMIA_M
         umbral_hto_bajo = 40 if es_masculino else 36
 
-        # --- ANEMIA ---
+        # --- ANEMIA (clasificación OMS 2011) ---
         if hb is not None and hb < umbral_hb:
             gravedad = ''
-            if hb < 7:
+            if hb < 8.0:
                 gravedad = ' severa'
-            elif hb < 10:
+            elif hb < 11.0:
                 gravedad = ' moderada'
-            elif hb < 12:
+            else:
+                # Leve: 11.0-12.9 (H), 11.0-11.9 (F)
                 gravedad = ' leve'
 
             if mcv is not None:
@@ -162,8 +168,8 @@ class MotorReglasClinicas:
                     "Causas: infección viral, medicamentos (quimioterapia, antibióticos), "
                     "enfermedades autoinmunes, aplasia medular."
                 )
-                if neut is not None and neut < 45:
-                    obs.append("Neutropenia relativa: riesgo incrementado de infecciones bacterianas.")
+                if neut is not None and neut < 40:
+                    obs.append("Neutropenia relativa (<40%): riesgo incrementado de infecciones bacterianas.")
                 hallazgos.append('leucopenia')
 
         # --- PLAQUETAS ---
@@ -184,6 +190,49 @@ class MotorReglasClinicas:
                 )
                 hallazgos.append('trombocitosis')
 
+        # --- ERITROCITOS (RBC) ---
+        if rbc is not None:
+            # Ref: H 4.5-5.5, M 4.0-5.0 x10⁶/mm³
+            rbc_alto = 5.5 if es_masculino else 5.0
+            rbc_bajo = 4.5 if es_masculino else 4.0
+            if rbc > 6.0:
+                obs.append(
+                    f"Eritrocitosis ({rbc:.2f} x10⁶/mm³). "
+                    "Evaluar policitemia vera, EPOC, cardiopatía cianótica, altitud, deshidratación."
+                )
+            elif rbc < rbc_bajo and hb is not None and hb >= umbral_hb:
+                obs.append(f"Eritrocitos disminuidos ({rbc:.2f} x10⁶/mm³) con Hb conservada. Monitorear.")
+
+        # --- CHCM/MCHC (ref: 32-36 g/dL) ---
+        if mchc is not None:
+            if mchc < 32:
+                obs.append(
+                    f"CHCM bajo ({mchc} g/dL, ref: 32-36): hipocromía. "
+                    "Compatible con ferropenia o talasemia."
+                )
+            elif mchc > 36:
+                obs.append(
+                    f"CHCM elevado ({mchc} g/dL, ref: 32-36): hipercromía. "
+                    "Considerar esferocitosis hereditaria, deshidratación eritrocitaria."
+                )
+
+        # --- EOSINOFILOS ---
+        if eos is not None and eos > 6:
+            obs.append(
+                f"Eosinofilia ({eos}%, ref: 1-6%). "
+                "Causas: parasitosis, alergia, asma, reacciones a fármacos, "
+                "enfermedades autoinmunes, neoplasias hematológicas."
+            )
+            hallazgos.append('eosinofilia')
+
+        # --- MONOCITOS ---
+        if mono is not None and mono > 10:
+            obs.append(
+                f"Monocitosis ({mono}%, ref: 2-10%). "
+                "Asociada a infecciones crónicas (tuberculosis, endocarditis), "
+                "enfermedades autoinmunes, recuperación de neutropenia."
+            )
+
         if not obs:
             obs.append("Parámetros hematológicos dentro de límites normales en los valores evaluados.")
 
@@ -201,6 +250,11 @@ class MotorReglasClinicas:
         urea = self._obtener_valor(resultados_dict, ['urea'])
         tgo = self._obtener_valor(resultados_dict, ['tgo', 'ast', 'aspartato aminotransferasa', 'transaminasa oxalacetica'])
         tgp = self._obtener_valor(resultados_dict, ['tgp', 'alt', 'alanina aminotransferasa', 'transaminasa piruvica'])
+        fa = self._obtener_valor(resultados_dict, ['fosfatasa alcalina', 'fa', 'alp', 'alkaline phosphatase'])
+        ggt = self._obtener_valor(resultados_dict, ['ggt', 'gamma glutamil transferasa', 'gamma gt', 'gamma-gt'])
+        ldh = self._obtener_valor(resultados_dict, ['ldh', 'lactato deshidrogenasa', 'deshidrogenasa lactica'])
+        prot_t = self._obtener_valor(resultados_dict, ['proteínas totales', 'proteinas totales', 'total protein'])
+        albumina = self._obtener_valor(resultados_dict, ['albúmina', 'albumina', 'albumin'])
         bilis_t = self._obtener_valor(resultados_dict, ['bilirrubina total', 'bilirubin total'])
         bilis_d = self._obtener_valor(resultados_dict, ['bilirrubina directa', 'bilirubin directa', 'bilirrubina conjugada'])
         col_t = self._obtener_valor(resultados_dict, ['colesterol total', 'cholesterol total', 'colesterol'])
@@ -234,6 +288,173 @@ class MotorReglasClinicas:
                 obs.append(f"HbA1c elevada ({hba1c}%): diagnóstico de Diabetes Mellitus (≥6.5%).")
             elif hba1c >= 5.7:
                 obs.append(f"HbA1c en rango de prediabetes ({hba1c}%, rango: 5.7-6.4%).")
+
+        # --- PANEL HOMA / RESISTENCIA A INSULINA ---
+        # Buscar insulina basal y variantes pre/post
+        insulina = self._obtener_valor(resultados_dict, [
+            'insulina', 'insulina basal', 'insulin', 'insulina en ayunas',
+            'insulina pre', 'insulina pre carga', 'insulina precarga',
+            'insulina ayunas', 'insulina preprandial', 'ins pre'])
+        insulina_post = self._obtener_valor(resultados_dict, [
+            'insulina post', 'insulina post carga', 'insulina postcarga',
+            'insulina postprandial', 'insulina post prandial',
+            'insulina 2h post carga', 'ins post'])
+        glucosa_post = self._obtener_valor(resultados_dict, [
+            'glucosa post', 'glicemia post', 'glucosa post carga',
+            'glicemia post carga', 'glucosa postcarga', 'glicemia postcarga',
+            'glucosa postprandial', 'glicemia postprandial',
+            'glucosa 2h post carga', 'glicemia 2h postcarga'])
+        homa_ir = self._obtener_valor(resultados_dict, [
+            'homa-ir', 'homa ir', 'homa', 'indice homa', 'índice homa'])
+        homa_beta = self._obtener_valor(resultados_dict, [
+            'homa-β', 'homa-beta', 'homa beta', 'homa β'])
+        quicki = self._obtener_valor(resultados_dict, ['quicki', 'indice quicki', 'índice quicki'])
+        rel_gi = self._obtener_valor(resultados_dict, [
+            'relacion glucosa/insulina', 'relación glucosa/insulina',
+            'glucosa/insulina', 'relacion g/i', 'relación g/i'])
+        indice_tyg = self._obtener_valor(resultados_dict, [
+            'indice tyg', 'índice tyg', 'tyg', 'ty-g',
+            'indice triglicéridos-glucosa', 'índice triglicéridos-glucosa',
+            'indice trigliceridos-glucosa', 'índice trigliceridos-glucosa',
+            'triglyceride-glucose index'])
+
+        # Usar glucosa basal como referencia para HOMA si no hay valor directo
+        glu_basal = glucosa  # ya extraída arriba
+
+        # Interpretar insulina basal
+        if insulina is not None:
+            if insulina > 25:
+                obs.append(
+                    f"Hiperinsulinemia en ayunas ({insulina} µU/mL, ref: 2-25 µU/mL). "
+                    "Sugestiva de resistencia a insulina o insulinoma.")
+            elif insulina < 2:
+                obs.append(
+                    f"Insulina en ayunas baja ({insulina} µU/mL). "
+                    "Evaluar déficit de producción insulínica.")
+
+        # Interpretar HOMA-IR (valor calculado automáticamente)
+        if homa_ir is not None:
+            if homa_ir >= 5.0:
+                obs.append(
+                    f"HOMA-IR significativamente elevado ({homa_ir}, ref: <2.5). "
+                    "Resistencia a insulina marcada. Riesgo elevado de síndrome metabólico "
+                    "y diabetes mellitus tipo 2. Se recomienda evaluación integral.")
+            elif homa_ir >= 3.5:
+                obs.append(
+                    f"HOMA-IR elevado ({homa_ir}, ref: <2.5). "
+                    "Resistencia a insulina moderada. Considerar cambios en estilo de vida, "
+                    "evaluación de síndrome metabólico.")
+            elif homa_ir >= 2.5:
+                obs.append(
+                    f"HOMA-IR limítrofe ({homa_ir}, ref: <2.5). "
+                    "Resistencia leve a insulina. Vigilancia y modificación del estilo de vida.")
+
+        # Interpretar HOMA-β
+        if homa_beta is not None:
+            if homa_beta > 150:
+                obs.append(
+                    f"HOMA-β elevado ({homa_beta}%, ref: 100-150%). "
+                    "Hiperinsulinismo compensatorio: las células beta pancreáticas "
+                    "producen insulina en exceso para compensar la resistencia periférica.")
+            elif homa_beta < 100:
+                obs.append(
+                    f"HOMA-β disminuido ({homa_beta}%, ref: 100-150%). "
+                    "Función de células beta reducida. Capacidad secretora de insulina "
+                    "comprometida, posible agotamiento pancreático.")
+
+        # Interpretar QUICKI
+        if quicki is not None:
+            if quicki < 0.30:
+                obs.append(
+                    f"Índice QUICKI bajo ({quicki}, ref: >0.45). "
+                    "Confirma resistencia a insulina por método independiente del HOMA.")
+            elif quicki < 0.45:
+                obs.append(
+                    f"Índice QUICKI intermedio ({quicki}, ref: >0.45). "
+                    "Sensibilidad a insulina parcialmente comprometida.")
+
+        # Interpretar Relación G/I
+        if rel_gi is not None:
+            if rel_gi < 4.5:
+                obs.append(
+                    f"Relación Glucosa/Insulina baja ({rel_gi}, ref: >7.0). "
+                    "Compatible con resistencia a insulina e hiperinsulinismo relativo.")
+            elif rel_gi < 7.0:
+                obs.append(
+                    f"Relación Glucosa/Insulina limítrofe ({rel_gi}, ref: >7.0). "
+                    "Sugiere vigilancia metabólica.")
+
+        # Interpretar Índice TyG (Triglicéridos-Glucosa)
+        # Marcador subrogado de resistencia a insulina sin requerir insulinemia.
+        # Fórmula: ln[(TG × Glucosa) / 2]. Corte de referencia: 8.75.
+        if indice_tyg is not None:
+            if indice_tyg >= 9.5:
+                obs.append(
+                    f"Índice TyG muy elevado ({indice_tyg}, ref: <8.75). "
+                    "Alto riesgo cardiometabólico y de síndrome metabólico. "
+                    "Fuerte indicador de resistencia a insulina; correlacionar con "
+                    "perímetro abdominal, presión arterial y HDL/TG.")
+            elif indice_tyg >= 8.75:
+                obs.append(
+                    f"Índice TyG elevado ({indice_tyg}, ref: <8.75). "
+                    "Resistencia a insulina probable por marcador subrogado. "
+                    "Considerar HOMA-IR de confirmación y evaluación de "
+                    "síndrome metabólico.")
+            elif indice_tyg >= 8.5:
+                obs.append(
+                    f"Índice TyG limítrofe ({indice_tyg}, ref: <8.75). "
+                    "Vigilar factores de riesgo cardiometabólico "
+                    "(dislipidemia, obesidad abdominal, hipertensión).")
+
+        # Interpretar glucosa post-carga / post-prandial
+        if glucosa_post is not None:
+            if glucosa_post >= 200:
+                obs.append(
+                    f"Glucosa post-carga/post-prandial elevada ({glucosa_post} mg/dL ≥ 200). "
+                    "Compatible con Diabetes Mellitus (criterio OMS). "
+                    "Requiere confirmación diagnóstica.")
+            elif glucosa_post >= 140:
+                obs.append(
+                    f"Glucosa post-carga/post-prandial limítrofe ({glucosa_post} mg/dL, 140-199). "
+                    "Compatible con Intolerancia a la Glucosa (prediabetes). "
+                    "Modificación del estilo de vida recomendada.")
+
+        # Interpretar insulina post-carga
+        if insulina_post is not None and insulina is not None and insulina > 0:
+            ratio_ins = insulina_post / insulina
+            if ratio_ins > 10:
+                obs.append(
+                    f"Hiperinsulinismo reactivo post-carga marcado "
+                    f"(Insulina post: {insulina_post} µU/mL, ratio post/pre: {ratio_ins:.1f}x). "
+                    "Respuesta exagerada de células beta.")
+            elif ratio_ins > 5:
+                obs.append(
+                    f"Respuesta insulínica post-carga exagerada "
+                    f"(Insulina post: {insulina_post} µU/mL, ratio post/pre: {ratio_ins:.1f}x). "
+                    "Sugiere resistencia periférica con compensación.")
+            elif ratio_ins < 2:
+                obs.append(
+                    f"Respuesta insulínica post-carga insuficiente "
+                    f"(Insulina post: {insulina_post} µU/mL, ratio post/pre: {ratio_ins:.1f}x). "
+                    "Posible agotamiento de reserva pancreática.")
+
+        # Conclusión integrada si hay múltiples marcadores de RI
+        marcadores_ri = []
+        if homa_ir is not None and homa_ir >= 2.5:
+            marcadores_ri.append(f"HOMA-IR={homa_ir}")
+        if quicki is not None and quicki < 0.30:
+            marcadores_ri.append(f"QUICKI={quicki}")
+        if rel_gi is not None and rel_gi < 4.5:
+            marcadores_ri.append(f"G/I={rel_gi}")
+        if insulina is not None and insulina > 25:
+            marcadores_ri.append(f"Insulina={insulina}")
+
+        if len(marcadores_ri) >= 2:
+            obs.append(
+                f"RESISTENCIA A INSULINA confirmada por múltiples indicadores "
+                f"({', '.join(marcadores_ri)}). "
+                "Correlacionar con perímetro abdominal, perfil lipídico y presión arterial "
+                "para evaluación de síndrome metabólico (criterios ATP III/IDF).")
 
         # --- FUNCION RENAL ---
         renal_alterado = False
@@ -299,7 +520,7 @@ class MotorReglasClinicas:
                 )
 
         if bilis_t is not None and bilis_t > 1.2:
-            if bilis_d is not None and bilis_d > 0.4:
+            if bilis_d is not None and bilis_d > 0.3:
                 tipo_bil = "directa (conjugada): evaluar colestasis, obstrucción biliar, hepatitis"
             else:
                 tipo_bil = "indirecta (no conjugada): evaluar hemólisis, síndrome de Gilbert"
@@ -307,6 +528,77 @@ class MotorReglasClinicas:
                 f"Hiperbilirrubinemia (BilT: {bilis_t} mg/dL). "
                 f"Predominio {tipo_bil}."
             )
+
+        # Fosfatasa Alcalina (ref: 44-147 U/L adulto)
+        if fa is not None and fa > 147:
+            factor_fa = fa / 147
+            if factor_fa >= 3:
+                obs.append(
+                    f"Fosfatasa Alcalina marcadamente elevada ({fa} U/L, {factor_fa:.1f}x VN). "
+                    "Causas: colestasis, obstrucción biliar, metástasis hepáticas, Paget óseo."
+                )
+            else:
+                obs.append(
+                    f"Fosfatasa Alcalina elevada ({fa} U/L, ref: 44-147). "
+                    "Evaluar: colestasis, enfermedad ósea, embarazo (fisiológica)."
+                )
+            hepatico_alterado = True
+
+        # GGT (ref: H <55, M <38 U/L)
+        umbral_ggt = 55 if es_masculino else 38
+        if ggt is not None and ggt > umbral_ggt:
+            obs.append(
+                f"GGT elevada ({ggt} U/L, ref: <{umbral_ggt}). "
+                "Marcador sensible de daño hepatobiliar y consumo de alcohol. "
+                "También elevada por medicamentos inductores enzimáticos."
+            )
+            hepatico_alterado = True
+
+        # LDH (ref: 140-280 U/L)
+        if ldh is not None:
+            if ldh > 280:
+                obs.append(
+                    f"LDH elevada ({ldh} U/L, ref: 140-280). "
+                    "Marcador inespecífico de daño tisular: hemólisis, infarto de miocardio, "
+                    "hepatopatía, neoplasia, rabdomiólisis."
+                )
+            elif ldh < 140:
+                obs.append(f"LDH baja ({ldh} U/L, ref: 140-280). Hallazgo generalmente sin significado clínico.")
+
+        # Proteínas Totales (ref: 6.0-8.3 g/dL)
+        if prot_t is not None:
+            if prot_t > 8.3:
+                obs.append(
+                    f"Hiperproteinemia ({prot_t} g/dL, ref: 6.0-8.3). "
+                    "Evaluar: deshidratación, mieloma múltiple, enfermedades inflamatorias crónicas."
+                )
+            elif prot_t < 6.0:
+                obs.append(
+                    f"Hipoproteinemia ({prot_t} g/dL, ref: 6.0-8.3). "
+                    "Evaluar: desnutrición, síndrome nefrótico, hepatopatía, malabsorción."
+                )
+
+        # Albúmina (ref: 3.5-5.2 g/dL)
+        if albumina is not None:
+            if albumina < 3.5:
+                grado_alb = 'severa' if albumina < 2.5 else ('moderada' if albumina < 3.0 else 'leve')
+                obs.append(
+                    f"Hipoalbuminemia {grado_alb} ({albumina} g/dL, ref: 3.5-5.2). "
+                    "Causas: hepatopatía crónica, síndrome nefrótico, desnutrición, "
+                    "inflamación crónica, enteropatía perdedora de proteínas."
+                )
+
+        # Relación Albúmina/Globulina
+        if prot_t is not None and albumina is not None and prot_t > albumina:
+            globulina = prot_t - albumina
+            if globulina > 0:
+                ratio_ag = albumina / globulina
+                if ratio_ag < 1.0:
+                    obs.append(
+                        f"Relación A/G invertida ({ratio_ag:.2f}, ref: 1.1-2.5). "
+                        "Sugiere aumento de globulinas: infección crónica, hepatopatía, "
+                        "gammapatía monoclonal, enfermedad autoinmune."
+                    )
 
         # --- PERFIL LIPIDICO ---
         dislipi = []
@@ -316,14 +608,20 @@ class MotorReglasClinicas:
             elif col_t >= 200:
                 dislipi.append(f"Colesterol total limítrofe ({col_t} mg/dL, 200-239)")
         if ldl is not None:
-            if ldl >= 160:
-                dislipi.append(f"LDL elevado ({ldl} mg/dL ≥ 160)")
+            if ldl >= 190:
+                dislipi.append(f"LDL muy elevado ({ldl} mg/dL ≥ 190, riesgo cardiovascular alto)")
+            elif ldl >= 160:
+                dislipi.append(f"LDL elevado ({ldl} mg/dL, 160-189)")
             elif ldl >= 130:
-                dislipi.append(f"LDL limítrofe ({ldl} mg/dL, 130-159)")
+                dislipi.append(f"LDL limítrofe alto ({ldl} mg/dL, 130-159)")
+            elif ldl >= 100:
+                dislipi.append(f"LDL sobre el óptimo ({ldl} mg/dL, 100-129; óptimo <100)")
         if hdl is not None:
             umbral_hdl = 40 if es_masculino else 50  # H: <40 riesgo, M: <50 riesgo (ATP III)
             if hdl < umbral_hdl:
                 dislipi.append(f"HDL bajo ({hdl} mg/dL < {umbral_hdl}) — factor de riesgo cardiovascular")
+            elif hdl >= 60:
+                obs.append(f"HDL elevado ({hdl} mg/dL ≥ 60): factor cardioprotector (ATP III).")
         if trig is not None:
             if trig >= 500:
                 dislipi.append(f"Hipertrigliceridemia severa ({trig} mg/dL ≥ 500, riesgo pancreatitis)")
@@ -355,13 +653,13 @@ class MotorReglasClinicas:
 
         if tp is not None and tp > 14:
             obs.append(
-                f"Tiempo de protrombina prolongado ({tp} seg). "
+                f"Tiempo de protrombina prolongado ({tp} seg, ref: 11-14). "
                 "Sugiere: déficit de factores vía extrínseca (II, V, VII, X), "
                 "disfunción hepática, déficit de vitamina K, anticoagulación oral."
             )
-        if tpt is not None and tpt > 40:
+        if tpt is not None and tpt > 38:
             obs.append(
-                f"TPT prolongado ({tpt} seg). "
+                f"TPT prolongado ({tpt} seg, ref: 25-35). "
                 "Sugiere: déficit de factores vía intrínseca (VIII, IX, XI, XII), "
                 "hemofilia A/B, anticoagulante lúpico, heparina."
             )
@@ -457,12 +755,27 @@ class MotorReglasClinicas:
                 "Evaluar: cetoacidosis diabética, ayuno prolongado, dieta baja en carbohidratos."
             )
 
-        # Densidad
+        # Densidad (ref: 1.005-1.030)
         if densidad is not None:
             if densidad > 1.030:
                 obs.append(f"Densidad urinaria elevada ({densidad}). Compatible con deshidratación o orina concentrada.")
             elif densidad < 1.005:
                 obs.append(f"Densidad urinaria baja ({densidad}). Sugiere hiposmolalidad o ingesta excesiva de líquidos.")
+
+        # pH urinario (ref: 4.5-8.0, habitual 5.5-6.5)
+        if ph_orina is not None:
+            if ph_orina > 8.0:
+                obs.append(
+                    f"Orina alcalina (pH {ph_orina}, ref: 4.5-8.0). "
+                    "Causas: ITU por Proteus/Klebsiella (ureasas), acidosis tubular renal, "
+                    "dieta vegetariana, vómitos prolongados."
+                )
+            elif ph_orina < 5.0:
+                obs.append(
+                    f"Orina muy ácida (pH {ph_orina}, ref: 4.5-8.0). "
+                    "Causas: acidosis metabólica, cetoacidosis diabética, diarrea severa, "
+                    "dieta hiperproteica. Riesgo de litiasis por ácido úrico."
+                )
 
         if not obs:
             obs.append("Uroanálisis sin hallazgos significativos en los parámetros evaluados.")
@@ -1051,7 +1364,7 @@ Responde de forma concisa, clara y en español. Usa términos médicos precisos 
                 return data.get('response', '').strip()
             return None
         except Exception as e:
-            print(f"[IA] Error Ollama: {e}")
+            logging.getLogger("angeslab.ia_interpretacion").warning("[IA] Error Ollama: %s", e)
             return None
 
     def _interpretar_claude(self, prompt):
@@ -1071,7 +1384,7 @@ Responde de forma concisa, clara y en español. Usa términos médicos precisos 
             )
             return mensaje.content[0].text.strip()
         except Exception as e:
-            print(f"[IA] Error Claude API: {e}")
+            logging.getLogger("angeslab.ia_interpretacion").warning("[IA] Error Claude API: %s", e)
             return None
 
     # ----------------------------------------------------------
@@ -1194,7 +1507,7 @@ class ConfigIA:
                     config['claude_api_key'] = self._protector.descifrar(api_key)
                 return config
         except Exception as e:
-            print(f"[ConfigIA] Error al leer configuracion: {e}")
+            logging.getLogger("angeslab.ia_interpretacion").warning("[ConfigIA] Error al leer configuracion: %s", e)
         return dict(self.DEFAULTS)
 
     def guardar(self, config):
@@ -1209,7 +1522,7 @@ class ConfigIA:
                 json.dump(datos, f, indent=2, ensure_ascii=False)
             return True
         except Exception as e:
-            print(f"[ConfigIA] Error al guardar configuracion: {e}")
+            logging.getLogger("angeslab.ia_interpretacion").warning("[ConfigIA] Error al guardar configuracion: %s", e)
             return False
 
 

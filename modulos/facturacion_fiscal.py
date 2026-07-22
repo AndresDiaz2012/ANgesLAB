@@ -3,14 +3,19 @@
 MODULO DE FACTURACION FISCAL - ANgesLAB
 ================================================================================
 Modulo de facturacion adaptado a normativas fiscales venezolanas:
-- Control de numeracion de facturas
+- Control de numeracion de facturas, notas de credito y debito
 - Manejo de IVA segun normativa vigente
+- IGTF (Impuesto a Grandes Transacciones Financieras) al 3%
 - Soporte para exoneraciones
+- Soporte multi-moneda (USD, VES, COP) con tasas BCV
+- Retenciones de IVA
 - Generacion de reportes fiscales
-- Libro de ventas
+- Libro de ventas formato SENIAT
 
 Normativas aplicadas:
 - Providencia SNAT/2011/0071 (Facturacion)
+- Providencia SNAT/2024/000102 (Facturacion digital)
+- Providencia SNAT/2022/000013 (IGTF en facturas)
 - Ley de IVA vigente
 - Codigo de Comercio
 
@@ -38,6 +43,35 @@ class ConfiguracionFiscal:
     # Servicios de laboratorio (segun normativa pueden estar exentos o con tasa reducida)
     TASA_IVA_LABORATORIO = Decimal('16.00')   # Servicios de laboratorio
 
+    # IGTF (Impuesto a Grandes Transacciones Financieras)
+    # Aplica a pagos en divisas, criptomonedas y transferencias internacionales
+    TASA_IGTF = Decimal('3.00')  # 3%
+
+    # Formas de pago que activan IGTF automaticamente (nombres de FormasPago)
+    FORMAS_PAGO_IGTF = {'Divisa', 'Zelle'}
+
+    # Tipos de documento fiscal
+    TIPO_FACTURA = 'Factura'
+    TIPO_NOTA_CREDITO = 'NC'
+    TIPO_NOTA_DEBITO = 'ND'
+
+    # Tasas de retencion de IVA
+    RETENCION_IVA_ORDINARIO = Decimal('75.00')    # 75% contribuyente ordinario
+    RETENCION_IVA_ESPECIAL = Decimal('100.00')     # 100% contribuyente especial
+
+    # Tasas de retencion de ISLR (Decreto 1.808)
+    # Clave: codigo de actividad → (porcentaje retencion, sustraendo UT)
+    RETENCIONES_ISLR = {
+        'servicios_salud':      {'tasa': Decimal('1.00'),  'sustraendo_ut': 0,  'descripcion': 'Servicios de salud'},
+        'servicios_profesional': {'tasa': Decimal('3.00'),  'sustraendo_ut': 0,  'descripcion': 'Honorarios profesionales PJD'},
+        'servicios_general':    {'tasa': Decimal('2.00'),  'sustraendo_ut': 0,  'descripcion': 'Servicios en general'},
+        'compras_bienes':       {'tasa': Decimal('1.00'),  'sustraendo_ut': 0,  'descripcion': 'Compra de bienes muebles'},
+        'alquiler_inmueble':    {'tasa': Decimal('3.00'),  'sustraendo_ut': 0,  'descripcion': 'Alquiler de bienes inmuebles'},
+        'comisiones':           {'tasa': Decimal('3.00'),  'sustraendo_ut': 0,  'descripcion': 'Comisiones mercantiles'},
+        'fletes':               {'tasa': Decimal('1.00'),  'sustraendo_ut': 0,  'descripcion': 'Fletes y transporte'},
+        'publicidad':           {'tasa': Decimal('5.00'),  'sustraendo_ut': 0,  'descripcion': 'Publicidad y propaganda'},
+    }
+
     # Formatos de numeracion
     FORMATO_FACTURA = "FAC-{YYYY}-{NNNNNN}"           # FAC-2024-000001
     FORMATO_NOTA_CREDITO = "NC-{YYYY}-{NNNNNN}"       # NC-2024-000001
@@ -51,7 +85,7 @@ class ConfiguracionFiscal:
         config = None
         try:
             config = db.query_one("SELECT * FROM ConfiguracionLaboratorio")
-        except:
+        except Exception:
             pass
         if not config:
             config = db.query_one("SELECT * FROM ConfiguracionSistema")
@@ -62,7 +96,11 @@ class ConfiguracionFiscal:
             'telefono': (config.get('Telefono1') or config.get('Telefono') or '') if config else '',
             'whatsapp': (config.get('WhatsApp') or '') if config else '',
             'email': (config.get('Email') or '') if config else '',
-            'tasa_iva': Decimal(str(config.get('TasaIVALaboratorio') or config.get('IVAPorDefecto') or 16)) if config else Decimal('16')
+            'tasa_iva': Decimal(str(config.get('TasaIVALaboratorio') or config.get('IVAPorDefecto') or 16)) if config else Decimal('16'),
+            # Campos IGTF / Fiscal
+            'igtf_activo': bool(config.get('IGTFActivo', True)) if config else True,
+            'tasa_igtf': Decimal(str(config.get('TasaIGTF') or 3)) if config else Decimal('3'),
+            'tipo_contribuyente': (config.get('TipoContribuyente') or 'Ordinario') if config else 'Ordinario',
         }
 
 
@@ -72,7 +110,8 @@ class ConfiguracionFiscal:
 
 class FacturacionFiscal:
     """
-    Maneja la facturacion conforme a normativas fiscales
+    Maneja la facturacion conforme a normativas fiscales venezolanas.
+    Soporta IGTF, multi-moneda, notas de credito/debito y retenciones.
     """
 
     def __init__(self, db):
@@ -83,28 +122,38 @@ class FacturacionFiscal:
     # GENERACION DE NUMEROS DE DOCUMENTO
     # -------------------------------------------------------------------------
 
-    def generar_numero_factura(self):
-        """Genera el siguiente numero de factura secuencial"""
+    def _generar_numero_secuencial(self, prefijo):
+        """Genera el siguiente numero secuencial para un prefijo dado."""
         anio = datetime.now().year
 
-        # Obtener ultima factura del anio
         result = self.db.query_one(f"""
             SELECT MAX(NumeroFactura) as Ultimo
             FROM Facturas
-            WHERE NumeroFactura LIKE 'FAC-{anio}-%'
+            WHERE NumeroFactura LIKE '{prefijo}-{anio}-%'
         """)
 
         if result and result['Ultimo']:
-            # Extraer numero y incrementar
             try:
                 ultimo = result['Ultimo']
                 numero = int(ultimo.split('-')[-1]) + 1
-            except:
+            except Exception:
                 numero = 1
         else:
             numero = 1
 
-        return f"FAC-{anio}-{numero:06d}"
+        return f"{prefijo}-{anio}-{numero:06d}"
+
+    def generar_numero_factura(self):
+        """Genera el siguiente numero de factura secuencial"""
+        return self._generar_numero_secuencial('FAC')
+
+    def generar_numero_nota_credito(self):
+        """Genera el siguiente numero de nota de credito: NC-YYYY-NNNNNN"""
+        return self._generar_numero_secuencial('NC')
+
+    def generar_numero_nota_debito(self):
+        """Genera el siguiente numero de nota de debito: ND-YYYY-NNNNNN"""
+        return self._generar_numero_secuencial('ND')
 
     def generar_numero_control(self):
         """
@@ -123,7 +172,7 @@ class FacturacionFiscal:
         if result and result['Ultimo']:
             try:
                 numero = int(result['Ultimo'].replace('-', '')) + 1
-            except:
+            except Exception:
                 numero = 1
         else:
             numero = 1
@@ -153,14 +202,81 @@ class FacturacionFiscal:
 
         return float(monto_iva), float(total)
 
-    def calcular_totales_factura(self, detalles, descuento_porcentaje=0, es_exonerada=False):
+    def calcular_igtf(self, monto_total, forma_pago_nombre=None, aplica_igtf=False):
         """
-        Calcula todos los totales de una factura
+        Calcula el IGTF (3%) sobre pagos en divisas/cripto.
+
+        Segun Providencia SNAT/2022/000013, el IGTF se aplica a
+        pagos realizados en moneda extranjera, criptomonedas o
+        transferencias internacionales.
+
+        Args:
+            monto_total: monto total de la factura (base + IVA)
+            forma_pago_nombre: nombre de la forma de pago (de FormasPago)
+            aplica_igtf: forzar aplicacion de IGTF
+
+        Returns:
+            (monto_igtf, total_con_igtf) como floats
+        """
+        if not self.config.get('igtf_activo', True):
+            return 0.0, float(monto_total)
+
+        # Auto-detectar si la forma de pago activa IGTF
+        if forma_pago_nombre and forma_pago_nombre in ConfiguracionFiscal.FORMAS_PAGO_IGTF:
+            aplica_igtf = True
+
+        if not aplica_igtf:
+            return 0.0, float(monto_total)
+
+        base = Decimal(str(monto_total))
+        tasa = self.config.get('tasa_igtf', ConfiguracionFiscal.TASA_IGTF)
+
+        monto_igtf = (base * tasa / Decimal('100')).quantize(
+            Decimal('0.01'), rounding=ROUND_HALF_UP
+        )
+
+        return float(monto_igtf), float(base + monto_igtf)
+
+    def calcular_retencion_iva(self, monto_iva, es_contribuyente_especial=None):
+        """
+        Calcula la retencion de IVA.
+
+        Segun normativa:
+        - Contribuyente ordinario: 75% del IVA
+        - Contribuyente especial: 100% del IVA
+
+        Args:
+            monto_iva: monto del IVA a retener
+            es_contribuyente_especial: si None, usa config del sistema
+
+        Returns:
+            float: monto de la retencion
+        """
+        if es_contribuyente_especial is None:
+            es_contribuyente_especial = (
+                self.config.get('tipo_contribuyente', 'Ordinario') == 'Especial'
+            )
+
+        tasa = (ConfiguracionFiscal.RETENCION_IVA_ESPECIAL
+                if es_contribuyente_especial
+                else ConfiguracionFiscal.RETENCION_IVA_ORDINARIO)
+
+        retencion = (Decimal(str(monto_iva)) * tasa / Decimal('100')).quantize(
+            Decimal('0.01'), rounding=ROUND_HALF_UP
+        )
+
+        return float(retencion)
+
+    def calcular_totales_factura(self, detalles, descuento_porcentaje=0,
+                                 es_exonerada=False, forma_pago_nombre=None):
+        """
+        Calcula todos los totales de una factura incluyendo IGTF.
 
         Parametros:
         - detalles: lista de dict con {precio, cantidad, descuento}
         - descuento_porcentaje: descuento global sobre el subtotal
         - es_exonerada: si la factura esta exonerada de IVA
+        - forma_pago_nombre: nombre de forma de pago (para auto-detectar IGTF)
 
         Retorna: dict con todos los montos calculados
         """
@@ -195,8 +311,13 @@ class FacturacionFiscal:
             monto_exento = Decimal('0.00')
             base_imponible_iva = base_imponible
 
-        # Total
+        # Total (sin IGTF)
         total = base_imponible + monto_iva
+
+        # Calcular IGTF
+        monto_igtf, total_con_igtf = self.calcular_igtf(
+            float(total), forma_pago_nombre
+        )
 
         return {
             'subtotal': float(subtotal),
@@ -206,32 +327,102 @@ class FacturacionFiscal:
             'monto_exento': float(monto_exento),
             'tasa_iva': float(self.config['tasa_iva']),
             'monto_iva': float(monto_iva),
-            'total': float(total)
+            'total': float(total),
+            # Campos IGTF
+            'monto_igtf': monto_igtf,
+            'tasa_igtf': float(self.config.get('tasa_igtf', 3)),
+            'total_con_igtf': total_con_igtf,
+            'aplica_igtf': monto_igtf > 0,
         }
 
     # -------------------------------------------------------------------------
     # CREACION DE FACTURAS
     # -------------------------------------------------------------------------
 
-    def crear_factura(self, datos_factura, detalles, usuario_id):
+    def crear_factura(self, datos_factura, detalles, usuario_id, gestor_tasas=None):
         """
-        Crea una factura completa con todos sus detalles
+        Crea una factura completa con todos sus detalles.
+        Soporta multi-moneda, IGTF y tipos de documento (FAC/NC/ND).
 
         Parametros:
         - datos_factura: dict con datos de la factura
+            - paciente_id (requerido)
+            - moneda_factura: 'USD', 'VES', 'COP' (default: 'USD')
+            - tipo_documento: 'Factura', 'NC', 'ND' (default: 'Factura')
+            - factura_afectada_id: int (para NC/ND)
+            - forma_pago_nombre: str (para auto-detectar IGTF)
+            - descuento_porcentaje, es_exonerada, etc.
         - detalles: lista de pruebas/items a facturar
         - usuario_id: ID del usuario que crea la factura
+        - gestor_tasas: instancia de GestorTasasCambio (opcional, para conversiones)
 
-        Retorna: ID de la factura creada
+        Retorna: (factura_id, numero_factura)
         """
-        # Generar numeros
-        numero_factura = self.generar_numero_factura()
+        tipo_doc = datos_factura.get('tipo_documento', 'Factura')
+        moneda = datos_factura.get('moneda_factura', 'USD')
+
+        # Generar numeros segun tipo de documento
+        if tipo_doc == ConfiguracionFiscal.TIPO_NOTA_CREDITO:
+            numero_factura = self.generar_numero_nota_credito()
+        elif tipo_doc == ConfiguracionFiscal.TIPO_NOTA_DEBITO:
+            numero_factura = self.generar_numero_nota_debito()
+        else:
+            numero_factura = self.generar_numero_factura()
+
         numero_control = self.generar_numero_control()
 
-        # Calcular totales
+        # Calcular totales con IGTF
         descuento = datos_factura.get('descuento_porcentaje', 0)
         es_exonerada = datos_factura.get('es_exonerada', False)
-        totales = self.calcular_totales_factura(detalles, descuento, es_exonerada)
+        forma_pago = datos_factura.get('forma_pago_nombre')
+        totales = self.calcular_totales_factura(
+            detalles, descuento, es_exonerada, forma_pago
+        )
+
+        # Obtener tasa de cambio para montos duales
+        tasa_cambio = 1.0
+        if gestor_tasas:
+            try:
+                tasa_cambio = gestor_tasas.get_tasa_actual('USD')
+            except Exception:
+                tasa_cambio = 1.0
+
+        # Calcular montos duales (USD y Bs)
+        total_factura = totales['total_con_igtf'] if totales['aplica_igtf'] else totales['total']
+        total_dec = Decimal(str(total_factura))
+        tasa_dec = Decimal(str(tasa_cambio))
+
+        if moneda == 'USD':
+            monto_total_usd = float(total_dec)
+            monto_total_bs = float((total_dec * tasa_dec).quantize(
+                Decimal('0.01'), rounding=ROUND_HALF_UP))
+        elif moneda in ('VES', 'Bs', 'Bs.'):
+            monto_total_bs = float(total_dec)
+            if tasa_dec > 0:
+                monto_total_usd = float((total_dec / tasa_dec).quantize(
+                    Decimal('0.01'), rounding=ROUND_HALF_UP))
+            else:
+                monto_total_usd = float(total_dec)
+        elif moneda == 'COP':
+            # COP: usar tasa COP/USD si disponible
+            tasa_cop = 1.0
+            if gestor_tasas:
+                try:
+                    tasa_cop = gestor_tasas.get_tasa_actual('COP_USD')
+                except Exception:
+                    pass
+            tasa_cop_dec = Decimal(str(tasa_cop))
+            if tasa_cop_dec > 0:
+                monto_total_usd = float((total_dec / tasa_cop_dec).quantize(
+                    Decimal('0.01'), rounding=ROUND_HALF_UP))
+            else:
+                monto_total_usd = float(total_dec)
+            monto_total_bs = float((Decimal(str(monto_total_usd)) * tasa_dec).quantize(
+                Decimal('0.01'), rounding=ROUND_HALF_UP))
+        else:
+            monto_total_usd = float(total_dec)
+            monto_total_bs = float((total_dec * tasa_dec).quantize(
+                Decimal('0.01'), rounding=ROUND_HALF_UP))
 
         # Insertar factura
         factura_data = {
@@ -253,6 +444,21 @@ class FacturacionFiscal:
             'MontoIVA': totales['monto_iva'],
             'MontoExento': totales['monto_exento'],
             'MontoTotal': totales['total'],
+
+            # IGTF
+            'MontoIGTF': totales['monto_igtf'],
+            'TasaIGTF': totales['tasa_igtf'],
+            'AplicaIGTF': totales['aplica_igtf'],
+
+            # Multi-moneda
+            'MonedaFactura': moneda,
+            'TasaCambioDia': tasa_cambio,
+            'MontoTotalBs': monto_total_bs,
+            'MontoTotalUSD': monto_total_usd,
+
+            # Tipo de documento (Factura / NC / ND)
+            'TipoDocumento': tipo_doc,
+            'FacturaAfectadaID': datos_factura.get('factura_afectada_id'),
 
             # Estado
             'EstadoPago': 'Pendiente',
@@ -310,10 +516,85 @@ class FacturacionFiscal:
             self.db.insert('DetalleFacturas', detalle_data)
 
         # Log de auditoria
+        tipo_label = {'Factura': 'Factura', 'NC': 'Nota de Credito', 'ND': 'Nota de Debito'}
         self._registrar_auditoria(usuario_id, 'INSERT', 'Facturas', factura_id,
-                                  f"Factura {numero_factura} creada")
+                                  f"{tipo_label.get(tipo_doc, tipo_doc)} {numero_factura} creada")
 
         return factura_id, numero_factura
+
+    # -------------------------------------------------------------------------
+    # NOTAS DE CREDITO Y DEBITO
+    # -------------------------------------------------------------------------
+
+    def crear_nota_credito(self, factura_original_id, detalles_nc, motivo,
+                           usuario_id, gestor_tasas=None):
+        """
+        Crea una Nota de Credito referenciando una factura original.
+
+        Args:
+            factura_original_id: ID de la factura que se acredita
+            detalles_nc: items a acreditar (parcial o total)
+            motivo: razon de la nota de credito
+            usuario_id: usuario que crea
+            gestor_tasas: GestorTasasCambio (opcional)
+
+        Returns:
+            (nc_id, nc_numero)
+        """
+        factura_original = self.db.query_one(
+            f"SELECT * FROM Facturas WHERE FacturaID={factura_original_id}"
+        )
+        if not factura_original:
+            raise ValueError("Factura original no encontrada")
+
+        datos_nc = {
+            'paciente_id': factura_original['PacienteID'],
+            'responsable_id': factura_original.get('ResponsablePagoID'),
+            'solicitud_id': factura_original.get('SolicitudID'),
+            'tipo_documento': ConfiguracionFiscal.TIPO_NOTA_CREDITO,
+            'factura_afectada_id': factura_original_id,
+            'observaciones': f"NC por: {motivo}. Ref: {factura_original.get('NumeroFactura', '')}",
+            'moneda_factura': factura_original.get('MonedaFactura', 'USD'),
+            'tipo': factura_original.get('TipoFactura', 'Contado'),
+            'es_exonerada': bool(factura_original.get('EstaExonerada', False)),
+        }
+
+        return self.crear_factura(datos_nc, detalles_nc, usuario_id, gestor_tasas)
+
+    def crear_nota_debito(self, factura_original_id, detalles_nd, motivo,
+                          usuario_id, gestor_tasas=None):
+        """
+        Crea una Nota de Debito referenciando una factura original.
+
+        Args:
+            factura_original_id: ID de la factura afectada
+            detalles_nd: items del cargo adicional
+            motivo: razon de la nota de debito
+            usuario_id: usuario que crea
+            gestor_tasas: GestorTasasCambio (opcional)
+
+        Returns:
+            (nd_id, nd_numero)
+        """
+        factura_original = self.db.query_one(
+            f"SELECT * FROM Facturas WHERE FacturaID={factura_original_id}"
+        )
+        if not factura_original:
+            raise ValueError("Factura original no encontrada")
+
+        datos_nd = {
+            'paciente_id': factura_original['PacienteID'],
+            'responsable_id': factura_original.get('ResponsablePagoID'),
+            'solicitud_id': factura_original.get('SolicitudID'),
+            'tipo_documento': ConfiguracionFiscal.TIPO_NOTA_DEBITO,
+            'factura_afectada_id': factura_original_id,
+            'observaciones': f"ND por: {motivo}. Ref: {factura_original.get('NumeroFactura', '')}",
+            'moneda_factura': factura_original.get('MonedaFactura', 'USD'),
+            'tipo': factura_original.get('TipoFactura', 'Contado'),
+            'es_exonerada': bool(factura_original.get('EstaExonerada', False)),
+        }
+
+        return self.crear_factura(datos_nd, detalles_nd, usuario_id, gestor_tasas)
 
     # -------------------------------------------------------------------------
     # ANULACION DE FACTURAS
@@ -360,10 +641,15 @@ class FacturacionFiscal:
 
     def registrar_cobro(self, datos_cobro, usuario_id):
         """
-        Registra un cobro/pago de factura
+        Registra un cobro/pago de factura con soporte IGTF y multi-moneda.
 
         Parametros:
         - datos_cobro: dict con datos del cobro
+            - factura_id (requerido)
+            - monto (requerido)
+            - forma_pago_id (requerido)
+            - moneda_pago: 'USD', 'VES', 'COP' (default: 'USD')
+            - banco_id, cuenta_id, referencia, numero_cheque, observaciones
         - usuario_id: usuario que registra
         """
         factura_id = datos_cobro['factura_id']
@@ -381,6 +667,28 @@ class FacturacionFiscal:
 
         if monto_cobro > saldo_actual:
             raise ValueError(f"El monto excede el saldo pendiente ({saldo_actual})")
+
+        # Determinar si aplica IGTF segun forma de pago
+        forma_pago_nombre = None
+        aplica_igtf = False
+        monto_igtf = Decimal('0')
+
+        try:
+            fp = self.db.query_one(
+                f"SELECT Nombre FROM FormasPago WHERE FormaPagoID={datos_cobro['forma_pago_id']}"
+            )
+            if fp:
+                forma_pago_nombre = fp['Nombre']
+                if forma_pago_nombre in ConfiguracionFiscal.FORMAS_PAGO_IGTF:
+                    aplica_igtf = True
+        except Exception:
+            pass
+
+        if aplica_igtf and self.config.get('igtf_activo', True):
+            tasa_igtf = self.config.get('tasa_igtf', ConfiguracionFiscal.TASA_IGTF)
+            monto_igtf = (monto_cobro * tasa_igtf / Decimal('100')).quantize(
+                Decimal('0.01'), rounding=ROUND_HALF_UP
+            )
 
         # Generar numero de cobro
         anio = datetime.now().year
@@ -400,7 +708,11 @@ class FacturacionFiscal:
             'NumeroCheque': datos_cobro.get('numero_cheque', ''),
             'Observaciones': datos_cobro.get('observaciones', ''),
             'UsuarioRegistro': usuario_id,
-            'FechaRegistro': datetime.now()
+            'FechaRegistro': datetime.now(),
+            # Campos IGTF
+            'MontoIGTF': float(monto_igtf),
+            'AplicaIGTF': aplica_igtf,
+            'MonedaPago': datos_cobro.get('moneda_pago', 'USD'),
         }
 
         self.db.insert('Cobros', cobro_data)
@@ -424,8 +736,9 @@ class FacturacionFiscal:
         }, f"FacturaID={factura_id}")
 
         # Log de auditoria
+        igtf_info = f" (IGTF: {monto_igtf})" if aplica_igtf else ""
         self._registrar_auditoria(usuario_id, 'INSERT', 'Cobros', None,
-                                  f"Cobro {numero_cobro} de {monto_cobro} a factura {factura['NumeroFactura']}")
+                                  f"Cobro {numero_cobro} de {monto_cobro}{igtf_info} a factura {factura['NumeroFactura']}")
 
         return numero_cobro
 
@@ -435,8 +748,8 @@ class FacturacionFiscal:
 
     def generar_libro_ventas(self, fecha_desde, fecha_hasta):
         """
-        Genera el libro de ventas para el periodo indicado
-        Segun formato SENIAT
+        Genera el libro de ventas para el periodo indicado.
+        Formato SENIAT con columnas de IGTF y multi-moneda.
 
         Retorna: lista de registros del libro de ventas
         """
@@ -448,11 +761,20 @@ class FacturacionFiscal:
                 p.NumeroDocumento as RIFCliente,
                 p.Nombres + ' ' + p.Apellidos as NombreCliente,
                 f.TipoFactura,
+                f.TipoDocumento,
                 f.BaseImponible,
                 f.TasaIVA,
                 f.MontoIVA,
                 f.MontoExento,
                 f.MontoTotal,
+                f.MontoIGTF,
+                f.TasaIGTF,
+                f.AplicaIGTF,
+                f.MonedaFactura,
+                f.TasaCambioDia,
+                f.MontoTotalBs,
+                f.MontoTotalUSD,
+                f.FacturaAfectadaID,
                 f.Anulada
             FROM Facturas f
             INNER JOIN Pacientes p ON f.PacienteID = p.PacienteID
@@ -463,18 +785,42 @@ class FacturacionFiscal:
 
         libro = []
         for f in facturas:
+            tipo_doc = f.get('TipoDocumento', 'Factura')
+
+            # Tipo de operacion segun documento
+            if f.get('Anulada'):
+                tipo_op = 'ANULADA'
+            elif tipo_doc == 'NC':
+                tipo_op = 'NOTA DE CREDITO'
+            elif tipo_doc == 'ND':
+                tipo_op = 'NOTA DE DEBITO'
+            else:
+                tipo_op = 'VENTA'
+
             registro = {
                 'fecha': f['FechaEmision'],
                 'numero_factura': f['NumeroFactura'],
                 'numero_control': f['NumeroControl'],
                 'rif_cliente': f['RIFCliente'] or 'SIN RIF',
                 'nombre_cliente': f['NombreCliente'],
-                'tipo_operacion': 'VENTA' if not f['Anulada'] else 'ANULADA',
+                'tipo_operacion': tipo_op,
+                'tipo_documento': tipo_doc,
                 'base_imponible': f['BaseImponible'] or 0,
                 'alicuota': f['TasaIVA'] or 0,
                 'impuesto': f['MontoIVA'] or 0,
                 'exento': f['MontoExento'] or 0,
-                'total': f['MontoTotal'] if not f['Anulada'] else 0
+                'total': f['MontoTotal'] if not f['Anulada'] else 0,
+                # Campos IGTF
+                'igtf': f.get('MontoIGTF') or 0,
+                'tasa_igtf': f.get('TasaIGTF') or 0,
+                'aplica_igtf': bool(f.get('AplicaIGTF')),
+                # Multi-moneda
+                'moneda': f.get('MonedaFactura', 'USD'),
+                'tasa_cambio': f.get('TasaCambioDia') or 0,
+                'total_bs': f.get('MontoTotalBs') or 0,
+                'total_usd': f.get('MontoTotalUSD') or 0,
+                # Referencia NC/ND
+                'factura_afectada': f.get('FacturaAfectadaID'),
             }
             libro.append(registro)
 
@@ -482,7 +828,7 @@ class FacturacionFiscal:
 
     def resumen_fiscal_periodo(self, fecha_desde, fecha_hasta):
         """
-        Genera resumen fiscal del periodo
+        Genera resumen fiscal del periodo con IGTF.
 
         Retorna: dict con totales del periodo
         """
@@ -495,7 +841,8 @@ class FacturacionFiscal:
                 SUM(CASE WHEN Anulada=False THEN MontoIVA ELSE 0 END) as TotalIVA,
                 SUM(CASE WHEN Anulada=False THEN MontoExento ELSE 0 END) as TotalExento,
                 SUM(CASE WHEN Anulada=False THEN MontoTotal ELSE 0 END) as TotalVentas,
-                SUM(CASE WHEN Anulada=False THEN MontoCobrado ELSE 0 END) as TotalCobrado
+                SUM(CASE WHEN Anulada=False THEN MontoCobrado ELSE 0 END) as TotalCobrado,
+                SUM(CASE WHEN Anulada=False THEN MontoIGTF ELSE 0 END) as TotalIGTF
             FROM Facturas
             WHERE FechaEmision BETWEEN #{fecha_desde.strftime('%m/%d/%Y')}#
                 AND #{fecha_hasta.strftime('%m/%d/%Y')}#
@@ -512,7 +859,194 @@ class FacturacionFiscal:
             'total_exento': result['TotalExento'] or 0,
             'total_ventas': result['TotalVentas'] or 0,
             'total_cobrado': result['TotalCobrado'] or 0,
-            'por_cobrar': (result['TotalVentas'] or 0) - (result['TotalCobrado'] or 0)
+            'por_cobrar': (result['TotalVentas'] or 0) - (result['TotalCobrado'] or 0),
+            'total_igtf': result.get('TotalIGTF') or 0,
+        }
+
+    # -------------------------------------------------------------------------
+    # RETENCION ISLR (Decreto 1.808)
+    # -------------------------------------------------------------------------
+
+    def calcular_retencion_islr(self, monto_bruto, tipo_actividad='servicios_general',
+                                  es_persona_natural=False):
+        """
+        Calcula la retención de ISLR según tipo de actividad.
+
+        Args:
+            monto_bruto: Monto total del pago
+            tipo_actividad: Código de actividad (ver RETENCIONES_ISLR)
+            es_persona_natural: True si el beneficiario es persona natural
+
+        Returns:
+            dict con tasa, monto_retencion, monto_neto, descripcion
+        """
+        info = ConfiguracionFiscal.RETENCIONES_ISLR.get(
+            tipo_actividad,
+            ConfiguracionFiscal.RETENCIONES_ISLR['servicios_general']
+        )
+        tasa = info['tasa']
+        monto = Decimal(str(monto_bruto))
+        retencion = (monto * tasa / Decimal('100')).quantize(
+            Decimal('0.01'), rounding=ROUND_HALF_UP
+        )
+        return {
+            'tipo_actividad': tipo_actividad,
+            'descripcion': info['descripcion'],
+            'tasa_retencion': float(tasa),
+            'monto_bruto': float(monto),
+            'monto_retencion': float(retencion),
+            'monto_neto': float(monto - retencion),
+            'es_persona_natural': es_persona_natural,
+        }
+
+    def registrar_retencion_islr(self, datos, usuario_id=None):
+        """
+        Registra un comprobante de retención ISLR.
+
+        Args:
+            datos: dict con ProveedorID, NumeroDocumento, FechaDocumento,
+                   MontoDocumento, TipoActividad, MontoRetencion, TasaRetencion,
+                   NumeroComprobante, Periodo (AAAAMM)
+        """
+        fecha = datos.get('FechaDocumento', datetime.now())
+        if isinstance(fecha, datetime):
+            fecha_str = f"#{fecha.strftime('%m/%d/%Y %H:%M:%S')}#"
+        else:
+            fecha_str = f"#{fecha.strftime('%m/%d/%Y')}#"
+
+        sql = (
+            "INSERT INTO [RetencionesISLR] "
+            "([ProveedorID], [NumeroDocumento], [FechaDocumento], "
+            "[MontoDocumento], [TipoActividad], [TasaRetencion], [MontoRetencion], "
+            "[NumeroComprobante], [Periodo], [FechaRegistro]) "
+            f"VALUES ("
+            f"{int(datos.get('ProveedorID', 0))}, "
+            f"'{str(datos.get('NumeroDocumento', '')).replace(chr(39), chr(39)*2)}', "
+            f"{fecha_str}, "
+            f"{float(datos.get('MontoDocumento', 0))}, "
+            f"'{datos.get('TipoActividad', 'servicios_general')}', "
+            f"{float(datos.get('TasaRetencion', 0))}, "
+            f"{float(datos.get('MontoRetencion', 0))}, "
+            f"'{str(datos.get('NumeroComprobante', '')).replace(chr(39), chr(39)*2)}', "
+            f"'{datos.get('Periodo', datetime.now().strftime('%Y%m'))}', "
+            f"#{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}#"
+            f")"
+        )
+        self.db.execute(sql)
+
+        if usuario_id:
+            self._registrar_auditoria(
+                usuario_id, 'Registrar Retencion ISLR',
+                'RetencionesISLR', 0,
+                f"Comprobante: {datos.get('NumeroComprobante', '')}"
+            )
+
+    def listar_retenciones_islr(self, periodo=None, proveedor_id=None):
+        """Lista retenciones ISLR con filtros opcionales."""
+        where = []
+        if periodo:
+            where.append(f"r.Periodo='{periodo}'")
+        if proveedor_id:
+            where.append(f"r.ProveedorID={int(proveedor_id)}")
+
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+
+        sql = (
+            f"SELECT r.*, p.RazonSocial, p.RIF "
+            f"FROM [RetencionesISLR] AS r "
+            f"LEFT JOIN [Proveedores] AS p ON r.ProveedorID = p.ProveedorID "
+            f"{where_sql} "
+            f"ORDER BY r.FechaDocumento DESC"
+        )
+        return self.db.query(sql) or []
+
+    # -------------------------------------------------------------------------
+    # LIBRO DE COMPRAS (formato SENIAT)
+    # -------------------------------------------------------------------------
+
+    def generar_libro_compras(self, fecha_desde, fecha_hasta):
+        """
+        Genera el libro de compras en formato SENIAT.
+
+        Args:
+            fecha_desde: Fecha inicio del período
+            fecha_hasta: Fecha fin del período
+
+        Returns:
+            dict con registros, totales y período
+        """
+        sql = (
+            f"SELECT cp.CuentaPagarID, cp.NumeroDocumento, cp.FechaEmision, "
+            f"cp.FechaVencimiento, cp.MontoOriginal, cp.MontoPagado, cp.Estado, "
+            f"p.RazonSocial, p.RIF, p.TipoContribuyente, "
+            f"cp.Descripcion, cp.Categoria "
+            f"FROM [CuentasPorPagar] AS cp "
+            f"LEFT JOIN [Proveedores] AS p ON cp.ProveedorID = p.ProveedorID "
+            f"WHERE cp.FechaEmision >= #{fecha_desde.strftime('%m/%d/%Y')}# "
+            f"AND cp.FechaEmision <= #{fecha_hasta.strftime('%m/%d/%Y')}# "
+            f"ORDER BY cp.FechaEmision ASC"
+        )
+        compras = self.db.query(sql) or []
+
+        # Calcular desglose IVA para cada compra
+        registros = []
+        totales = {
+            'total_compras': Decimal('0'),
+            'base_imponible': Decimal('0'),
+            'iva_soportado': Decimal('0'),
+            'total_exento': Decimal('0'),
+            'total_retenciones_iva': Decimal('0'),
+            'total_retenciones_islr': Decimal('0'),
+            'num_registros': 0,
+        }
+
+        tasa_iva = ConfiguracionFiscal.TASA_IVA_GENERAL
+
+        for compra in compras:
+            monto = Decimal(str(compra.get('MontoOriginal', 0)))
+            # Calcular base e IVA (asumiendo que el monto incluye IVA)
+            base = (monto / (1 + tasa_iva / 100)).quantize(
+                Decimal('0.01'), rounding=ROUND_HALF_UP
+            )
+            iva = monto - base
+
+            registro = {
+                'numero_doc': compra.get('NumeroDocumento', ''),
+                'fecha': compra.get('FechaEmision'),
+                'razon_social': compra.get('RazonSocial', compra.get('Descripcion', '')),
+                'rif': compra.get('RIF', ''),
+                'tipo_contribuyente': compra.get('TipoContribuyente', 'Ordinario'),
+                'monto_total': float(monto),
+                'base_imponible': float(base),
+                'iva_soportado': float(iva),
+                'tasa_iva': float(tasa_iva),
+                'monto_exento': 0,
+            }
+            registros.append(registro)
+
+            totales['total_compras'] += monto
+            totales['base_imponible'] += base
+            totales['iva_soportado'] += iva
+            totales['num_registros'] += 1
+
+        # Buscar retenciones del período
+        ret_iva_sql = (
+            f"SELECT SUM(MontoRetencion) AS TotalRetIVA "
+            f"FROM [RetencionesISLR] "
+            f"WHERE FechaDocumento >= #{fecha_desde.strftime('%m/%d/%Y')}# "
+            f"AND FechaDocumento <= #{fecha_hasta.strftime('%m/%d/%Y')}#"
+        )
+        try:
+            ret_result = self.db.query_one(ret_iva_sql) or {}
+            totales['total_retenciones_islr'] = Decimal(str(ret_result.get('TotalRetIVA', 0) or 0))
+        except Exception:
+            pass
+
+        return {
+            'periodo_desde': fecha_desde,
+            'periodo_hasta': fecha_hasta,
+            'registros': registros,
+            'totales': {k: float(v) if isinstance(v, Decimal) else v for k, v in totales.items()},
         }
 
     # -------------------------------------------------------------------------
@@ -530,7 +1064,7 @@ class FacturacionFiscal:
                 'RegistroID': registro_id,
                 'ValorNuevo': detalle
             })
-        except:
+        except Exception:
             pass  # No fallar si no se puede registrar auditoria
 
 
@@ -617,6 +1151,7 @@ if __name__ == "__main__":
     config = ConfiguracionFiscal()
     print(f"Tasa IVA General: {config.TASA_IVA_GENERAL}%")
     print(f"Tasa IVA Laboratorio: {config.TASA_IVA_LABORATORIO}%")
+    print(f"Tasa IGTF: {config.TASA_IGTF}%")
 
     # Ejemplo de monto en letras
     print(f"\n123.45 = {monto_en_letras(123.45)}")

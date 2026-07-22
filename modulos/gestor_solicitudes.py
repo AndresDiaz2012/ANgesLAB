@@ -11,10 +11,11 @@ Funcionalidades:
 - Generar recibos o facturas según selección
 - Control de permisos por rol
 
-Copyright 2024-2025 ANgesLAB Solutions
+Copyright 2024-2026 ANgesLAB Solutions
 ================================================================================
 """
 
+import logging
 from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 import tkinter as tk
@@ -245,7 +246,7 @@ class GestorSolicitudes:
             return self.db.query(sql)
 
         except Exception as e:
-            print(f"Error buscando solicitudes del paciente: {e}")
+            logging.getLogger("angeslab.gestor_solicitudes").warning("Error buscando solicitudes del paciente: %s", e)
             return []
 
     def buscar_solicitudes_mismo_dia(self, paciente_id):
@@ -279,7 +280,7 @@ class GestorSolicitudes:
             return self.db.query(sql)
 
         except Exception as e:
-            print(f"Error buscando solicitudes del mismo día: {e}")
+            logging.getLogger("angeslab.gestor_solicitudes").warning("Error buscando solicitudes del mismo día: %s", e)
             return []
 
     def obtener_solicitud(self, solicitud_id):
@@ -303,7 +304,7 @@ class GestorSolicitudes:
             """
             return self.db.query_one(sql)
         except Exception as e:
-            print(f"Error obteniendo solicitud: {e}")
+            logging.getLogger("angeslab.gestor_solicitudes").warning("Error obteniendo solicitud: %s", e)
             return None
 
     def obtener_pruebas_solicitud(self, solicitud_id):
@@ -328,7 +329,7 @@ class GestorSolicitudes:
             """
             return self.db.query(sql)
         except Exception as e:
-            print(f"Error obteniendo pruebas de solicitud: {e}")
+            logging.getLogger("angeslab.gestor_solicitudes").warning("Error obteniendo pruebas de solicitud: %s", e)
             return []
 
     # -------------------------------------------------------------------------
@@ -384,7 +385,7 @@ class GestorSolicitudes:
                 try:
                     numero = config_numeracion.generar_numero_solicitud()
                 except Exception as e:
-                    print(f"Error generando número con configurador: {e}")
+                    logging.getLogger("angeslab.gestor_solicitudes").warning("Error generando número con configurador: %s", e)
                     numero = self._generar_numero_solicitud_fallback()
             else:
                 numero = self._generar_numero_solicitud_fallback()
@@ -728,7 +729,7 @@ class GestorSolicitudes:
             return total
 
         except Exception as e:
-            print(f"Error recalculando totales: {e}")
+            logging.getLogger("angeslab.gestor_solicitudes").warning("Error recalculando totales: %s", e)
             return None
 
     def _generar_numero_solicitud_fallback(self):
@@ -736,7 +737,7 @@ class GestorSolicitudes:
         try:
             count = self.db.count('Solicitudes') + 1
             return f"{datetime.now().strftime('%Y')}-{count:06d}"
-        except:
+        except Exception:
             return f"{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
     # -------------------------------------------------------------------------
@@ -969,13 +970,13 @@ class GestorSolicitudes:
             if result and result['Ultimo']:
                 try:
                     numero = int(result['Ultimo'].split('-')[-1]) + 1
-                except:
+                except Exception:
                     numero = 1
             else:
                 numero = 1
 
             return f"REC-{anio}-{numero:06d}"
-        except:
+        except Exception:
             return f"REC-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
     def _generar_numero_factura_simple(self):
@@ -991,13 +992,13 @@ class GestorSolicitudes:
             if result and result['Ultimo']:
                 try:
                     numero = int(result['Ultimo'].split('-')[-1]) + 1
-                except:
+                except Exception:
                     numero = 1
             else:
                 numero = 1
 
             return f"FAC-{anio}-{numero:06d}"
-        except:
+        except Exception:
             return f"FAC-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
     # -------------------------------------------------------------------------
@@ -1048,12 +1049,12 @@ class GestorSolicitudes:
         try:
             # Intentar consultar la tabla
             self.db.query("SELECT TOP 1 * FROM Recibos")
-        except:
+        except Exception:
             # La tabla no existe, intentar crearla
             try:
                 self._crear_tabla_recibos()
             except Exception as e:
-                print(f"Advertencia: No se pudo crear tabla Recibos: {e}")
+                logging.getLogger("angeslab.gestor_solicitudes").warning("No se pudo crear tabla Recibos: %s", e)
 
     def _crear_tabla_recibos(self):
         """Crea la tabla Recibos si no existe."""
@@ -1083,7 +1084,7 @@ class GestorSolicitudes:
                 )
             """
             self.db.execute(sql_create)
-            print("Tabla Recibos creada exitosamente")
+            logging.getLogger("angeslab.gestor_solicitudes").info("Tabla Recibos creada exitosamente")
         except Exception as e:
             # Si falla el CREATE, puede que ya exista parcialmente
             # Intentar agregar columnas faltantes
@@ -1109,7 +1110,7 @@ class GestorSolicitudes:
             for col_name, col_type in columnas:
                 try:
                     self.db.execute(f"ALTER TABLE Recibos ADD COLUMN {col_name} {col_type}")
-                except:
+                except Exception:
                     pass  # Columna ya existe
 
 

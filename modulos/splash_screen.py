@@ -10,6 +10,7 @@ Copyright (c) 2024-2026 ANgesLAB Solutions
 import tkinter as tk
 import math
 import time
+import logging
 import os
 
 # Importar PIL para la imagen
@@ -110,7 +111,7 @@ class SplashScreen:
 
         try:
             base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            img_path = os.path.join(base_path, 'fondo.png')
+            img_path = os.path.join(base_path, 'assets', 'fondo.png')
 
             if not os.path.exists(img_path):
                 self._crear_fondo_alternativo()
@@ -160,7 +161,7 @@ class SplashScreen:
                 )
 
         except Exception as e:
-            print(f"Error cargando imagen: {e}")
+            logging.getLogger("angeslab.splash_screen").warning("Error cargando imagen: %s", e)
             self._crear_fondo_alternativo()
 
     def _agregar_vignette(self, img):
@@ -277,7 +278,7 @@ class SplashScreen:
         # Copyright
         self.canvas.create_text(
             self.width // 2, self.height - 12,
-            text="2024-2026 ANgesLAB Solutions | v1.0",
+            text="2024-2026 ANgesLAB Solutions | v2.0",
             font=('Segoe UI', 8),
             fill=self.COLORS['gray_dark']
         )
@@ -374,7 +375,7 @@ class SplashScreen:
                 self.root.attributes('-alpha', alpha)
                 self.root.update()
                 time.sleep(0.03)
-        except:
+        except Exception:
             pass
         finally:
             self.root.destroy()
@@ -471,7 +472,7 @@ def mostrar_splash(duracion=4000, simple=False):
             splash = SplashScreen(duracion)
         splash.run()
     except Exception as e:
-        print(f"Error en splash screen: {e}")
+        logging.getLogger("angeslab.splash_screen").warning("Error en splash screen: %s", e)
 
 
 if __name__ == "__main__":

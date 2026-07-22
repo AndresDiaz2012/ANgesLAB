@@ -15,8 +15,10 @@ Incluye:
 - Metabolismo (HOMA-IR, índice TyG)
 - Y más...
 
-Copyright (c) 2024-2025 ANgesLAB Solutions
+Copyright (c) 2024-2026 ANgesLAB Solutions
 """
+
+import logging
 
 import re
 from decimal import Decimal, ROUND_HALF_UP
@@ -101,6 +103,84 @@ class CalculadorLaboratorio:
         ],
 
         # =====================================================================
+        # DIFERENCIAL LEUCOCITARIO (% y absolutos)
+        # =====================================================================
+        'neutrofilos_pct': [
+            'neutrofilos %', 'neutrófilos %', 'neutrofilos%', 'neutrofilos porcentaje',
+            'segmentados %', 'seg %', 'seg%', 'neut %', 'neut%',
+            'neutrofilos', 'neutrófilos', 'segmentados', 'segmentados neutrofilos',
+            'segmentados neutrofilos.', 'seg. neutrofilos'
+        ],
+        'neutrofilos_abs': [
+            'neutrofilos abs', 'neutrófilos abs', 'neutrofilos absolutos',
+            'neutrofilos #', 'neutrofilos abs.', 'neut abs',
+            'recuento absoluto neutrofilos', 'segmentados abs',
+            'segmentados absolutos', 'segmentados #'
+        ],
+        'linfocitos_pct': [
+            'linfocitos %', 'linfocitos%', 'linfocitos porcentaje',
+            'linf %', 'linf%', 'lymph %',
+            'linfocitos', 'linfocitos #'
+        ],
+        'linfocitos_abs': [
+            'linfocitos abs', 'linfocitos absolutos', 'linfocitos abs.',
+            'linf abs', 'recuento absoluto linfocitos'
+        ],
+        'monocitos_pct': [
+            'monocitos %', 'monocitos%', 'monocitos porcentaje',
+            'mono %', 'mono%', 'monocitos'
+        ],
+        'monocitos_abs': [
+            'monocitos abs', 'monocitos absolutos', 'monocitos abs.',
+            'mono abs', 'recuento absoluto monocitos'
+        ],
+        'eosinofilos_pct': [
+            'eosinofilos %', 'eosinófilos %', 'eosinofilos%', 'eosinofilos porcentaje',
+            'eos %', 'eos%', 'eosinofilos', 'eosinófilos'
+        ],
+        'eosinofilos_abs': [
+            'eosinofilos abs', 'eosinófilos abs', 'eosinofilos absolutos',
+            'eosinofilos abs.', 'eos abs', 'recuento absoluto eosinofilos'
+        ],
+        'basofilos_pct': [
+            'basofilos %', 'basófilos %', 'basofilos%', 'basofilos porcentaje',
+            'baso %', 'baso%', 'basofilos', 'basófilos'
+        ],
+        'basofilos_abs': [
+            'basofilos abs', 'basófilos abs', 'basofilos absolutos',
+            'basofilos abs.', 'baso abs', 'recuento absoluto basofilos'
+        ],
+        'cayados_pct': [
+            'cayados %', 'cayados%', 'bandas %', 'bandas%',
+            'cayados neutrofilos', 'cayados', 'bandas',
+            'cayados neutrofilos.', 'en banda', 'bands'
+        ],
+        'cayados_abs': [
+            'cayados abs', 'bandas abs', 'cayados absolutos',
+            'bandas absolutos', 'cayados #'
+        ],
+        'blastos_pct': [
+            'blastos %', 'blastos%', 'blastos'
+        ],
+        'blastos_abs': [
+            'blastos abs', 'blastos absolutos', 'blastos #'
+        ],
+        'mielocitos_pct': [
+            'mielocitos %', 'mielocitos%', 'mielocitos'
+        ],
+        'mielocitos_abs': [
+            'mielocitos abs', 'mielocitos absolutos'
+        ],
+        'metamielocitos_pct': [
+            'metamielocitos %', 'metamielocitos%', 'metamielocitos',
+            'juveniles %', 'juveniles'
+        ],
+        'metamielocitos_abs': [
+            'metamielocitos abs', 'metamielocitos absolutos',
+            'juveniles abs'
+        ],
+
+        # =====================================================================
         # PERFIL LIPÍDICO
         # =====================================================================
         'colesterol_total': [
@@ -175,12 +255,49 @@ class CalculadorLaboratorio:
         ],
         'depuracion_creatinina': [
             'depuracion de creatinina', 'depuración de creatinina', 'clearance de creatinina',
-            'clearence de creatinina', 'dcr', 'aclaramiento de creatinina',
-            'depuracion corregida (sc)'
+            'clearence de creatinina', 'dcr', 'aclaramiento de creatinina'
+        ],
+        'depuracion_corregida': [
+            'depuracion corregida (sc)', 'depuración corregida (sc)',
+            'depuracion corregida', 'dcr corregida', 'clearance corregido'
+        ],
+        'depuracion_cockcroft': [
+            'depuracion cockcroft-gault', 'depuración cockcroft-gault',
+            'cockcroft-gault', 'cockcroft gault', 'depuracion cockcroft',
+            'dcr cockcroft', 'c-g'
         ],
         'egfr': [
             'egfr', 'tfg', 'tfge', 'filtrado glomerular', 'tasa de filtrado glomerular',
-            'gfr'
+            'gfr', 'egfr (ckd-epi)', 'ckd-epi', 'tasa filtracion glomerular'
+        ],
+        'relacion_bun_cr': [
+            'relacion bun/creatinina', 'relación bun/creatinina',
+            'rel bun/cr', 'bun/creatinina', 'bun/cr', 'indice bun/cr'
+        ],
+        'imc': [
+            'imc', 'indice de masa corporal', 'índice de masa corporal',
+            'bmi', 'body mass index', 'indice masa corporal'
+        ],
+        'fena': [
+            'fena', 'fraccion excretada de sodio', 'fracción excretada de sodio',
+            'fe na', 'fena%', 'excrecion fraccional de sodio'
+        ],
+        'excrecion_creatinina_24h': [
+            'excrecion creatinina 24h', 'excreción creatinina 24h',
+            'creatinina excretada 24h', 'excrecion cr 24h'
+        ],
+        'proteinuria_24h': [
+            'proteinuria 24h calculada', 'proteinuria 24h',
+            'proteinuria calculada', 'prot 24h calculada',
+            'proteinuria de 24 horas', 'proteinuria de 18 horas'
+        ],
+        'clasificacion_erc': [
+            'clasificacion erc', 'clasificación erc', 'estadio erc',
+            'estadio ckd', 'etapa erc', 'stage ckd'
+        ],
+        'sodio_orina': [
+            'sodio orina', 'natriuria', 'sodio en orina parcial', 'sodio orina 24h.',
+            'na en orina', 'sodio en orina', 'na orina'
         ],
 
         # =====================================================================
@@ -260,7 +377,8 @@ class CalculadorLaboratorio:
             'bicarbonato', 'hco3', 'hco3-', 'co2 total', 'total co2', 'co2'
         ],
         'anion_gap': [
-            'anion gap', 'brecha anionica', 'brecha aniónica', 'gap anionico'
+            'anion gap', 'anion gap calculado', 'brecha anionica', 'brecha aniónica',
+            'gap anionico', 'gap aniónico'
         ],
         'osmolaridad': [
             'osmolaridad', 'osmolaridad calculada', 'osm', 'osmolarity'
@@ -273,12 +391,72 @@ class CalculadorLaboratorio:
             'glucosa', 'glicemia', 'glicemia basal', 'glucemia', 'glucose',
             'glucosa basal', 'glicemia en ayunas', 'glucosa en ayunas'
         ],
+        'glucosa_pre': [
+            'glucosa pre', 'glicemia pre', 'glucosa pre carga',
+            'glicemia pre carga', 'glucosa precarga', 'glicemia precarga',
+            'glucosa ayunas', 'glicemia ayunas', 'glucosa basal pre',
+            'glicemia basal pre', 'glucosa pre prandial', 'glicemia pre prandial',
+            'glucosa preprandial', 'glicemia preprandial',
+            'glicemia pre (ayunas)', 'glucosa pre (ayunas)',
+            'glicemia (pre)', 'glucosa (pre)'
+        ],
+        'glucosa_post': [
+            'glucosa post', 'glicemia post', 'glucosa post carga',
+            'glicemia post carga', 'glucosa postcarga', 'glicemia postcarga',
+            'glucosa post prandial', 'glicemia post prandial',
+            'glucosa postprandial', 'glicemia postprandial',
+            'glucosa post-prandial', 'glicemia post-prandial',
+            'glucosa post pandrial', 'glicemia post pandrial',
+            'glucosa 2h post carga', 'glicemia 2h post carga',
+            'glucosa 2 horas', 'glicemia 2 horas',
+            'glicemia post (2h)', 'glucosa post (2h)',
+            'glicemia (post)', 'glucosa (post)',
+            'glicemia 2h postcarga', 'glucosa 2h postcarga'
+        ],
         'insulina': [
             'insulina', 'insulina basal', 'insulin', 'insulina   basal',
-            'insulina en ayunas'
+            'insulina  basal', 'insulina en ayunas'
+        ],
+        'insulina_pre': [
+            'insulina pre', 'insulina pre carga', 'insulina precarga',
+            'insulina ayunas', 'insulina basal pre', 'insulina pre prandial',
+            'insulina preprandial', 'insulina pre (ayunas)',
+            'insulina (pre)', 'ins pre', 'ins. pre'
+        ],
+        'insulina_post': [
+            'insulina post', 'insulina post carga', 'insulina postcarga',
+            'insulina post prandial', 'insulina postprandial',
+            'insulina post-prandial', 'insulina post pandrial',
+            'insulina 2h post carga', 'insulina 2 horas',
+            'insulina post (2h)', 'insulina (post)',
+            'insulina 2h postcarga', 'ins post', 'ins. post'
         ],
         'homa_ir': [
             'homa-ir', 'homa ir', 'homa', 'indice homa', 'índice homa'
+        ],
+        'homa_beta': [
+            'homa-β', 'homa-beta', 'homa beta', 'homa β',
+            'indice homa beta', 'índice homa-β', 'homa-b'
+        ],
+        'quicki': [
+            'quicki', 'indice quicki', 'índice quicki',
+            'quantitative insulin sensitivity check index'
+        ],
+        'relacion_glucosa_insulina': [
+            'relacion glucosa/insulina', 'relación glucosa/insulina',
+            'rel glucosa/insulina', 'rel. glucosa/insulina',
+            'glucosa/insulina', 'relacion g/i', 'relación g/i',
+            'indice glucosa/insulina', 'índice glucosa/insulina',
+            'cociente glucosa/insulina'
+        ],
+        'indice_tyg': [
+            'indice tyg', 'índice tyg', 'tyg', 'ty-g', 'ty g',
+            'indice triglicéridos-glucosa', 'índice triglicéridos-glucosa',
+            'indice trigliceridos-glucosa', 'índice trigliceridos-glucosa',
+            'indice trigliceridos glucosa', 'índice trigliceridos glucosa',
+            'tg-glucosa', 'tg glucosa', 'triglyceride-glucose index',
+            'triglyceride glucose index', 'indice tg/glucosa',
+            'índice tg/glucosa', 'indice tg-g', 'índice tg-g'
         ],
         'hba1c': [
             'hba1c', 'hemoglobina glicosilada', 'hemoglobina glucosilada',
@@ -304,20 +482,23 @@ class CalculadorLaboratorio:
         ],
         'proteinas_orina': [
             'proteinas orina', 'proteinuria', 'proteinas en orina',
-            'proteinuria de 24 horas', 'proteinuria de 18 horas',
-            'proteinas'
+            'proteinas en orina parcial', 'prot orina', 'proteinas urinarias'
         ],
         'calcio_orina': [
             'calcio orina', 'calciuria', 'calcio en orina', 'calcio en orina palcial',
-            'ca en orina', 'calcio urinario'
+            'calcio en orina parcial', 'ca en orina', 'calcio urinario',
+            'calcio en orina de 24 horas', 'calcio orina 24h'
         ],
         'acido_urico_orina': [
             'acido urico orina', 'uricosuria', 'acido urico en orina 24 h',
-            'acido urico en orina parcial', 'ac. urico orina'
+            'acido urico en orina parcial', 'ac. urico orina',
+            'acido urico en orina de 24 horas', 'acido urico en orina',
+            'acido urico urinario'
         ],
-        'sodio_orina': [
-            'sodio orina', 'natriuria', 'sodio en orina parcial', 'sodio orina 24h.',
-            'na en orina'
+        'fosforo_orina': [
+            'fosforo orina', 'fosforo en orina', 'fosforo en orina parcial',
+            'fosforo en orina 24 horas', 'fosforo en orina 24 h',
+            'fosforo urinario', 'fosfaturia', 'p en orina'
         ],
         'potasio_orina': [
             'potasio orina', 'kaliuria', 'potasio en orina', 'potasio en orina 24h.',
@@ -338,7 +519,12 @@ class CalculadorLaboratorio:
         ],
         'relacion_acido_urico_cr': [
             'relacion acido urico /  creatinina', 'relacion acido urico/creatinina',
-            'au/cr'
+            'relación acido urico/creatinina', 'indice au/cr', 'au/cr'
+        ],
+        'relacion_fosforo_cr': [
+            'relacion fosforo / creatinina', 'relacion fosforo/creatinina',
+            'relación fosforo/creatinina', 'relacion  fosforo /creatinina',
+            'indice p/cr', 'p/cr'
         ],
 
         # =====================================================================
@@ -591,6 +777,48 @@ class CalculadorLaboratorio:
             'hcm': self.calcular_hcm(hemoglobina, hematies),
             'chcm': self.calcular_chcm(hemoglobina, hematocrito)
         }
+
+    # =========================================================================
+    # DIFERENCIAL LEUCOCITARIO - VALORES ABSOLUTOS
+    # =========================================================================
+
+    def calcular_absoluto_leucocitario(self, porcentaje: float, leucocitos: float) -> Optional[float]:
+        """
+        Calcula el valor absoluto de una línea celular leucocitaria.
+
+        Fórmula: Absoluto = (Porcentaje / 100) × Leucocitos totales
+
+        Donde:
+        - Porcentaje: valor relativo del diferencial (%)
+        - Leucocitos: recuento total de glóbulos blancos (/mm³)
+
+        Resultado en células/mm³.
+
+        Ejemplo: GB=8000/mm³, Neutrófilos=60%
+                 Abs = 0.60 × 8000 = 4800 /mm³
+
+        Rangos de referencia (adultos, /mm³):
+        - Neutrófilos:  2000 - 7500
+        - Linfocitos:   1500 - 4000
+        - Monocitos:     200 - 800
+        - Eosinófilos:    40 - 400
+        - Basófilos:      10 - 100
+
+        Args:
+            porcentaje: Porcentaje relativo de la línea celular (%)
+            leucocitos: Leucocitos totales en /mm³
+
+        Returns:
+            Valor absoluto en /mm³
+        """
+        pct = self._to_float(porcentaje)
+        wbc = self._to_float(leucocitos)
+
+        if pct is None or wbc is None or pct < 0 or wbc < 0:
+            return None
+
+        absoluto = (pct / 100) * wbc
+        return int(round(absoluto))
 
     # =========================================================================
     # CÁLCULOS DE PERFIL LIPÍDICO
@@ -1227,15 +1455,257 @@ class CalculadorLaboratorio:
         homa_beta = (360 * ins) / (glu - 63)
         return self._redondear(homa_beta, 2)
 
+    def calcular_quicki(self, glucosa: float, insulina: float) -> Optional[float]:
+        """
+        Calcula el índice QUICKI (Quantitative Insulin Sensitivity Check Index).
+
+        Fórmula: QUICKI = 1 / (log10(Insulina) + log10(Glucosa))
+
+        Donde:
+        - Glucosa en mg/dL (en ayunas)
+        - Insulina en µU/mL (en ayunas)
+
+        Interpretación:
+        - > 0.45: Sensibilidad normal a insulina
+        - 0.30-0.45: Sensibilidad intermedia
+        - < 0.30: Resistencia a insulina
+
+        Args:
+            glucosa: Glucosa en ayunas en mg/dL
+            insulina: Insulina en ayunas en µU/mL
+
+        Returns:
+            Índice QUICKI
+        """
+        import math
+
+        glu = self._to_float(glucosa)
+        ins = self._to_float(insulina)
+
+        if glu is None or ins is None or glu <= 0 or ins <= 0:
+            return None
+
+        quicki = 1 / (math.log10(ins) + math.log10(glu))
+        return self._redondear(quicki, 3)
+
+    def calcular_relacion_glucosa_insulina(self, glucosa: float, insulina: float) -> Optional[float]:
+        """
+        Calcula la Relación Glucosa/Insulina (G/I).
+
+        Fórmula: G/I = Glucosa (mg/dL) / Insulina (µU/mL)
+
+        Interpretación:
+        - > 7.0: Normal
+        - 4.5-7.0: Limítrofe (vigilancia)
+        - < 4.5: Resistencia a insulina
+
+        Args:
+            glucosa: Glucosa en ayunas en mg/dL
+            insulina: Insulina en ayunas en µU/mL
+
+        Returns:
+            Relación Glucosa/Insulina
+        """
+        glu = self._to_float(glucosa)
+        ins = self._to_float(insulina)
+
+        if glu is None or ins is None or ins <= 0:
+            return None
+
+        relacion = glu / ins
+        return self._redondear(relacion, 2)
+
+    def interpretar_panel_homa(self, glucosa_pre: float, insulina_pre: float,
+                                glucosa_post: float = None, insulina_post: float = None,
+                                trigliceridos: float = None) -> Optional[Dict]:
+        """
+        Genera interpretación clínica completa del panel de resistencia a insulina.
+
+        Calcula HOMA-IR, HOMA-β, QUICKI, Relación G/I e Índice TyG a partir de
+        valores PRE (ayunas), y evalúa la respuesta post-carga/post-prandial si
+        están disponibles.
+
+        Args:
+            glucosa_pre: Glucosa en ayunas (mg/dL)
+            insulina_pre: Insulina en ayunas (µU/mL)
+            glucosa_post: Glucosa post-carga/post-prandial (mg/dL), opcional
+            insulina_post: Insulina post-carga/post-prandial (µU/mL), opcional
+            trigliceridos: Triglicéridos en ayunas (mg/dL), opcional. Si se
+                aporta, se calcula e interpreta el índice TyG.
+
+        Returns:
+            Diccionario con índices calculados e interpretación clínica
+        """
+        glu_pre = self._to_float(glucosa_pre)
+        ins_pre = self._to_float(insulina_pre)
+
+        if glu_pre is None or ins_pre is None:
+            return None
+
+        resultado = {
+            'glucosa_pre': glu_pre,
+            'insulina_pre': ins_pre,
+        }
+
+        # Calcular índices basales (PRE / ayunas)
+        homa_ir = self.calcular_homa_ir(glu_pre, ins_pre)
+        homa_beta = self.calcular_homa_beta(glu_pre, ins_pre)
+        quicki = self.calcular_quicki(glu_pre, ins_pre)
+        rel_gi = self.calcular_relacion_glucosa_insulina(glu_pre, ins_pre)
+        tg_val = self._to_float(trigliceridos)
+        tyg = self.calcular_indice_tyg(tg_val, glu_pre) if tg_val is not None else None
+
+        resultado['homa_ir'] = homa_ir
+        resultado['homa_beta'] = homa_beta
+        resultado['quicki'] = quicki
+        resultado['relacion_gi'] = rel_gi
+        if tyg is not None:
+            resultado['trigliceridos'] = tg_val
+            resultado['indice_tyg'] = tyg
+
+        # Interpretación HOMA-IR
+        if homa_ir is not None:
+            if homa_ir < 2.5:
+                resultado['interpretacion_homa_ir'] = 'Normal - Sin resistencia a insulina'
+                resultado['nivel_resistencia'] = 'Normal'
+            elif homa_ir < 3.5:
+                resultado['interpretacion_homa_ir'] = 'Resistencia a insulina leve'
+                resultado['nivel_resistencia'] = 'Leve'
+            elif homa_ir <= 5.0:
+                resultado['interpretacion_homa_ir'] = 'Resistencia a insulina moderada'
+                resultado['nivel_resistencia'] = 'Moderada'
+            else:
+                resultado['interpretacion_homa_ir'] = 'Resistencia a insulina significativa'
+                resultado['nivel_resistencia'] = 'Severa'
+
+        # Interpretación HOMA-β
+        if homa_beta is not None:
+            if homa_beta > 150:
+                resultado['interpretacion_homa_beta'] = (
+                    'Hiperinsulinismo compensatorio - Las células beta '
+                    'producen insulina en exceso para compensar la resistencia')
+            elif homa_beta >= 100:
+                resultado['interpretacion_homa_beta'] = 'Función de células beta normal'
+            else:
+                resultado['interpretacion_homa_beta'] = (
+                    'Función de células beta reducida - '
+                    'Capacidad secretora de insulina disminuida')
+
+        # Interpretación QUICKI
+        if quicki is not None:
+            if quicki > 0.45:
+                resultado['interpretacion_quicki'] = 'Sensibilidad normal a insulina'
+            elif quicki >= 0.30:
+                resultado['interpretacion_quicki'] = 'Sensibilidad intermedia a insulina'
+            else:
+                resultado['interpretacion_quicki'] = 'Resistencia a insulina (QUICKI bajo)'
+
+        # Interpretación Relación G/I
+        if rel_gi is not None:
+            if rel_gi > 7.0:
+                resultado['interpretacion_gi'] = 'Relación G/I normal'
+            elif rel_gi >= 4.5:
+                resultado['interpretacion_gi'] = 'Relación G/I limítrofe - vigilancia'
+            else:
+                resultado['interpretacion_gi'] = 'Relación G/I baja - compatible con resistencia a insulina'
+
+        # Interpretación Índice TyG (Triglicéridos-Glucosa)
+        if tyg is not None:
+            if tyg < 8.5:
+                resultado['interpretacion_tyg'] = (
+                    'Índice TyG normal - sensibilidad a insulina conservada')
+            elif tyg < 8.75:
+                resultado['interpretacion_tyg'] = (
+                    'Índice TyG limítrofe - vigilar factores de riesgo cardiometabólico')
+            elif tyg < 9.5:
+                resultado['interpretacion_tyg'] = (
+                    'Índice TyG elevado - resistencia a insulina probable')
+            else:
+                resultado['interpretacion_tyg'] = (
+                    'Índice TyG muy elevado - alto riesgo cardiometabólico '
+                    'y de síndrome metabólico')
+
+        # Valores post-carga/post-prandial si disponibles
+        glu_post = self._to_float(glucosa_post)
+        ins_post = self._to_float(insulina_post)
+
+        if glu_post is not None:
+            resultado['glucosa_post'] = glu_post
+            # Clasificación glucosa post-carga (criterios OMS/ADA)
+            if glu_post < 140:
+                resultado['tolerancia_glucosa'] = 'Tolerancia normal a la glucosa'
+            elif glu_post < 200:
+                resultado['tolerancia_glucosa'] = 'Intolerancia a la glucosa (prediabetes)'
+            else:
+                resultado['tolerancia_glucosa'] = 'Compatible con Diabetes Mellitus'
+
+        if ins_post is not None:
+            resultado['insulina_post'] = ins_post
+            # Respuesta insulínica post-carga
+            if ins_pre > 0:
+                ratio_ins = ins_post / ins_pre
+                resultado['ratio_insulina_post_pre'] = self._redondear(ratio_ins, 2)
+                if ratio_ins > 10:
+                    resultado['respuesta_insulinica'] = (
+                        'Hiperinsulinismo reactivo post-carga marcado')
+                elif ratio_ins > 5:
+                    resultado['respuesta_insulinica'] = (
+                        'Respuesta insulínica post-carga exagerada')
+                elif ratio_ins >= 2:
+                    resultado['respuesta_insulinica'] = (
+                        'Respuesta insulínica post-carga normal')
+                else:
+                    resultado['respuesta_insulinica'] = (
+                        'Respuesta insulínica post-carga insuficiente - '
+                        'posible agotamiento de células beta')
+
+        # Conclusión global
+        indicadores_ri = 0  # resistencia a insulina
+        if homa_ir is not None and homa_ir >= 2.5:
+            indicadores_ri += 1
+        if quicki is not None and quicki < 0.30:
+            indicadores_ri += 1
+        if rel_gi is not None and rel_gi < 4.5:
+            indicadores_ri += 1
+        if tyg is not None and tyg >= 8.75:
+            indicadores_ri += 1
+
+        if indicadores_ri >= 2:
+            resultado['conclusion'] = (
+                'RESISTENCIA A INSULINA confirmada por múltiples indicadores. '
+                'Correlacionar con clínica, considerar síndrome metabólico.')
+        elif indicadores_ri == 1:
+            resultado['conclusion'] = (
+                'Indicadores limítrofes de resistencia a insulina. '
+                'Se recomienda seguimiento y correlación clínica.')
+        else:
+            resultado['conclusion'] = (
+                'Sin evidencia bioquímica de resistencia a insulina '
+                'en los parámetros evaluados.')
+
+        return resultado
+
     def calcular_indice_tyg(self, trigliceridos: float, glucosa: float) -> Optional[float]:
         """
         Calcula el índice TyG (Triglicéridos-Glucosa).
 
-        Fórmula: TyG = Ln[(TG × Glucosa) / 2]
+        Marcador subrogado de resistencia a la insulina que no requiere medir
+        insulinemia. Útil como complemento del HOMA-IR y para tamizaje en
+        pacientes sin insulina disponible.
 
-        Donde TG y Glucosa están en mg/dL
+        Fórmula (logaritmo natural):
+            TyG = Ln[(TG × Glucosa) / 2]
 
-        Valor de corte para resistencia a insulina: > 4.5
+        Donde TG y Glucosa están en mg/dL, en ayunas.
+
+        Valores de referencia (Simental-Mendía y col., Guerrero-Romero y col.):
+            < 8.50          Normal — sensibilidad a insulina conservada
+            8.50 – 8.74     Limítrofe — vigilar factores de riesgo
+            ≥ 8.75          Resistencia a insulina probable
+            ≥ 9.50          Alto riesgo cardiometabólico / sindrome metabólico
+
+        Nota: si se emplea la variante log10 el corte equivalente es ~4.49;
+        este método usa ln (natural), por lo que el corte es 8.75.
         """
         import math
 
@@ -1354,6 +1824,58 @@ class CalculadorLaboratorio:
 
         return self._redondear(ca / cr, 3)
 
+    def calcular_relacion_acido_urico_creatinina(self, acido_urico_orina: float,
+                                                   creatinina_orina: float) -> Optional[float]:
+        """
+        Calcula la relación ácido úrico/creatinina en orina.
+
+        Valores de referencia (adultos):
+        - Normal: 0.21 - 0.59 mg/mg
+        - Nefropatía aguda por ácido úrico: > 1.0 mg/mg
+        Fuente: Mayo Clinic Labs, Harrison's
+
+        Args:
+            acido_urico_orina: Ácido úrico en orina en mg/dL
+            creatinina_orina: Creatinina en orina en mg/dL
+
+        Returns:
+            Relación AU/Cr en mg/mg
+        """
+        au = self._to_float(acido_urico_orina)
+        cr = self._to_float(creatinina_orina)
+
+        if au is None or cr is None or cr == 0:
+            return None
+
+        return self._redondear(au / cr, 3)
+
+    def calcular_relacion_fosforo_creatinina(self, fosforo_orina: float,
+                                               creatinina_orina: float) -> Optional[float]:
+        """
+        Calcula la relación fósforo/creatinina en orina.
+
+        Valores de referencia (adultos):
+        - Normal: 0.1 - 1.0 mg/mg
+        - Niños 0-2 años: 0.8 - 2.0
+        - Niños 3-10 años: 0.4 - 1.3
+        - Adolescentes 11-17: 0.2 - 0.9
+        Fuente: Mayo Clinic Labs, KDIGO
+
+        Args:
+            fosforo_orina: Fósforo en orina en mg/dL
+            creatinina_orina: Creatinina en orina en mg/dL
+
+        Returns:
+            Relación P/Cr en mg/mg
+        """
+        p = self._to_float(fosforo_orina)
+        cr = self._to_float(creatinina_orina)
+
+        if p is None or cr is None or cr == 0:
+            return None
+
+        return self._redondear(p / cr, 3)
+
     def calcular_relacion_proteina_creatinina(self, proteinas_orina: float,
                                                creatinina_orina: float) -> Optional[float]:
         """
@@ -1394,6 +1916,99 @@ class CalculadorLaboratorio:
             return None
 
         return self._redondear(alb / cr, 2)
+
+    def calcular_fena(self, sodio_orina: float, creatinina_serica: float,
+                      sodio_serico: float, creatinina_orina: float) -> Optional[float]:
+        """
+        Calcula la Fracción Excretada de Sodio (FENa).
+
+        Fórmula: FENa = (Na orina × Cr sérica) / (Na sérico × Cr orina) × 100
+
+        Interpretación:
+        - < 1%: Causa prerrenal (deshidratación, hipovolemia)
+        - 1-2%: Intermedio / mixto
+        - > 2%: Causa renal intrínseca (NTA, nefritis)
+        - > 4%: Causa postrenal o uso de diuréticos
+
+        Args:
+            sodio_orina: Sodio en orina (mEq/L)
+            creatinina_serica: Creatinina sérica (mg/dL)
+            sodio_serico: Sodio sérico (mEq/L)
+            creatinina_orina: Creatinina en orina (mg/dL)
+
+        Returns:
+            FENa en %
+        """
+        na_o = self._to_float(sodio_orina)
+        cr_s = self._to_float(creatinina_serica)
+        na_s = self._to_float(sodio_serico)
+        cr_o = self._to_float(creatinina_orina)
+
+        if any(v is None for v in [na_o, cr_s, na_s, cr_o]):
+            return None
+        if na_s == 0 or cr_o == 0:
+            return None
+
+        fena = (na_o * cr_s) / (na_s * cr_o) * 100
+        return self._redondear(fena, 2)
+
+    def calcular_excrecion_creatinina_24h(self, creatinina_orina: float,
+                                           volumen: float) -> Optional[float]:
+        """
+        Calcula la excreción de creatinina en 24 horas.
+
+        Fórmula: Excreción = (Cr orina mg/dL × Volumen mL) / 100
+
+        Valores normales:
+        - Hombres: 1000-2000 mg/24h
+        - Mujeres: 700-1500 mg/24h
+
+        Returns:
+            Excreción en mg/24h
+        """
+        cr_o = self._to_float(creatinina_orina)
+        vol = self._to_float(volumen)
+
+        if cr_o is None or vol is None or vol <= 0:
+            return None
+
+        excrecion = (cr_o * vol) / 100
+        return self._redondear(excrecion, 0)
+
+    def clasificar_erc(self, egfr: float) -> Optional[str]:
+        """
+        Clasifica el estadio de Enfermedad Renal Crónica según eGFR (KDIGO 2012).
+
+        Estadios:
+        - G1: ≥90 mL/min/1.73m² - Normal o alto
+        - G2: 60-89 - Levemente disminuido
+        - G3a: 45-59 - Leve a moderadamente disminuido
+        - G3b: 30-44 - Moderada a severamente disminuido
+        - G4: 15-29 - Severamente disminuido
+        - G5: <15 - Falla renal
+
+        Args:
+            egfr: Tasa de filtración glomerular en mL/min/1.73m²
+
+        Returns:
+            Clasificación como texto
+        """
+        gfr = self._to_float(egfr)
+        if gfr is None:
+            return None
+
+        if gfr >= 90:
+            return 'G1 - Normal o alto'
+        elif gfr >= 60:
+            return 'G2 - Levemente disminuido'
+        elif gfr >= 45:
+            return 'G3a - Leve a moderadamente disminuido'
+        elif gfr >= 30:
+            return 'G3b - Moderada a severamente disminuido'
+        elif gfr >= 15:
+            return 'G4 - Severamente disminuido'
+        else:
+            return 'G5 - Falla renal'
 
     # =========================================================================
     # CÁLCULOS DE COAGULACIÓN
@@ -1450,6 +2065,17 @@ class CalculadorLaboratorio:
     # CÁLCULOS MISCELÁNEOS
     # =========================================================================
 
+    @staticmethod
+    def _normalizar_talla_cm(talla_val: float) -> float:
+        """
+        Normaliza la talla a centímetros.
+        Si el valor es <= 3, se asume que viene en metros y se convierte a cm.
+        (Ningún humano adulto mide menos de 3 cm, pero sí puede ser 1.70 m)
+        """
+        if talla_val <= 3:
+            return talla_val * 100
+        return talla_val
+
     def calcular_superficie_corporal(self, peso: float, talla: float) -> Optional[float]:
         """
         Calcula la superficie corporal usando la fórmula de Du Bois.
@@ -1458,7 +2084,7 @@ class CalculadorLaboratorio:
 
         Args:
             peso: Peso en kg
-            talla: Talla en cm
+            talla: Talla en cm (acepta metros, se auto-convierte)
 
         Returns:
             Superficie corporal en m²
@@ -1469,6 +2095,7 @@ class CalculadorLaboratorio:
         if p is None or t is None or p <= 0 or t <= 0:
             return None
 
+        t = self._normalizar_talla_cm(t)
         sc = 0.007184 * (p ** 0.425) * (t ** 0.725)
         return self._redondear(sc, 2)
 
@@ -1480,7 +2107,7 @@ class CalculadorLaboratorio:
 
         Args:
             peso: Peso en kg
-            talla: Talla en cm
+            talla: Talla en cm (acepta metros, se auto-convierte)
 
         Returns:
             IMC en kg/m²
@@ -1491,6 +2118,7 @@ class CalculadorLaboratorio:
         if p is None or t is None or t <= 0:
             return None
 
+        t = self._normalizar_talla_cm(t)
         t_metros = t / 100
         imc = p / (t_metros ** 2)
         return self._redondear(imc, 2)
@@ -1560,6 +2188,27 @@ class CalculadorLaboratorio:
                   f"{'hematies ' if not tiene_hematies else ''}" +
                   f"{'hemoglobina ' if not tiene_hemoglobina else ''}" +
                   f"{'hematocrito' if not tiene_hematocrito else ''}")
+
+        # Diferencial Leucocitario - Valores Absolutos
+        # Requiere: leucocitos (WBC total) + cada línea celular en %
+        wbc_val = valores_norm.get('leucocitos')
+        if wbc_val is not None:
+            lineas_celulares = [
+                ('neutrofilos_pct', 'neutrofilos_abs', 'Neutrófilos Abs'),
+                ('linfocitos_pct', 'linfocitos_abs', 'Linfocitos Abs'),
+                ('monocitos_pct', 'monocitos_abs', 'Monocitos Abs'),
+                ('eosinofilos_pct', 'eosinofilos_abs', 'Eosinófilos Abs'),
+                ('basofilos_pct', 'basofilos_abs', 'Basófilos Abs'),
+                ('cayados_pct', 'cayados_abs', 'Cayados Abs'),
+                ('blastos_pct', 'blastos_abs', 'Blastos Abs'),
+                ('mielocitos_pct', 'mielocitos_abs', 'Mielocitos Abs'),
+                ('metamielocitos_pct', 'metamielocitos_abs', 'Metamielocitos Abs'),
+            ]
+            for pct_key, abs_key, nombre in lineas_celulares:
+                pct_val = valores_norm.get(pct_key)
+                if pct_val is not None:
+                    calculos.append((nombre, abs_key,
+                        lambda p=pct_val, w=wbc_val: self.calcular_absoluto_leucocitario(p, w)))
 
         # Perfil Lipídico - Cálculos completos
         # Capturar valores para las lambdas
@@ -1631,12 +2280,20 @@ class CalculadorLaboratorio:
             calculos.append(('Calcio Corregido', 'calcio_corregido', lambda: self.calcular_calcio_corregido(
                 valores_norm.get('calcio'), valores_norm.get('albumina'))))
 
-        # HOMA-IR
-        if all(k in valores_norm for k in ['glucosa', 'insulina']):
-            calculos.append(('HOMA-IR', 'homa_ir', lambda: self.calcular_homa_ir(
-                valores_norm.get('glucosa'), valores_norm.get('insulina'))))
-            calculos.append(('HOMA-β', 'homa_beta', lambda: self.calcular_homa_beta(
-                valores_norm.get('glucosa'), valores_norm.get('insulina'))))
+        # HOMA-IR, HOMA-β, QUICKI, Relación G/I
+        # Prioridad: usar glucosa_pre/insulina_pre si existen, si no, glucosa/insulina
+        glu_homa = valores_norm.get('glucosa_pre') or valores_norm.get('glucosa')
+        ins_homa = valores_norm.get('insulina_pre') or valores_norm.get('insulina')
+
+        if glu_homa is not None and ins_homa is not None:
+            calculos.append(('HOMA-IR', 'homa_ir',
+                lambda g=glu_homa, i=ins_homa: self.calcular_homa_ir(g, i)))
+            calculos.append(('HOMA-β', 'homa_beta',
+                lambda g=glu_homa, i=ins_homa: self.calcular_homa_beta(g, i)))
+            calculos.append(('QUICKI', 'quicki',
+                lambda g=glu_homa, i=ins_homa: self.calcular_quicki(g, i)))
+            calculos.append(('Relación Glucosa/Insulina', 'relacion_glucosa_insulina',
+                lambda g=glu_homa, i=ins_homa: self.calcular_relacion_glucosa_insulina(g, i)))
 
         # Índice TyG
         if all(k in valores_norm for k in ['trigliceridos', 'glucosa']):
@@ -1668,21 +2325,28 @@ class CalculadorLaboratorio:
             sexo_val = valores_norm.get('sexo')
             if debug:
                 print(f"  [DEPURACION CG] creatinina={cr_val}, edad={edad_val}, peso={peso_val}, sexo={sexo_val}")
-            calculos.append(('Depuración Creatinina (C-G)', 'depuracion_creatinina',
+            calculos.append(('Depuración Cockcroft-Gault', 'depuracion_cockcroft',
                 lambda cr=cr_val, edad=edad_val, peso=peso_val, sexo=sexo_val:
                     self.calcular_depuracion_creatinina_cockcroft(cr, edad, peso, sexo)))
 
         # eGFR - CKD-EPI (usa datos del paciente)
         # Requiere: creatinina sérica, edad, sexo
+        egfr_calculado = None
         if all(k in valores_norm for k in ['creatinina', 'edad', 'sexo']):
             cr_val = valores_norm.get('creatinina')
             edad_val = valores_norm.get('edad')
             sexo_val = valores_norm.get('sexo')
             if debug:
                 print(f"  [eGFR] creatinina={cr_val}, edad={edad_val}, sexo={sexo_val}")
+            egfr_calculado = self.calcular_egfr_ckd_epi(cr_val, edad_val, sexo_val)
             calculos.append(('eGFR (CKD-EPI)', 'egfr',
                 lambda cr=cr_val, edad=edad_val, sexo=sexo_val:
                     self.calcular_egfr_ckd_epi(cr, edad, sexo)))
+
+        # Clasificación ERC (basada en eGFR calculado)
+        if egfr_calculado is not None:
+            calculos.append(('Clasificación ERC', 'clasificacion_erc',
+                lambda g=egfr_calculado: self.clasificar_erc(g)))
 
         # =====================================================================
         # SUPERFICIE CORPORAL E IMC
@@ -1696,38 +2360,227 @@ class CalculadorLaboratorio:
             talla_val = valores_norm.get('talla')
             if debug:
                 print(f"  [SUPERFICIE] peso={peso_val}, talla={talla_val}")
-            # Calcular la superficie para usarla en la depuración corregida
             superficie_calculada = self.calcular_superficie_corporal(peso_val, talla_val)
             calculos.append(('Superficie Corporal', 'superficie_corporal',
                 lambda p=peso_val, t=talla_val: self.calcular_superficie_corporal(p, t)))
-            # También calcular IMC
             calculos.append(('IMC', 'imc',
                 lambda p=peso_val, t=talla_val: self.calcular_imc(p, t)))
 
+        # =====================================================================
+        # ORINA 24 HORAS Y DEPURACIONES
+        # =====================================================================
+
         # Depuración de Creatinina medida (orina 24h)
-        # Requiere: creatinina en orina, volumen orina 24h, creatinina sérica
         if all(k in valores_norm for k in ['creatinina_orina', 'volumen_orina_24h', 'creatinina']):
             cr_orina = valores_norm.get('creatinina_orina')
             vol_orina = valores_norm.get('volumen_orina_24h')
             cr_serica = valores_norm.get('creatinina')
-            # Usar superficie calculada o la que venga en valores
             sc = superficie_calculada or valores_norm.get('superficie_corporal')
             if debug:
                 print(f"  [DEPURACION ORINA] cr_orina={cr_orina}, vol={vol_orina}, cr_serica={cr_serica}, sc={sc}")
+
+            # Depuración sin corregir
             calculos.append(('Depuración Creatinina (Orina)', 'depuracion_creatinina',
-                lambda cr_o=cr_orina, vol=vol_orina, cr_s=cr_serica, superficie=sc:
-                    self.calcular_depuracion_creatinina_orina(cr_o, vol, cr_s, superficie)))
+                lambda cr_o=cr_orina, vol=vol_orina, cr_s=cr_serica:
+                    self.calcular_depuracion_creatinina_orina(cr_o, vol, cr_s, None)))
+
+            # Depuración corregida por superficie corporal
+            if sc is not None:
+                calculos.append(('Depuración Corregida (SC)', 'depuracion_corregida',
+                    lambda cr_o=cr_orina, vol=vol_orina, cr_s=cr_serica, s=sc:
+                        self.calcular_depuracion_creatinina_orina(cr_o, vol, cr_s, s)))
+
+        # Excreción de Creatinina 24h
+        if all(k in valores_norm for k in ['creatinina_orina', 'volumen_orina_24h']):
+            calculos.append(('Excreción Creatinina 24h', 'excrecion_creatinina_24h',
+                lambda cr_o=valores_norm.get('creatinina_orina'), vol=valores_norm.get('volumen_orina_24h'):
+                    self.calcular_excrecion_creatinina_24h(cr_o, vol)))
+
+        # Proteinuria 24h calculada
+        if all(k in valores_norm for k in ['proteinas_orina', 'volumen_orina_24h']):
+            calculos.append(('Proteinuria 24h', 'proteinuria_24h',
+                lambda p=valores_norm.get('proteinas_orina'), vol=valores_norm.get('volumen_orina_24h'):
+                    self.calcular_proteinuria_24h(p, vol)))
+
+        # FENa - Fracción Excretada de Sodio
+        if all(k in valores_norm for k in ['sodio_orina', 'creatinina', 'sodio', 'creatinina_orina']):
+            calculos.append(('FENa', 'fena',
+                lambda na_o=valores_norm.get('sodio_orina'), cr_s=valores_norm.get('creatinina'),
+                       na_s=valores_norm.get('sodio'), cr_o=valores_norm.get('creatinina_orina'):
+                    self.calcular_fena(na_o, cr_s, na_s, cr_o)))
 
         # Orina - Relaciones
         if all(k in valores_norm for k in ['calcio_orina', 'creatinina_orina']):
-            calculos.append(('Relación Ca/Cr', 'relacion_ca_cr', lambda: self.calcular_relacion_calcio_creatinina(
-                valores_norm.get('calcio_orina'), valores_norm.get('creatinina_orina'))))
+            calculos.append(('Relación Ca/Cr', 'relacion_ca_cr',
+                lambda ca=valores_norm.get('calcio_orina'), cr=valores_norm.get('creatinina_orina'):
+                    self.calcular_relacion_calcio_creatinina(ca, cr)))
+
+        if all(k in valores_norm for k in ['acido_urico_orina', 'creatinina_orina']):
+            calculos.append(('Relación AU/Cr', 'relacion_acido_urico_cr',
+                lambda au=valores_norm.get('acido_urico_orina'), cr=valores_norm.get('creatinina_orina'):
+                    self.calcular_relacion_acido_urico_creatinina(au, cr)))
+
+        if all(k in valores_norm for k in ['fosforo_orina', 'creatinina_orina']):
+            calculos.append(('Relación P/Cr', 'relacion_fosforo_cr',
+                lambda p=valores_norm.get('fosforo_orina'), cr=valores_norm.get('creatinina_orina'):
+                    self.calcular_relacion_fosforo_creatinina(p, cr)))
 
         if all(k in valores_norm for k in ['proteinas_orina', 'creatinina_orina']):
-            calculos.append(('Relación Prot/Cr', 'relacion_prot_cr', lambda: self.calcular_relacion_proteina_creatinina(
-                valores_norm.get('proteinas_orina'), valores_norm.get('creatinina_orina'))))
+            calculos.append(('Relación Prot/Cr', 'relacion_prot_cr',
+                lambda prot=valores_norm.get('proteinas_orina'), cr=valores_norm.get('creatinina_orina'):
+                    self.calcular_relacion_proteina_creatinina(prot, cr)))
+
+        # ACR - Relación Albúmina/Creatinina
+        if all(k in valores_norm for k in ['microalbuminuria', 'creatinina_orina']):
+            calculos.append(('Relación Alb/Cr (ACR)', 'relacion_alb_cr',
+                lambda alb=valores_norm.get('microalbuminuria'), cr=valores_norm.get('creatinina_orina'):
+                    self.calcular_relacion_albumina_creatinina(alb, cr)))
 
         return calculos
+
+    # Valores de referencia por sexo para cálculos automáticos
+    # Formato: {nombre_calculo: {'M': 'referencia', 'F': 'referencia', None: 'genérico'}}
+    REFERENCIAS_CALCULOS = {
+        'depuracion_cockcroft': {
+            'M': '97 - 137 mL/min',
+            'F': '88 - 128 mL/min',
+            None: 'H: 97-137 | M: 88-128 mL/min',
+        },
+        'depuracion_creatinina': {
+            'M': '97 - 137 mL/min',
+            'F': '88 - 128 mL/min',
+            None: 'H: 97-137 | M: 88-128 mL/min',
+        },
+        'depuracion_corregida': {
+            'M': '97 - 137 mL/min/1.73m²',
+            'F': '88 - 128 mL/min/1.73m²',
+            None: 'H: 97-137 | M: 88-128 mL/min/1.73m²',
+        },
+        'egfr': {
+            None: '> 90 mL/min/1.73m²',
+        },
+        'clasificacion_erc': {
+            None: 'G1 (Normal)',
+        },
+        'imc': {
+            None: '18.5 - 24.9 kg/m²',
+        },
+        'superficie_corporal': {
+            'M': '1.7 - 2.0 m²',
+            'F': '1.5 - 1.8 m²',
+            None: 'H: 1.7-2.0 | M: 1.5-1.8 m²',
+        },
+        'fena': {
+            None: '<1% Prerrenal | 1-2% Mixto | >2% Renal',
+        },
+        'relacion_bun_cr': {
+            None: '10 - 20',
+        },
+        'excrecion_creatinina_24h': {
+            'M': '1000 - 2000 mg/24h',
+            'F': '800 - 1800 mg/24h',
+            None: 'H: 1000-2000 | M: 800-1800 mg/24h',
+        },
+        'proteinuria_24h': {
+            None: '< 150 mg/24h',
+        },
+        'relacion_alb_cr': {
+            None: '< 30 mg/g',
+        },
+        'relacion_ca_cr': {
+            None: '< 0.20 mg/mg',
+        },
+        'relacion_acido_urico_cr': {
+            None: '0.21 - 0.59 mg/mg',
+        },
+        'relacion_fosforo_cr': {
+            None: '0.1 - 1.0 mg/mg',
+        },
+        'relacion_prot_cr': {
+            None: '< 0.2 mg/mg',
+        },
+    }
+
+    # Rangos de referencia ajustados por grupo etario (edad en años)
+    # Fuentes: KDIGO 2012, Harrison's Principles of Internal Medicine
+    REFERENCIAS_POR_EDAD = {
+        'depuracion_cockcroft': [
+            # (edad_min, edad_max, ref_M, ref_F)
+            (0, 17,    '70 - 140 mL/min',  '70 - 140 mL/min'),
+            (18, 29,   '97 - 137 mL/min',  '88 - 128 mL/min'),
+            (30, 39,   '90 - 130 mL/min',  '82 - 120 mL/min'),
+            (40, 49,   '83 - 120 mL/min',  '75 - 112 mL/min'),
+            (50, 59,   '75 - 110 mL/min',  '68 - 102 mL/min'),
+            (60, 69,   '68 - 100 mL/min',  '61 - 93 mL/min'),
+            (70, 150,  '60 - 90 mL/min',   '54 - 84 mL/min'),
+        ],
+        'depuracion_creatinina': [
+            (0, 17,    '70 - 140 mL/min',  '70 - 140 mL/min'),
+            (18, 29,   '97 - 137 mL/min',  '88 - 128 mL/min'),
+            (30, 39,   '90 - 130 mL/min',  '82 - 120 mL/min'),
+            (40, 49,   '83 - 120 mL/min',  '75 - 112 mL/min'),
+            (50, 59,   '75 - 110 mL/min',  '68 - 102 mL/min'),
+            (60, 69,   '68 - 100 mL/min',  '61 - 93 mL/min'),
+            (70, 150,  '60 - 90 mL/min',   '54 - 84 mL/min'),
+        ],
+        'depuracion_corregida': [
+            (0, 17,    '70 - 140 mL/min/1.73m²',  '70 - 140 mL/min/1.73m²'),
+            (18, 29,   '97 - 137 mL/min/1.73m²',  '88 - 128 mL/min/1.73m²'),
+            (30, 39,   '90 - 130 mL/min/1.73m²',  '82 - 120 mL/min/1.73m²'),
+            (40, 49,   '83 - 120 mL/min/1.73m²',  '75 - 112 mL/min/1.73m²'),
+            (50, 59,   '75 - 110 mL/min/1.73m²',  '68 - 102 mL/min/1.73m²'),
+            (60, 69,   '68 - 100 mL/min/1.73m²',  '61 - 93 mL/min/1.73m²'),
+            (70, 150,  '60 - 90 mL/min/1.73m²',   '54 - 84 mL/min/1.73m²'),
+        ],
+        'egfr': [
+            (0, 17,    '> 90 mL/min/1.73m²',  '> 90 mL/min/1.73m²'),
+            (18, 39,   '> 90 mL/min/1.73m²',  '> 90 mL/min/1.73m²'),
+            (40, 49,   '> 85 mL/min/1.73m²',  '> 85 mL/min/1.73m²'),
+            (50, 59,   '> 80 mL/min/1.73m²',  '> 80 mL/min/1.73m²'),
+            (60, 69,   '> 70 mL/min/1.73m²',  '> 70 mL/min/1.73m²'),
+            (70, 150,  '> 60 mL/min/1.73m²',  '> 60 mL/min/1.73m²'),
+        ],
+        'excrecion_creatinina_24h': [
+            (0, 17,    '800 - 1800 mg/24h',  '600 - 1500 mg/24h'),
+            (18, 59,   '1000 - 2000 mg/24h', '800 - 1800 mg/24h'),
+            (60, 150,  '800 - 1700 mg/24h',  '600 - 1500 mg/24h'),
+        ],
+    }
+
+    def obtener_referencia_calculo(self, nombre_calculo: str, sexo: str = None,
+                                    edad: int = None) -> Optional[str]:
+        """
+        Obtiene el valor de referencia para un cálculo según sexo y edad del paciente.
+
+        Args:
+            nombre_calculo: Nombre canónico del cálculo
+            sexo: 'M', 'F' o None
+            edad: Edad en años (opcional, para ajuste por grupo etario)
+
+        Returns:
+            Texto del valor de referencia, o None
+        """
+        sexo_norm = sexo.upper()[:1] if sexo and isinstance(sexo, str) else None
+
+        # Intentar referencia ajustada por edad si está disponible
+        if edad is not None and nombre_calculo in self.REFERENCIAS_POR_EDAD:
+            try:
+                edad_val = int(edad)
+                for e_min, e_max, ref_m, ref_f in self.REFERENCIAS_POR_EDAD[nombre_calculo]:
+                    if e_min <= edad_val <= e_max:
+                        if sexo_norm == 'F':
+                            return ref_f
+                        return ref_m  # M o genérico
+            except (ValueError, TypeError):
+                pass
+
+        # Fallback a referencia estática por sexo
+        refs = self.REFERENCIAS_CALCULOS.get(nombre_calculo)
+        if not refs:
+            return None
+        if sexo_norm in ('M', 'F') and sexo_norm in refs:
+            return refs[sexo_norm]
+        return refs.get(None)
 
     def ejecutar_calculos(self, valores: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -1748,7 +2601,7 @@ class CalculadorLaboratorio:
                 if resultado is not None:
                     resultados[parametro] = resultado
             except Exception as e:
-                print(f"Error en cálculo {nombre}: {e}")
+                logging.getLogger("angeslab.calculos_automaticos").warning("Error en cálculo {nombre}: %s", e)
 
         return resultados
 

@@ -1,0 +1,31 @@
+# ============================================================
+# ANgesLAB v2.0 - Dependencias de Python
+# Sistema de Gestión de Laboratorio Clínico
+# ============================================================
+# Instalar con:  pip install -r requirements.txt
+# ============================================================
+
+# --- Generación de reportes PDF ---
+reportlab>=4.0
+
+# --- Procesamiento de imágenes (logos, firmas) ---
+Pillow>=10.0
+
+# --- Conexión COM con Microsoft Access (Windows) ---
+pywin32>=306
+
+# --- Gráficas e historial clínico ---
+matplotlib>=3.8
+numpy>=1.26
+
+# --- Comunicación y envío de resultados ---
+requests>=2.31
+
+# --- Código QR en reportes (opcional) ---
+qrcode[pil]>=7.4
+
+# --- Tasas de cambio BCV (opcional) ---
+pyBCV>=0.2
+
+# --- IA Clinica (opcional) ---
+anthropic>=0.18

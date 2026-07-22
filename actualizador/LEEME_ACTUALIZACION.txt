@@ -1,0 +1,67 @@
+================================================================================
+   ACTUALIZACION ANgesLAB  -  Indice TyG + Imagen Profesional
+================================================================================
+
+Esta carpeta actualiza una instalacion EXISTENTE de ANgesLAB con las mejoras
+recientes, SIN eliminar el trabajo ya realizado por el cliente.
+
+--------------------------------------------------------------------------------
+  QUE INCLUYE ESTA ACTUALIZACION
+--------------------------------------------------------------------------------
+  - Indice TyG (Trigliceridos-Glucosa) en el Perfil de Resistencia a Insulina,
+    con calculo automatico e interpretacion por IA clinica.
+  - Nueva imagen profesional de la interfaz (tema visual mejorado).
+  - Correcciones en el modulo de calculos automaticos.
+
+--------------------------------------------------------------------------------
+  COMO USARLA (cliente)
+--------------------------------------------------------------------------------
+  1. Conecte la USB al equipo donde ESTA INSTALADO ANgesLAB.
+  2. CIERRE ANgesLAB por completo.
+  3. Abra la carpeta 'actualizador' de la USB.
+  4. Haga doble clic en:  ACTUALIZAR_ANgesLAB.bat
+  5. Siga las indicaciones en pantalla (le pedira confirmar).
+  6. Al terminar, abra ANgesLAB normalmente.
+
+  Si el programa no encuentra la instalacion automaticamente, ejecute desde
+  una consola indicando la ruta, por ejemplo:
+      python aplicar_actualizacion.py "C:\ANgesLAB"
+
+--------------------------------------------------------------------------------
+  QUE SE MODIFICA Y QUE NO
+--------------------------------------------------------------------------------
+  SE ACTUALIZA (codigo del programa):
+     - ANgesLAB.pyw
+     - carpeta modulos\  (archivos .py)
+
+  SE AGREGA (sin borrar nada):
+     - Parametros 'Trigliceridos' e 'Indice TyG' al Perfil de Resistencia
+       a Insulina (migracion idempotente de base de datos).
+
+  OPCIONAL - SOLO SOPORTE TECNICO (acceso 'developer'):
+     Al final, el actualizador pregunta si desea establecer la contrasena
+     del usuario 'developer'. El cliente normal debe presionar Enter para
+     OMITIR este paso (no afecta sus usuarios). Si es personal tecnico de
+     ANgesLAB, puede escribir 's' e ingresar la contrasena (se muestra con
+     asteriscos). Esa clave NO queda guardada en la USB ni en el programa;
+     solo se aplica en ese momento a la base de datos de esa instalacion.
+
+  NO SE TOCA NUNCA (su trabajo y configuracion):
+     - ANgesLAB.accdb  (pacientes, resultados, facturas, historia...)
+     - db_config.json, config_ia.json, backup_config.json
+     - logos\, firmas\, backups\, logs\
+
+  Ademas, ANTES de cualquier cambio se crea un respaldo automatico de la
+  base de datos en la carpeta  backups\  de la instalacion, con nombre:
+     ANgesLAB_pre_actualizacion_AAAAMMDD_HHMMSS.accdb
+
+--------------------------------------------------------------------------------
+  IMPORTANTE
+--------------------------------------------------------------------------------
+  - La actualizacion es SEGURA de repetir: si se ejecuta dos veces no duplica
+    nada.
+  - Requiere que ANgesLAB este cerrado (para poder actualizar la base de datos).
+  - El proceso NO borra ni reinicia ningun dato del cliente.
+
+  Soporte: soporte@angeslab.com
+================================================================================

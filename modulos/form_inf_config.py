@@ -18,6 +18,7 @@ Autor: Sistema ANgesLAB
 
 from datetime import datetime
 import json
+import logging
 import os
 
 # ============================================================================
@@ -271,7 +272,7 @@ class FormInfConfig:
         try:
             # Verificar si existe la tabla
             self.db.query("SELECT TOP 1 * FROM FormulariosReporte")
-        except:
+        except Exception:
             # Crear tabla si no existe
             try:
                 self.db.execute("""
@@ -294,7 +295,7 @@ class FormInfConfig:
                         FechaModificacion DATETIME
                     )
                 """)
-            except:
+            except Exception:
                 pass  # Tabla ya existe o error de permisos
 
     # -------------------------------------------------------------------------
@@ -322,10 +323,10 @@ class FormInfConfig:
                 if config.get('ConfiguracionJSON'):
                     try:
                         config['configuracion'] = json.loads(config['ConfiguracionJSON'])
-                    except:
+                    except Exception:
                         config['configuracion'] = {}
                 return config
-        except:
+        except Exception:
             pass
 
         # Retornar configuracion por defecto si existe
@@ -389,7 +390,7 @@ class FormInfConfig:
 
             return True
         except Exception as e:
-            print(f"Error guardando configuracion: {e}")
+            logging.getLogger("angeslab.form_inf_config").warning("Error guardando configuracion: %s", e)
             return False
 
     def listar_formularios(self, tipo_reporte=None, area_id=None):
@@ -417,7 +418,7 @@ class FormInfConfig:
                 ORDER BY TipoReporte, Nombre
             """)
             return formularios
-        except:
+        except Exception:
             # Retornar lista de configuraciones por defecto
             resultado = []
             for codigo, config in CONFIGURACIONES_DEFECTO.items():
@@ -440,7 +441,7 @@ class FormInfConfig:
                 UPDATE FormulariosReporte SET Activo = False WHERE Codigo = '{codigo}'
             """)
             return True
-        except:
+        except Exception:
             return False
 
     # -------------------------------------------------------------------------
@@ -543,15 +544,16 @@ class FormInfConfig:
         """
         Carga los formularios por defecto en la base de datos
         """
-        print("Inicializando formularios por defecto...")
+        logger = logging.getLogger("angeslab.form_inf_config")
+        logger.info("Inicializando formularios por defecto...")
 
         for codigo, config in CONFIGURACIONES_DEFECTO.items():
             existente = self.obtener_configuracion(codigo)
             if not existente or existente == config:  # Es el default, no de BD
                 self.guardar_configuracion(codigo, config)
-                print(f"  - {codigo}: OK")
+                logger.debug("  - %s: OK", codigo)
 
-        print("Formularios inicializados.")
+        logger.info("Formularios inicializados.")
 
     # -------------------------------------------------------------------------
     # EXPORTACION E IMPORTACION

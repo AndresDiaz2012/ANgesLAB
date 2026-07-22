@@ -4,169 +4,16 @@ Módulo Administrativo - Lógica de Negocio
 ANgesLAB - Sistema de Gestión de Laboratorio Clínico
 
 Clases:
-- ControlAcceso: RBAC (permisos por rol/usuario)
 - GestorCajaChica: Apertura/cierre de caja y movimientos
 - GestorCuentasPorCobrar: Cartera de clientes
 - GestorCuentasPorPagar: Deudas con proveedores
 - GestorGastos: Registro y control de gastos
 - ResumenFinanciero: Dashboard e indicadores
 
-Copyright © 2024-2025 ANgesLAB Solutions
+Copyright © 2024-2026 ANgesLAB Solutions
 """
 
 from datetime import datetime, date, timedelta
-
-
-class ControlAcceso:
-    """Control de acceso basado en roles (RBAC)."""
-
-    def __init__(self, db):
-        self.db = db
-        self._cache = {}
-        self._tablas_disponibles = None
-
-    def _tablas_existen(self):
-        """Verifica si las tablas RBAC están disponibles."""
-        if self._tablas_disponibles is not None:
-            return self._tablas_disponibles
-        try:
-            self.db.query("SELECT TOP 1 * FROM [Roles]")
-            self.db.query("SELECT TOP 1 * FROM [PermisosModulo]")
-            self.db.query("SELECT TOP 1 * FROM [UsuarioRol]")
-            self._tablas_disponibles = True
-        except:
-            self._tablas_disponibles = False
-        return self._tablas_disponibles
-
-    def tiene_permiso(self, usuario_id, modulo, tipo='PuedeVer'):
-        """Verifica si el usuario tiene un permiso específico.
-
-        Args:
-            usuario_id: ID del usuario
-            modulo: Nombre del módulo (caja_chica, facturacion, etc.)
-            tipo: PuedeVer, PuedeCrear, PuedeEditar, PuedeEliminar, PuedeExportar
-
-        Returns:
-            True si tiene permiso, True si tablas no existen (compatibilidad)
-        """
-        if not self._tablas_existen():
-            return True
-
-        cache_key = f"{usuario_id}_{modulo}_{tipo}"
-        if cache_key in self._cache:
-            return self._cache[cache_key]
-
-        try:
-            sql = (
-                f"SELECT p.{tipo} FROM [PermisosModulo] p "
-                f"INNER JOIN [UsuarioRol] ur ON p.RolID = ur.RolID "
-                f"WHERE ur.UsuarioID = {usuario_id} AND ur.Activo = True "
-                f"AND p.NombreModulo = '{modulo}' "
-                f"ORDER BY p.{tipo} DESC"
-            )
-            resultado = self.db.query_one(sql)
-            tiene = bool(resultado and resultado.get(tipo))
-            self._cache[cache_key] = tiene
-            return tiene
-        except:
-            return True
-
-    def obtener_permisos_modulo(self, usuario_id, modulo):
-        """Retorna dict completo de permisos para un módulo."""
-        if not self._tablas_existen():
-            return {
-                'PuedeVer': True, 'PuedeCrear': True, 'PuedeEditar': True,
-                'PuedeEliminar': True, 'PuedeExportar': True
-            }
-        try:
-            sql = (
-                f"SELECT p.PuedeVer, p.PuedeCrear, p.PuedeEditar, p.PuedeEliminar, p.PuedeExportar "
-                f"FROM [PermisosModulo] p "
-                f"INNER JOIN [UsuarioRol] ur ON p.RolID = ur.RolID "
-                f"WHERE ur.UsuarioID = {usuario_id} AND ur.Activo = True "
-                f"AND p.NombreModulo = '{modulo}'"
-            )
-            resultado = self.db.query_one(sql)
-            if resultado:
-                return {k: bool(v) for k, v in resultado.items()}
-            return {
-                'PuedeVer': False, 'PuedeCrear': False, 'PuedeEditar': False,
-                'PuedeEliminar': False, 'PuedeExportar': False
-            }
-        except:
-            return {
-                'PuedeVer': True, 'PuedeCrear': True, 'PuedeEditar': True,
-                'PuedeEliminar': True, 'PuedeExportar': True
-            }
-
-    def asignar_rol(self, usuario_id, rol_id):
-        """Asigna un rol a un usuario."""
-        existente = self.db.query_one(
-            f"SELECT UsuarioRolID FROM [UsuarioRol] "
-            f"WHERE UsuarioID={usuario_id} AND RolID={rol_id}"
-        )
-        if existente:
-            self.db.update('UsuarioRol', {'Activo': True},
-                          f"UsuarioID={usuario_id} AND RolID={rol_id}")
-        else:
-            self.db.insert('UsuarioRol', {
-                'UsuarioID': usuario_id, 'RolID': rol_id, 'Activo': True
-            })
-        self._cache.clear()
-
-    def remover_rol(self, usuario_id, rol_id):
-        """Desactiva un rol de un usuario."""
-        self.db.update('UsuarioRol', {'Activo': False},
-                      f"UsuarioID={usuario_id} AND RolID={rol_id}")
-        self._cache.clear()
-
-    def crear_rol(self, nombre, descripcion, nivel_acceso):
-        """Crea un nuevo rol."""
-        self.db.insert('Roles', {
-            'NombreRol': nombre,
-            'Descripcion': descripcion,
-            'NivelAcceso': nivel_acceso,
-            'Activo': True
-        })
-
-    def actualizar_permisos(self, rol_id, modulo, permisos):
-        """Actualiza permisos de un rol para un módulo.
-
-        Args:
-            permisos: dict con PuedeVer, PuedeCrear, etc.
-        """
-        existente = self.db.query_one(
-            f"SELECT PermisoID FROM [PermisosModulo] "
-            f"WHERE RolID={rol_id} AND NombreModulo='{modulo}'"
-        )
-        if existente:
-            self.db.update('PermisosModulo', permisos,
-                          f"RolID={rol_id} AND NombreModulo='{modulo}'")
-        else:
-            permisos['RolID'] = rol_id
-            permisos['NombreModulo'] = modulo
-            self.db.insert('PermisosModulo', permisos)
-        self._cache.clear()
-
-    def listar_roles(self):
-        """Lista todos los roles activos."""
-        try:
-            return self.db.query("SELECT * FROM [Roles] WHERE Activo=True ORDER BY NivelAcceso DESC")
-        except:
-            return []
-
-    def listar_usuarios_con_roles(self):
-        """Lista usuarios con sus roles asignados."""
-        try:
-            return self.db.query(
-                "SELECT u.UsuarioID, u.NombreCompleto, u.NombreUsuario, "
-                "r.NombreRol, r.NivelAcceso, ur.Activo "
-                "FROM ([Usuarios] u LEFT JOIN [UsuarioRol] ur ON u.UsuarioID = ur.UsuarioID) "
-                "LEFT JOIN [Roles] r ON ur.RolID = r.RolID "
-                "ORDER BY u.NombreCompleto"
-            )
-        except:
-            return []
 
 
 class GestorCajaChica:
@@ -183,7 +30,7 @@ class GestorCajaChica:
                 f"SELECT * FROM [CajaChica] WHERE Estado='Abierta' "
                 f"AND FechaApertura >= #{hoy}#"
             )
-        except:
+        except Exception:
             return None
 
     def abrir_caja(self, monto_apertura, efectivo_inicial, usuario_id):
@@ -267,39 +114,6 @@ class GestorCajaChica:
         except Exception as e:
             return False, f"Error al registrar movimiento: {e}"
 
-    def anular_movimiento(self, movimiento_id, motivo):
-        """Anula un movimiento y revierte el efecto en la caja."""
-        try:
-            mov = self.db.query_one(
-                f"SELECT * FROM [MovimientosCaja] WHERE MovimientoID={movimiento_id}"
-            )
-            if not mov:
-                return False, "Movimiento no encontrado"
-            if mov.get('Anulado'):
-                return False, "El movimiento ya está anulado"
-
-            motivo_safe = str(motivo).replace("'", "''")
-            self.db.execute(
-                f"UPDATE [MovimientosCaja] SET Anulado=True, "
-                f"MotivoAnulacion='{motivo_safe}' WHERE MovimientoID={movimiento_id}"
-            )
-
-            monto = float(mov.get('Monto', 0) or 0)
-            caja_id = mov.get('CajaID')
-            if mov.get('Tipo') == 'Ingreso':
-                self.db.execute(
-                    f"UPDATE [CajaChica] SET TotalIngresos = TotalIngresos - {monto} "
-                    f"WHERE CajaID={caja_id}"
-                )
-            else:
-                self.db.execute(
-                    f"UPDATE [CajaChica] SET TotalEgresos = TotalEgresos - {monto} "
-                    f"WHERE CajaID={caja_id}"
-                )
-            return True, "Movimiento anulado"
-        except Exception as e:
-            return False, f"Error al anular movimiento: {e}"
-
     def obtener_movimientos_caja(self, caja_id):
         """Lista movimientos de una caja."""
         try:
@@ -308,7 +122,7 @@ class GestorCajaChica:
                 f"LEFT JOIN [FormasPago] fp ON m.FormaPagoID = fp.FormaPagoID "
                 f"WHERE m.CajaID={caja_id} ORDER BY m.Fecha DESC"
             )
-        except:
+        except Exception:
             return []
 
     def obtener_resumen_caja(self, caja_id):
@@ -323,7 +137,7 @@ class GestorCajaChica:
                 f"GROUP BY fp.Nombre, m.Tipo"
             )
             return {'caja': caja, 'desglose': desglose}
-        except:
+        except Exception:
             return {'caja': None, 'desglose': []}
 
 
@@ -332,35 +146,6 @@ class GestorCuentasPorCobrar:
 
     def __init__(self, db):
         self.db = db
-
-    def crear_cuenta_desde_factura(self, factura_id):
-        """Crea una cuenta por cobrar vinculada a una factura."""
-        try:
-            factura = self.db.query_one(
-                f"SELECT * FROM [Facturas] WHERE FacturaID={factura_id}"
-            )
-            if not factura:
-                return False, "Factura no encontrada"
-
-            monto = float(factura.get('MontoTotal', 0) or factura.get('Total', 0) or 0)
-            paciente_id = factura.get('PacienteID', 'Null')
-            nombre = str(factura.get('NombrePaciente', '')).replace("'", "''")
-
-            fecha_emision = datetime.now()
-            fecha_venc = fecha_emision + timedelta(days=30)
-            fe = fecha_emision.strftime('#%m/%d/%Y %H:%M:%S#')
-            fv = fecha_venc.strftime('#%m/%d/%Y#')
-
-            self.db.execute(
-                f"INSERT INTO [CuentasPorCobrar] (FacturaID, PacienteID, NombrePaciente, "
-                f"FechaEmision, FechaVencimiento, MontoOriginal, MontoCobrado, SaldoPendiente, "
-                f"DiasVencida, Estado) "
-                f"VALUES ({factura_id}, {paciente_id}, '{nombre}', {fe}, {fv}, "
-                f"{monto}, 0, {monto}, 0, 'Pendiente')"
-            )
-            return True, "Cuenta por cobrar creada"
-        except Exception as e:
-            return False, f"Error al crear cuenta: {e}"
 
     def registrar_cobro(self, cuenta_id, monto, forma_pago_id, referencia='', registrar_en_caja=True):
         """Registra un cobro parcial o total."""
@@ -405,6 +190,87 @@ class GestorCuentasPorCobrar:
         except Exception as e:
             return False, f"Error al registrar cobro: {e}"
 
+    def crear_cuenta_manual(self, datos):
+        """Crea una cuenta por cobrar manualmente (sin factura)."""
+        try:
+            monto = float(datos.get('MontoOriginal', 0))
+            paciente_id = datos.get('PacienteID', 'Null')
+            nombre = str(datos.get('NombrePaciente', '')).replace("'", "''")
+            factura_id = datos.get('FacturaID', 'Null')
+            obs = str(datos.get('Observaciones', '')).replace("'", "''")
+
+            fecha_emision = datetime.now()
+            dias_venc = int(datos.get('DiasVencimiento', 30))
+            fecha_venc = fecha_emision + timedelta(days=dias_venc)
+            fe = fecha_emision.strftime('#%m/%d/%Y %H:%M:%S#')
+            fv = fecha_venc.strftime('#%m/%d/%Y#')
+
+            self.db.execute(
+                f"INSERT INTO [CuentasPorCobrar] (FacturaID, PacienteID, NombrePaciente, "
+                f"FechaEmision, FechaVencimiento, MontoOriginal, MontoCobrado, SaldoPendiente, "
+                f"DiasVencida, Estado, Observaciones) "
+                f"VALUES ({factura_id}, {paciente_id}, '{nombre}', {fe}, {fv}, "
+                f"{monto}, 0, {monto}, 0, 'Pendiente', '{obs}')"
+            )
+            return True, "Cuenta por cobrar creada"
+        except Exception as e:
+            return False, f"Error al crear cuenta: {e}"
+
+    def importar_solicitudes_pendientes(self):
+        """Importa solicitudes con saldo pendiente que no estan en CxC."""
+        try:
+            # Solicitudes cobradas parcialmente o sin cobrar
+            sql = """
+                SELECT s.SolicitudID, s.NumeroSolicitud, s.PacienteID,
+                       p.Nombres & ' ' & p.Apellidos AS NombrePaciente,
+                       s.MontoTotal, Nz(s.MontoCobrado, 0) AS MontoCobrado,
+                       s.FechaSolicitud
+                FROM Solicitudes s
+                LEFT JOIN Pacientes p ON s.PacienteID = p.PacienteID
+                WHERE Nz(s.MontoTotal, 0) > 0
+                  AND (Nz(s.MontoTotal, 0) - Nz(s.MontoCobrado, 0)) > 0.01
+                  AND s.SolicitudID NOT IN (
+                      SELECT Nz(FacturaID, 0) FROM [CuentasPorCobrar]
+                  )
+                ORDER BY s.FechaSolicitud DESC
+            """
+            pendientes = self.db.query(sql)
+            if not pendientes:
+                return 0, "No hay solicitudes pendientes por importar"
+
+            importadas = 0
+            for sol in pendientes:
+                monto_total = float(sol.get('MontoTotal', 0) or 0)
+                monto_cobrado = float(sol.get('MontoCobrado', 0) or 0)
+                saldo = monto_total - monto_cobrado
+                nombre = str(sol.get('NombrePaciente', '')).replace("'", "''")
+                pac_id = sol.get('PacienteID', 'Null') or 'Null'
+                sol_id = sol.get('SolicitudID', 'Null')
+
+                fecha_sol = sol.get('FechaSolicitud')
+                if isinstance(fecha_sol, datetime):
+                    fe = fecha_sol.strftime('#%m/%d/%Y %H:%M:%S#')
+                else:
+                    fe = datetime.now().strftime('#%m/%d/%Y %H:%M:%S#')
+                fv = (datetime.now() + timedelta(days=30)).strftime('#%m/%d/%Y#')
+
+                try:
+                    self.db.execute(
+                        f"INSERT INTO [CuentasPorCobrar] (FacturaID, PacienteID, NombrePaciente, "
+                        f"FechaEmision, FechaVencimiento, MontoOriginal, MontoCobrado, SaldoPendiente, "
+                        f"DiasVencida, Estado, Observaciones) "
+                        f"VALUES ({sol_id}, {pac_id}, '{nombre}', {fe}, {fv}, "
+                        f"{saldo}, 0, {saldo}, 0, 'Pendiente', "
+                        f"'Importado de Solicitud #{sol.get('NumeroSolicitud', '')}')"
+                    )
+                    importadas += 1
+                except Exception:
+                    pass
+
+            return importadas, f"{importadas} solicitud(es) importada(s) como cuentas por cobrar"
+        except Exception as e:
+            return 0, f"Error al importar: {e}"
+
     def listar_cuentas(self, estado=None, paciente=None, solo_vencidas=False):
         """Lista cuentas por cobrar con filtros."""
         try:
@@ -431,10 +297,10 @@ class GestorCuentasPorCobrar:
                             fv = datetime.strptime(fv, '%m/%d/%Y')
                         dias = (hoy - fv).days
                         c['DiasVencida'] = max(0, dias)
-                    except:
+                    except Exception:
                         pass
             return cuentas
-        except:
+        except Exception:
             return []
 
     def obtener_resumen_cartera(self):
@@ -458,7 +324,7 @@ class GestorCuentasPorCobrar:
                         if isinstance(fv, str):
                             fv = datetime.strptime(fv, '%m/%d/%Y')
                         dias = (hoy - fv).days
-                    except:
+                    except Exception:
                         pass
 
                 if dias <= 0:
@@ -473,7 +339,7 @@ class GestorCuentasPorCobrar:
                     resumen['mas_90'] += saldo
 
             return resumen
-        except:
+        except Exception:
             return {
                 'vigente': 0, '30_dias': 0, '60_dias': 0,
                 '90_dias': 0, 'mas_90': 0, 'total': 0
@@ -567,7 +433,7 @@ class GestorCuentasPorPagar:
                 sql += f" AND cp.ProveedorNombre LIKE '%{prov_safe}%'"
             sql += " ORDER BY cp.FechaEmision DESC"
             return self.db.query(sql)
-        except:
+        except Exception:
             return []
 
     def obtener_resumen(self):
@@ -591,10 +457,10 @@ class GestorCuentasPorPagar:
                             vencidas += saldo
                         else:
                             por_vencer += saldo
-                    except:
+                    except Exception:
                         por_vencer += saldo
             return {'total': total, 'por_vencer': por_vencer, 'vencidas': vencidas, 'cantidad': len(cuentas)}
-        except:
+        except Exception:
             return {'total': 0, 'por_vencer': 0, 'vencidas': 0, 'cantidad': 0}
 
 
@@ -703,7 +569,7 @@ class GestorGastos:
                 sql += f" AND g.CategoriaGastoID={int(categoria_id)}"
             sql += " ORDER BY g.Fecha DESC"
             return self.db.query(sql)
-        except:
+        except Exception:
             return []
 
     def resumen_gastos_por_categoria(self, fecha_desde=None, fecha_hasta=None):
@@ -725,15 +591,9 @@ class GestorGastos:
                     sql += f" AND g.Fecha <= #{fh}#"
             sql += " GROUP BY cg.Nombre ORDER BY SUM(g.Monto) DESC"
             return self.db.query(sql)
-        except:
+        except Exception:
             return []
 
-    def listar_categorias(self):
-        """Lista categorías de gastos activas."""
-        try:
-            return self.db.query("SELECT * FROM [CategoriaGastos] WHERE Activo=True ORDER BY Nombre")
-        except:
-            return []
 
 
 class ResumenFinanciero:
@@ -764,7 +624,7 @@ class ResumenFinanciero:
                 'egresos': total_egresos,
                 'saldo': total_ingresos - total_egresos
             }
-        except:
+        except Exception:
             return {'fecha': fecha, 'ingresos': 0, 'egresos': 0, 'saldo': 0}
 
     def resumen_mensual(self, anio=None, mes=None):
@@ -799,36 +659,8 @@ class ResumenFinanciero:
                 'egresos': total_egresos,
                 'saldo': total_ingresos - total_egresos
             }
-        except:
+        except Exception:
             return {'anio': anio, 'mes': mes, 'ingresos': 0, 'egresos': 0, 'saldo': 0}
-
-    def resumen_periodo(self, fecha_desde, fecha_hasta):
-        """Resumen financiero de un período arbitrario."""
-        try:
-            ingresos = self.db.query(
-                f"SELECT SUM(Monto) as Total FROM [MovimientosCaja] "
-                f"WHERE Tipo='Ingreso' AND Anulado=False "
-                f"AND Fecha >= #{fecha_desde}# AND Fecha <= #{fecha_hasta}#"
-            )
-            egresos = self.db.query(
-                f"SELECT SUM(Monto) as Total FROM [MovimientosCaja] "
-                f"WHERE Tipo='Egreso' AND Anulado=False "
-                f"AND Fecha >= #{fecha_desde}# AND Fecha <= #{fecha_hasta}#"
-            )
-            total_ingresos = float((ingresos[0].get('Total') if ingresos else None) or 0)
-            total_egresos = float((egresos[0].get('Total') if egresos else None) or 0)
-
-            return {
-                'desde': fecha_desde, 'hasta': fecha_hasta,
-                'ingresos': total_ingresos,
-                'egresos': total_egresos,
-                'saldo': total_ingresos - total_egresos
-            }
-        except:
-            return {
-                'desde': fecha_desde, 'hasta': fecha_hasta,
-                'ingresos': 0, 'egresos': 0, 'saldo': 0
-            }
 
     def estado_cartera(self):
         """Estado de cartera (cuentas por cobrar y pagar)."""
@@ -862,7 +694,7 @@ class ResumenFinanciero:
                 'caja_abierta': caja is not None,
                 'caja_estado': caja.get('Estado', 'Sin caja') if caja else 'Sin caja',
             }
-        except:
+        except Exception:
             return {
                 'ingresos_hoy': 0, 'egresos_hoy': 0, 'saldo_hoy': 0,
                 'ingresos_mes': 0, 'egresos_mes': 0, 'saldo_mes': 0,
@@ -885,12 +717,283 @@ class ResumenFinanciero:
                 sql += f" AND m.Fecha <= #{fecha_hasta}#"
             sql += " GROUP BY fp.Nombre ORDER BY SUM(m.Monto) DESC"
             return self.db.query(sql)
-        except:
+        except Exception:
             return []
 
-    def listar_formas_pago(self):
-        """Lista formas de pago activas."""
-        try:
-            return self.db.query("SELECT * FROM [FormasPago] WHERE Activo=True ORDER BY Nombre")
-        except:
-            return []
+
+# ============================================================================
+# GESTOR DE PROVEEDORES
+# ============================================================================
+
+class GestorProveedores:
+    """Gestión de proveedores del laboratorio (reactivos, insumos, servicios)."""
+
+    def __init__(self, db):
+        self.db = db
+
+    def crear_proveedor(self, datos: dict) -> int:
+        """
+        Crea un nuevo proveedor.
+
+        Args:
+            datos: dict con RazonSocial, RIF, Direccion, Telefono, Email,
+                   Contacto, TipoContribuyente, Observaciones
+        """
+        razon = (datos.get('RazonSocial') or '').strip()
+        if not razon:
+            raise ValueError("La razón social es obligatoria")
+
+        rif = (datos.get('RIF') or '').strip()
+
+        fecha = datetime.now().strftime('#%m/%d/%Y %H:%M:%S#')
+        sql = (
+            f"INSERT INTO [Proveedores] "
+            f"([RazonSocial], [RIF], [Direccion], [Telefono], [Email], "
+            f"[Contacto], [TipoContribuyente], [Observaciones], [Activo], [FechaCreacion]) "
+            f"VALUES ("
+            f"'{razon.replace(chr(39), chr(39)*2)}', "
+            f"'{rif.replace(chr(39), chr(39)*2)}', "
+            f"'{(datos.get('Direccion') or '').replace(chr(39), chr(39)*2)}', "
+            f"'{(datos.get('Telefono') or '').replace(chr(39), chr(39)*2)}', "
+            f"'{(datos.get('Email') or '').replace(chr(39), chr(39)*2)}', "
+            f"'{(datos.get('Contacto') or '').replace(chr(39), chr(39)*2)}', "
+            f"'{datos.get('TipoContribuyente', 'Ordinario')}', "
+            f"'{(datos.get('Observaciones') or '').replace(chr(39), chr(39)*2)}', "
+            f"True, {fecha})"
+        )
+        self.db.execute(sql)
+
+        row = self.db.query_one(
+            f"SELECT TOP 1 ProveedorID FROM [Proveedores] "
+            f"WHERE RazonSocial='{razon.replace(chr(39), chr(39)*2)}' "
+            f"ORDER BY ProveedorID DESC"
+        )
+        return (row or {}).get('ProveedorID', 0)
+
+    def actualizar_proveedor(self, proveedor_id: int, datos: dict):
+        """Actualiza datos de un proveedor."""
+        sets = []
+        for campo in ('RazonSocial', 'RIF', 'Direccion', 'Telefono', 'Email',
+                       'Contacto', 'TipoContribuyente', 'Observaciones'):
+            val = datos.get(campo)
+            if val is not None:
+                sets.append(f"[{campo}]='{str(val).replace(chr(39), chr(39)*2)}'")
+
+        if datos.get('Activo') is not None:
+            sets.append(f"[Activo]={datos['Activo']}")
+
+        if sets:
+            self.db.execute(
+                f"UPDATE [Proveedores] SET {', '.join(sets)} "
+                f"WHERE ProveedorID={int(proveedor_id)}"
+            )
+
+    def desactivar_proveedor(self, proveedor_id: int):
+        self.db.execute(
+            f"UPDATE [Proveedores] SET Activo=False WHERE ProveedorID={int(proveedor_id)}"
+        )
+
+    def obtener_proveedor(self, proveedor_id: int) -> dict:
+        return self.db.query_one(
+            f"SELECT * FROM [Proveedores] WHERE ProveedorID={int(proveedor_id)}"
+        ) or {}
+
+    def listar_proveedores(self, solo_activos=True, busqueda=None) -> list:
+        """Lista proveedores con filtros."""
+        where = []
+        if solo_activos:
+            where.append("Activo=True")
+        if busqueda:
+            term = busqueda.replace("'", "''").replace("%", "").replace("_", "")
+            where.append(f"(RazonSocial LIKE '%{term}%' OR RIF LIKE '%{term}%')")
+
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+        return self.db.query(
+            f"SELECT * FROM [Proveedores] {where_sql} ORDER BY RazonSocial"
+        ) or []
+
+
+# ============================================================================
+# GESTOR DE SEGUROS / CONVENIOS
+# ============================================================================
+
+class GestorSeguros:
+    """Gestión de aseguradoras y convenios del laboratorio."""
+
+    def __init__(self, db):
+        self.db = db
+
+    def crear_seguro(self, datos: dict) -> int:
+        """
+        Crea una aseguradora/convenio.
+
+        Args:
+            datos: dict con Nombre, RIF, Telefono, Email, Contacto,
+                   DescuentoPorcentaje, ListaPreciosID, Observaciones
+        """
+        nombre = (datos.get('Nombre') or '').strip()
+        if not nombre:
+            raise ValueError("El nombre es obligatorio")
+
+        fecha = datetime.now().strftime('#%m/%d/%Y %H:%M:%S#')
+        descuento = float(datos.get('DescuentoPorcentaje', 0))
+        lista_id = datos.get('ListaPreciosID')
+
+        sql = (
+            f"INSERT INTO [Seguros] "
+            f"([Nombre], [RIF], [Telefono], [Email], [Contacto], "
+            f"[DescuentoPorcentaje], [ListaPreciosID], [Observaciones], [Activo], [FechaCreacion]) "
+            f"VALUES ("
+            f"'{nombre.replace(chr(39), chr(39)*2)}', "
+            f"'{(datos.get('RIF') or '').replace(chr(39), chr(39)*2)}', "
+            f"'{(datos.get('Telefono') or '').replace(chr(39), chr(39)*2)}', "
+            f"'{(datos.get('Email') or '').replace(chr(39), chr(39)*2)}', "
+            f"'{(datos.get('Contacto') or '').replace(chr(39), chr(39)*2)}', "
+            f"{descuento}, "
+            f"{'NULL' if lista_id is None else int(lista_id)}, "
+            f"'{(datos.get('Observaciones') or '').replace(chr(39), chr(39)*2)}', "
+            f"True, {fecha})"
+        )
+        self.db.execute(sql)
+
+        row = self.db.query_one(
+            f"SELECT TOP 1 SeguroID FROM [Seguros] "
+            f"WHERE Nombre='{nombre.replace(chr(39), chr(39)*2)}' ORDER BY SeguroID DESC"
+        )
+        return (row or {}).get('SeguroID', 0)
+
+    def actualizar_seguro(self, seguro_id: int, datos: dict):
+        sets = []
+        for campo in ('Nombre', 'RIF', 'Telefono', 'Email', 'Contacto', 'Observaciones'):
+            val = datos.get(campo)
+            if val is not None:
+                sets.append(f"[{campo}]='{str(val).replace(chr(39), chr(39)*2)}'")
+
+        if datos.get('DescuentoPorcentaje') is not None:
+            sets.append(f"[DescuentoPorcentaje]={float(datos['DescuentoPorcentaje'])}")
+        if datos.get('ListaPreciosID') is not None:
+            sets.append(f"[ListaPreciosID]={int(datos['ListaPreciosID'])}")
+        if datos.get('Activo') is not None:
+            sets.append(f"[Activo]={datos['Activo']}")
+
+        if sets:
+            self.db.execute(
+                f"UPDATE [Seguros] SET {', '.join(sets)} WHERE SeguroID={int(seguro_id)}"
+            )
+
+    def obtener_seguro(self, seguro_id: int) -> dict:
+        return self.db.query_one(
+            f"SELECT * FROM [Seguros] WHERE SeguroID={int(seguro_id)}"
+        ) or {}
+
+    def listar_seguros(self, solo_activos=True, busqueda=None) -> list:
+        where = []
+        if solo_activos:
+            where.append("Activo=True")
+        if busqueda:
+            term = busqueda.replace("'", "''").replace("%", "").replace("_", "")
+            where.append(f"Nombre LIKE '%{term}%'")
+
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+        return self.db.query(
+            f"SELECT * FROM [Seguros] {where_sql} ORDER BY Nombre"
+        ) or []
+
+    def obtener_descuento_seguro(self, seguro_id: int) -> float:
+        """Obtiene el porcentaje de descuento de un seguro."""
+        seg = self.obtener_seguro(seguro_id)
+        return float(seg.get('DescuentoPorcentaje', 0))
+
+
+# ============================================================================
+# GESTOR DE LISTAS DE PRECIOS
+# ============================================================================
+
+class GestorListasPrecios:
+    """Gestión de múltiples listas de precios (particular, seguro, convenio, USD)."""
+
+    def __init__(self, db):
+        self.db = db
+
+    def crear_lista(self, nombre: str, descripcion: str = '',
+                     moneda: str = 'USD') -> int:
+        """Crea una nueva lista de precios."""
+        nombre = nombre.strip()
+        if not nombre:
+            raise ValueError("El nombre de la lista es obligatorio")
+
+        fecha = datetime.now().strftime('#%m/%d/%Y %H:%M:%S#')
+        sql = (
+            f"INSERT INTO [ListasPrecios] "
+            f"([Nombre], [Descripcion], [Moneda], [Activo], [FechaCreacion]) "
+            f"VALUES ("
+            f"'{nombre.replace(chr(39), chr(39)*2)}', "
+            f"'{(descripcion or '').replace(chr(39), chr(39)*2)}', "
+            f"'{moneda}', True, {fecha})"
+        )
+        self.db.execute(sql)
+
+        row = self.db.query_one(
+            f"SELECT TOP 1 ListaPreciosID FROM [ListasPrecios] "
+            f"WHERE Nombre='{nombre.replace(chr(39), chr(39)*2)}' ORDER BY ListaPreciosID DESC"
+        )
+        return (row or {}).get('ListaPreciosID', 0)
+
+    def listar_listas(self, solo_activas=True) -> list:
+        where = "WHERE Activo=True" if solo_activas else ""
+        return self.db.query(
+            f"SELECT * FROM [ListasPrecios] {where} ORDER BY Nombre"
+        ) or []
+
+    def asignar_precio(self, lista_id: int, prueba_id: int, precio: float):
+        """Asigna o actualiza el precio de una prueba en una lista."""
+        # Verificar si ya existe
+        existing = self.db.query_one(
+            f"SELECT PrecioListaID FROM [PreciosLista] "
+            f"WHERE ListaPreciosID={int(lista_id)} AND PruebaID={int(prueba_id)}"
+        )
+        if existing:
+            self.db.execute(
+                f"UPDATE [PreciosLista] SET Precio={float(precio)} "
+                f"WHERE ListaPreciosID={int(lista_id)} AND PruebaID={int(prueba_id)}"
+            )
+        else:
+            self.db.execute(
+                f"INSERT INTO [PreciosLista] ([ListaPreciosID], [PruebaID], [Precio]) "
+                f"VALUES ({int(lista_id)}, {int(prueba_id)}, {float(precio)})"
+            )
+
+    def obtener_precio(self, lista_id: int, prueba_id: int) -> float:
+        """Obtiene el precio de una prueba en una lista específica."""
+        row = self.db.query_one(
+            f"SELECT Precio FROM [PreciosLista] "
+            f"WHERE ListaPreciosID={int(lista_id)} AND PruebaID={int(prueba_id)}"
+        )
+        if row:
+            return float(row.get('Precio', 0))
+        # Fallback: precio base de la prueba
+        prueba = self.db.query_one(
+            f"SELECT Precio FROM [Pruebas] WHERE PruebaID={int(prueba_id)}"
+        )
+        return float((prueba or {}).get('Precio', 0))
+
+    def obtener_precios_lista(self, lista_id: int) -> list:
+        """Obtiene todos los precios de una lista."""
+        return self.db.query(
+            f"SELECT pl.PrecioListaID, pl.PruebaID, pl.Precio, "
+            f"p.NombrePrueba, p.CodigoPrueba, p.Precio AS PrecioBase "
+            f"FROM [PreciosLista] AS pl "
+            f"INNER JOIN [Pruebas] AS p ON pl.PruebaID = p.PruebaID "
+            f"WHERE pl.ListaPreciosID={int(lista_id)} "
+            f"ORDER BY p.NombrePrueba"
+        ) or []
+
+    def copiar_precios_base(self, lista_id: int, factor: float = 1.0):
+        """Copia todos los precios base de Pruebas a una lista, aplicando un factor."""
+        pruebas = self.db.query(
+            "SELECT PruebaID, Precio FROM [Pruebas] WHERE Activo=True AND Precio > 0"
+        ) or []
+        for p in pruebas:
+            precio = float(p.get('Precio', 0)) * factor
+            self.asignar_precio(lista_id, p['PruebaID'], precio)
+

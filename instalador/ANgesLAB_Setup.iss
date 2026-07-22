@@ -6,7 +6,7 @@
 
 #define MyAppName "ANgesLAB"
 #define MyAppFullName "ANgesLAB - Sistema de Gestion de Laboratorio Clinico"
-#define MyAppVersion "2.1.0"
+#define MyAppVersion "2.0.0"
 #define MyAppPublisher "ANgesLAB Solutions"
 #define MyAppURL "https://angeslab.com"
 #define MyAppSupportURL "https://angeslab.com/soporte"
@@ -34,9 +34,9 @@ AllowNoIcons=yes
 LicenseFile=licencia.txt
 InfoBeforeFile=info_antes.txt
 OutputDir=output
-OutputBaseFilename=ANgesLAB_Setup_v2.1
-SetupIconFile=..\angeslab_icon.ico
-UninstallDisplayIcon={app}\angeslab_icon.ico
+OutputBaseFilename=ANgesLAB_Setup_v2.0
+SetupIconFile=..\assets\angeslab_icon.ico
+UninstallDisplayIcon={app}\assets\angeslab_icon.ico
 UninstallDisplayName={#MyAppFullName}
 Compression=lzma2/ultra64
 SolidCompression=yes
@@ -109,16 +109,16 @@ Name: "custom"; Description: "Instalacion Personalizada"; Flags: iscustom
 Name: "main"; Description: "Aplicacion Principal ANgesLAB"; Types: full custom; Flags: fixed
 Name: "database"; Description: "Base de Datos (solo primera instalacion)"; Types: full custom
 Name: "resources"; Description: "Recursos Graficos (imagenes y logos)"; Types: full custom
-Name: "modules"; Description: "Modulos del Sistema (28 modulos)"; Types: full custom; Flags: fixed
+Name: "modules"; Description: "Modulos del Sistema (32 modulos)"; Types: full custom; Flags: fixed
 Name: "ia"; Description: "IA Clinica - Interpretacion inteligente de resultados (matplotlib, graficas, Ollama/Claude)"; Types: full custom
 
 ; ============================================================================
 ; [Tasks] - Tareas Opcionales
 ; ============================================================================
 [Tasks]
-Name: "desktopicon"; Description: "{cm:DesktopIcon}"; GroupDescription: "Accesos directos:"; Flags: checked
-Name: "startmenuicon"; Description: "{cm:StartMenuIcon}"; GroupDescription: "Accesos directos:"; Flags: checked
-Name: "installia"; Description: "Instalar librerias de IA avanzada (requiere internet, ~50 MB: matplotlib, requests, anthropic)"; GroupDescription: "Funcionalidades adicionales:"; Flags: checked; Components: ia
+Name: "desktopicon"; Description: "{cm:DesktopIcon}"; GroupDescription: "Accesos directos:"; Flags: checkedonce
+Name: "startmenuicon"; Description: "{cm:StartMenuIcon}"; GroupDescription: "Accesos directos:"; Flags: checkedonce
+Name: "installia"; Description: "Instalar librerias de IA avanzada (requiere internet, ~50 MB: matplotlib, requests, anthropic)"; GroupDescription: "Funcionalidades adicionales:"; Flags: checkedonce; Components: ia
 
 ; ============================================================================
 ; [Dirs] - Directorios a Crear
@@ -126,10 +126,11 @@ Name: "installia"; Description: "Instalar librerias de IA avanzada (requiere int
 [Dirs]
 Name: "{app}"; Permissions: users-modify
 Name: "{app}\modulos"; Permissions: users-modify
+Name: "{app}\assets"; Permissions: users-modify
 Name: "{app}\logos"; Permissions: users-modify
-Name: "{app}\reportes"; Permissions: users-modify
-Name: "{app}\respaldos"; Permissions: users-modify
 Name: "{app}\firmas"; Permissions: users-modify
+Name: "{app}\backups"; Permissions: users-modify
+Name: "{app}\logs"; Permissions: users-modify
 
 ; ============================================================================
 ; [Files] - Archivos a Instalar
@@ -138,54 +139,70 @@ Name: "{app}\firmas"; Permissions: users-modify
 ; --- Aplicacion Principal ---
 Source: "..\ANgesLAB.pyw"; DestDir: "{app}"; Components: main; Flags: ignoreversion; \
   AfterInstall: SetProgressMessage('Instalando aplicacion principal...')
-Source: "..\angeslab_icon.ico"; DestDir: "{app}"; Components: main; Flags: ignoreversion
+
+; --- Identidad del Software ---
+Source: "..\LICENSE"; DestDir: "{app}"; Components: main; Flags: ignoreversion
+Source: "..\VERSION"; DestDir: "{app}"; Components: main; Flags: ignoreversion
+Source: "..\requirements.txt"; DestDir: "{app}"; Components: main; Flags: ignoreversion
+
+; --- Assets (iconos e imagenes del sistema) ---
+Source: "..\assets\angeslab_icon.ico"; DestDir: "{app}\assets"; Components: main; Flags: ignoreversion
+Source: "..\assets\angeslab_icon_256.png"; DestDir: "{app}\assets"; Components: main; Flags: ignoreversion
+Source: "..\assets\angeslab_icon_512.png"; DestDir: "{app}\assets"; Components: main; Flags: ignoreversion
+Source: "..\assets\laboratorio-clinico-2.png"; DestDir: "{app}\assets"; Components: resources; Flags: ignoreversion
+Source: "..\assets\fondo.png"; DestDir: "{app}\assets"; Components: resources; Flags: ignoreversion
 
 ; --- Base de Datos ---
 Source: "..\ANgesLAB.accdb"; DestDir: "{app}"; Components: database; Flags: onlyifdoesntexist uninsneveruninstall; \
   AfterInstall: SetProgressMessage('Configurando base de datos...')
 
-; --- Recursos Graficos ---
-Source: "..\fondo.png"; DestDir: "{app}"; Components: resources; Flags: ignoreversion; \
-  AfterInstall: SetProgressMessage('Instalando recursos graficos...')
-Source: "..\laboratorio-clinico-2.png"; DestDir: "{app}"; Components: resources; Flags: ignoreversion
-Source: "..\microscopio_login.png"; DestDir: "{app}"; Components: resources; Flags: ignoreversion
-Source: "..\microscopio_logo.png"; DestDir: "{app}"; Components: resources; Flags: ignoreversion
-
-; --- Logos ---
-Source: "..\logos\logo_laboratorio.jpg"; DestDir: "{app}\logos"; Components: resources; Flags: ignoreversion
-Source: "..\logos\logo_laboratorio.png"; DestDir: "{app}\logos"; Components: resources; Flags: ignoreversion
-
-; --- Configuracion IA (archivo JSON, preservar si existe) ---
+; --- Configuracion (preservar si existe) ---
+Source: "..\db_config.json"; DestDir: "{app}"; Components: main; Flags: onlyifdoesntexist uninsneveruninstall
+Source: "..\backup_config.json"; DestDir: "{app}"; Components: main; Flags: onlyifdoesntexist uninsneveruninstall
 Source: "..\config_ia.json"; DestDir: "{app}"; Components: ia; Flags: onlyifdoesntexist uninsneveruninstall
 
-; --- Modulos del Sistema (28 modulos) ---
+; --- Logos (personalizables por el laboratorio) ---
+Source: "..\logos\*"; DestDir: "{app}\logos"; Components: resources; Flags: ignoreversion skipifsourcedoesntexist; \
+  AfterInstall: SetProgressMessage('Instalando recursos graficos...')
+
+; --- Modulos del Sistema (35 modulos) ---
 Source: "..\modulos\__init__.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion; \
   AfterInstall: SetProgressMessage('Instalando modulos del sistema...')
+Source: "..\modulos\auditoria.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\calculos_automaticos.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\config_administrativa.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\config_numeracion.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
-Source: "..\modulos\demo_config.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
-Source: "..\modulos\demo_seed_db.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
+Source: "..\modulos\cotizaciones.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\envio_resultados.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\facturacion_fiscal.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\flujo_trabajo.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\form_inf_config.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
+Source: "..\modulos\formato_pdf.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\gestor_solicitudes.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\gtt_captura.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\gtt_reporte.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\historial_clinico.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
+Source: "..\modulos\logging_config.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\modulo_administrativo.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\plantillas_reportes.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\reportes_especificaciones.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\reportes_resultados.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\seguridad_db.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\splash_screen.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
+Source: "..\modulos\tasas_cambio.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\utilidades_db.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
+Source: "..\modulos\valores_referencia.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\ventana_administrativa.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\ventana_config_administrativa.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\ventana_config_numeracion.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\ventana_configuracion_completa.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\veterinario.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
+
+; --- Modulos de Inventario, Equipos, Etiquetas, Hojas de Trabajo ---
+Source: "..\modulos\inventario.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
+Source: "..\modulos\equipos.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
+Source: "..\modulos\etiquetas.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
+Source: "..\modulos\hojas_trabajo.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 
 ; --- Modulos de IA e Historial Avanzado ---
 Source: "..\modulos\graficas_historial.py"; DestDir: "{app}\modulos"; Components: ia; Flags: ignoreversion; \
@@ -206,7 +223,7 @@ Name: "{autodesktop}\ANgesLAB"; \
   Filename: "{code:GetPythonwPath}"; \
   Parameters: """{app}\{#MyAppExeName}"""; \
   WorkingDir: "{app}"; \
-  IconFilename: "{app}\angeslab_icon.ico"; \
+  IconFilename: "{app}\assets\angeslab_icon.ico"; \
   Comment: "{#MyAppFullName} v{#MyAppVersion}"; \
   Tasks: desktopicon
 
@@ -215,14 +232,14 @@ Name: "{group}\ANgesLAB"; \
   Filename: "{code:GetPythonwPath}"; \
   Parameters: """{app}\{#MyAppExeName}"""; \
   WorkingDir: "{app}"; \
-  IconFilename: "{app}\angeslab_icon.ico"; \
+  IconFilename: "{app}\assets\angeslab_icon.ico"; \
   Comment: "Iniciar {#MyAppFullName}"; \
   Tasks: startmenuicon
 
 ; Menu Inicio - Desinstalar
 Name: "{group}\Desinstalar ANgesLAB"; \
   Filename: "{uninstallexe}"; \
-  IconFilename: "{app}\angeslab_icon.ico"; \
+  IconFilename: "{app}\assets\angeslab_icon.ico"; \
   Comment: "Desinstalar {#MyAppName} de su equipo"; \
   Tasks: startmenuicon
 
@@ -240,7 +257,7 @@ Name: "{group}\Abrir Carpeta ANgesLAB"; \
 Filename: "{sys}\cmd.exe"; \
   Parameters: "/c ""{app}\instalar_dependencias.bat"""; \
   WorkingDir: "{app}"; \
-  StatusMsg: "Instalando librerias base de Python (reportlab, Pillow, pypiwin32)..."; \
+  StatusMsg: "Instalando librerias base de Python (reportlab, Pillow, pypiwin32, qrcode)..."; \
   Flags: runhidden waituntilterminated; \
   Description: "Instalar dependencias base de Python"
 
@@ -269,10 +286,10 @@ Type: filesandordirs; Name: "{app}\modulos\__pycache__"
 Type: filesandordirs; Name: "{app}\__pycache__"
 Type: files; Name: "{app}\modulos\*.pyc"
 Type: files; Name: "{app}\*.pyc"
-Type: files; Name: "{app}\*.log"
+Type: files; Name: "{app}\logs\*.log"
 Type: files; Name: "{app}\config_ia.json"
-Type: dirifempty; Name: "{app}\reportes"
-Type: dirifempty; Name: "{app}\respaldos"
+Type: dirifempty; Name: "{app}\logs"
+Type: dirifempty; Name: "{app}\backups"
 Type: dirifempty; Name: "{app}\firmas"
 ; NOTA: NO se elimina ANgesLAB.accdb para preservar datos del cliente
 
@@ -327,7 +344,7 @@ begin
     begin
       if LoadStringFromFile(ExpandConstant('{tmp}\python_ver.txt'), VersionOutput) then
       begin
-        // No necesitamos verificar la salida exacta, si ejecuto sin error Python esta presente
+        // Python ejecuto correctamente
       end;
       // Buscar ruta de pythonw.exe
       if Exec('cmd.exe', '/c where pythonw.exe > "%TEMP%\pythonw_path.txt" 2>&1', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
@@ -348,15 +365,17 @@ begin
   end;
 
   // Buscar en rutas comunes de instalacion
-  SetLength(SearchPaths, 8);
-  SearchPaths[0] := ExpandConstant('{localappdata}\Programs\Python\Python314\pythonw.exe');
-  SearchPaths[1] := ExpandConstant('{localappdata}\Programs\Python\Python313\pythonw.exe');
-  SearchPaths[2] := ExpandConstant('{localappdata}\Programs\Python\Python312\pythonw.exe');
-  SearchPaths[3] := ExpandConstant('{localappdata}\Programs\Python\Python311\pythonw.exe');
-  SearchPaths[4] := ExpandConstant('{localappdata}\Programs\Python\Python310\pythonw.exe');
-  SearchPaths[5] := 'C:\Python314\pythonw.exe';
-  SearchPaths[6] := 'C:\Python313\pythonw.exe';
-  SearchPaths[7] := 'C:\Python312\pythonw.exe';
+  SetLength(SearchPaths, 10);
+  SearchPaths[0] := ExpandConstant('{localappdata}\Programs\Python\Python315\pythonw.exe');
+  SearchPaths[1] := ExpandConstant('{localappdata}\Programs\Python\Python314\pythonw.exe');
+  SearchPaths[2] := ExpandConstant('{localappdata}\Programs\Python\Python313\pythonw.exe');
+  SearchPaths[3] := ExpandConstant('{localappdata}\Programs\Python\Python312\pythonw.exe');
+  SearchPaths[4] := ExpandConstant('{localappdata}\Programs\Python\Python311\pythonw.exe');
+  SearchPaths[5] := ExpandConstant('{localappdata}\Programs\Python\Python310\pythonw.exe');
+  SearchPaths[6] := 'C:\Python315\pythonw.exe';
+  SearchPaths[7] := 'C:\Python314\pythonw.exe';
+  SearchPaths[8] := 'C:\Python313\pythonw.exe';
+  SearchPaths[9] := 'C:\Python312\pythonw.exe';
 
   for I := 0 to GetArrayLength(SearchPaths) - 1 do
   begin
@@ -368,60 +387,37 @@ begin
     end;
   end;
 
-  // Buscar en registro de Windows
+  // Buscar en registro de Windows (HKLM)
   if RegQueryStringValue(HKLM, 'Software\Python\PythonCore\3.14\InstallPath', '', PythonExe) then
   begin
     PythonPath := PythonExe + 'pythonw.exe';
-    if FileExists(PythonPath) then
-    begin
-      Result := True;
-      Exit;
-    end;
+    if FileExists(PythonPath) then begin Result := True; Exit; end;
   end;
   if RegQueryStringValue(HKLM, 'Software\Python\PythonCore\3.13\InstallPath', '', PythonExe) then
   begin
     PythonPath := PythonExe + 'pythonw.exe';
-    if FileExists(PythonPath) then
-    begin
-      Result := True;
-      Exit;
-    end;
+    if FileExists(PythonPath) then begin Result := True; Exit; end;
   end;
   if RegQueryStringValue(HKLM, 'Software\Python\PythonCore\3.12\InstallPath', '', PythonExe) then
   begin
     PythonPath := PythonExe + 'pythonw.exe';
-    if FileExists(PythonPath) then
-    begin
-      Result := True;
-      Exit;
-    end;
+    if FileExists(PythonPath) then begin Result := True; Exit; end;
   end;
+  // Buscar en registro de Windows (HKCU)
   if RegQueryStringValue(HKCU, 'Software\Python\PythonCore\3.14\InstallPath', '', PythonExe) then
   begin
     PythonPath := PythonExe + 'pythonw.exe';
-    if FileExists(PythonPath) then
-    begin
-      Result := True;
-      Exit;
-    end;
+    if FileExists(PythonPath) then begin Result := True; Exit; end;
   end;
   if RegQueryStringValue(HKCU, 'Software\Python\PythonCore\3.13\InstallPath', '', PythonExe) then
   begin
     PythonPath := PythonExe + 'pythonw.exe';
-    if FileExists(PythonPath) then
-    begin
-      Result := True;
-      Exit;
-    end;
+    if FileExists(PythonPath) then begin Result := True; Exit; end;
   end;
   if RegQueryStringValue(HKCU, 'Software\Python\PythonCore\3.12\InstallPath', '', PythonExe) then
   begin
     PythonPath := PythonExe + 'pythonw.exe';
-    if FileExists(PythonPath) then
-    begin
-      Result := True;
-      Exit;
-    end;
+    if FileExists(PythonPath) then begin Result := True; Exit; end;
   end;
 end;
 
@@ -434,22 +430,13 @@ var
 begin
   Result := False;
   SubKey := 'SOFTWARE\Classes\Microsoft.ACE.OLEDB.12.0';
-  if RegKeyExists(HKLM, SubKey) then
-  begin
-    Result := True;
-    Exit;
-  end;
-  // Tambien buscar en el proveedor de 16 bits
+  if RegKeyExists(HKLM, SubKey) then begin Result := True; Exit; end;
   SubKey := 'SOFTWARE\Classes\Microsoft.ACE.OLEDB.16.0';
-  if RegKeyExists(HKLM, SubKey) then
-  begin
-    Result := True;
-    Exit;
-  end;
+  if RegKeyExists(HKLM, SubKey) then begin Result := True; Exit; end;
 end;
 
 // -----------------------------------------------------------------------
-// Funcion para obtener la ruta de pythonw.exe (usada en [Icons])
+// Funcion para obtener la ruta de pythonw.exe (usada en [Icons] y [Run])
 // -----------------------------------------------------------------------
 function GetPythonwPath(Param: String): String;
 begin
@@ -581,9 +568,9 @@ begin
     '  - Sistema Operativo: Windows 10 / Windows 11 (64-bit)' + #13#10 +
     '  - Procesador: Intel Core i3 o superior' + #13#10 +
     '  - Memoria RAM: 4 GB minimo (recomendado 8 GB)' + #13#10 +
-    '  - Espacio en disco: 100 MB disponibles' + #13#10 +
+    '  - Espacio en disco: 200 MB disponibles' + #13#10 +
     '  - Pantalla: Resolucion minima 1366 x 768' + #13#10 +
-    '  - Python 3.8 o superior (python.org)' + #13#10 +
+    '  - Python 3.10 o superior (python.org)' + #13#10 +
     '  - Microsoft Access Database Engine 2016' + #13#10 +
     '  - Conexion a internet (para instalar dependencias)';
 end;
@@ -601,16 +588,12 @@ begin
   if not PythonFound then
   begin
     if MsgBox(
-      'ANgesLAB requiere Python 3.8 o superior para funcionar.' + #13#10 +
-      #13#10 +
-      'Python NO fue detectado en su sistema.' + #13#10 +
-      #13#10 +
+      'ANgesLAB requiere Python 3.10 o superior para funcionar.' + #13#10 + #13#10 +
+      'Python NO fue detectado en su sistema.' + #13#10 + #13#10 +
       'Puede descargar Python desde:' + #13#10 +
-      'https://www.python.org/downloads/' + #13#10 +
-      #13#10 +
+      'https://www.python.org/downloads/' + #13#10 + #13#10 +
       'IMPORTANTE: Al instalar Python, marque la casilla' + #13#10 +
-      '"Add Python to PATH".' + #13#10 +
-      #13#10 +
+      '"Add Python to PATH".' + #13#10 + #13#10 +
       'Desea continuar con la instalacion de todas formas?' + #13#10 +
       '(Podra instalar Python posteriormente)',
       mbConfirmation, MB_YESNO) = IDNO then
@@ -650,8 +633,7 @@ begin
     begin
       if MsgBox(
         'Python no fue detectado en su sistema.' + #13#10 +
-        'ANgesLAB no podra ejecutarse sin Python.' + #13#10 +
-        #13#10 +
+        'ANgesLAB no podra ejecutarse sin Python.' + #13#10 + #13#10 +
         'Desea continuar con la instalacion de todas formas?',
         mbConfirmation, MB_YESNO) = IDNO then
       begin
@@ -663,75 +645,12 @@ begin
     if not OLEDBFound then
     begin
       MsgBox(
-        'Microsoft Access Database Engine no fue detectado.' + #13#10 +
-        #13#10 +
+        'Microsoft Access Database Engine no fue detectado.' + #13#10 + #13#10 +
         'Este componente es necesario para la base de datos.' + #13#10 +
         'Descargue e instale desde:' + #13#10 +
-        'https://www.microsoft.com/en-us/download/details.aspx?id=54920' + #13#10 +
-        #13#10 +
+        'https://www.microsoft.com/en-us/download/details.aspx?id=54920' + #13#10 + #13#10 +
         'Puede continuar la instalacion y configurar este componente despues.',
         mbInformation, MB_OK);
     end;
   end;
-end;
-
-// -----------------------------------------------------------------------
-// CurPageChanged - Eventos al cambiar de pagina
-// -----------------------------------------------------------------------
-procedure CurPageChanged(CurPageID: Integer);
-begin
-  // En la pagina de finalizacion, mostrar informacion adicional
-  if CurPageID = wpFinished then
-  begin
-    WizardForm.FinishedLabel.Caption :=
-      'ANgesLAB v' + '{#MyAppVersion}' + ' se ha instalado correctamente en su equipo.' + #13#10 +
-      #13#10 +
-      'Ubicacion: ' + ExpandConstant('{app}') + #13#10 +
-      #13#10 +
-      'Credenciales iniciales:' + #13#10 +
-      '  Usuario: admin' + #13#10 +
-      '  Contrasena: admin123' + #13#10 +
-      #13#10 +
-      'NOVEDADES v2.1:' + #13#10 +
-      '  - Graficas de evolucion clinica (Historial > Graficas)' + #13#10 +
-      '  - Interpretacion IA de resultados (Historial > IA Clinica)' + #13#10 +
-      '  - Reportes PDF con interpretacion clinica' + #13#10 +
-      #13#10 +
-      'IMPORTANTE: Cambie la contrasena del administrador' + #13#10 +
-      'despues del primer inicio de sesion.' + #13#10 +
-      #13#10 +
-      'Haga clic en Finalizar para cerrar el asistente.';
-  end;
-end;
-
-// -----------------------------------------------------------------------
-// CurStepChanged - Eventos por paso de instalacion
-// -----------------------------------------------------------------------
-procedure CurStepChanged(CurStep: TSetupStep);
-begin
-  if CurStep = ssPostInstall then
-  begin
-    // Registrar la instalacion exitosa
-    SaveStringToFile(ExpandConstant('{app}\install.log'),
-      'ANgesLAB v' + '{#MyAppVersion}' + ' instalado exitosamente.' + #13#10 +
-      'Fecha: ' + GetDateTimeString('yyyy/mm/dd hh:nn:ss', '-', ':') + #13#10 +
-      'Directorio: ' + ExpandConstant('{app}') + #13#10,
-      False);
-  end;
-end;
-
-// -----------------------------------------------------------------------
-// Confirmacion de desinstalacion
-// -----------------------------------------------------------------------
-function InitializeUninstall(): Boolean;
-begin
-  Result := MsgBox(
-    'Esta a punto de desinstalar ANgesLAB de su equipo.' + #13#10 +
-    #13#10 +
-    'NOTA: La base de datos (ANgesLAB.accdb) con toda la' + #13#10 +
-    'informacion de pacientes y resultados NO sera eliminada.' + #13#10 +
-    'Puede encontrarla en la carpeta de instalacion.' + #13#10 +
-    #13#10 +
-    'Desea continuar con la desinstalacion?',
-    mbConfirmation, MB_YESNO) = IDYES;
 end;

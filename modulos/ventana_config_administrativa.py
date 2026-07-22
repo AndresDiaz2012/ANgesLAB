@@ -4,9 +4,10 @@ ANgesLAB - Sistema de Gestión de Laboratorio Clínico
 
 Interfaz gráfica para gestionar toda la configuración administrativa del laboratorio.
 
-Copyright © 2024-2025 ANgesLAB Solutions
+Copyright © 2024-2026 ANgesLAB Solutions
 """
 
+import logging
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, colorchooser
 from modulos.config_administrativa import ConfiguradorAdministrativo
@@ -344,7 +345,7 @@ class VentanaConfigAdministrativa:
         ttk.Checkbutton(scrollable_frame, text="Resaltar valores fuera de rango", variable=self.var_resaltar).grid(row=row, column=0, sticky='w', padx=20)
         row += 1
 
-        colores_frame = ttk.Frame(tab)
+        colores_frame = ttk.Frame(scrollable_frame)
         colores_frame.grid(row=row, column=0, sticky='w', padx=40, pady=10)
 
         ttk.Label(colores_frame, text="Color para valores ALTOS:").grid(row=0, column=0, sticky='w')
@@ -357,14 +358,43 @@ class VentanaConfigAdministrativa:
         self.btn_color_bajo.grid(row=1, column=1, padx=10, pady=5)
         self.color_bajo = "#0000FF"
 
+        row += 1
+        ttk.Separator(scrollable_frame, orient='horizontal').grid(row=row, column=0, columnspan=2, sticky='ew', pady=15)
+        row += 1
+
+        # Colores de tablas de resultados
+        ttk.Label(scrollable_frame, text="Color de Tablas de Resultados:", font=('Segoe UI', 11, 'bold')).grid(row=row, column=0, sticky='w', pady=10)
+        row += 1
+
+        self.var_usar_colores = tk.BooleanVar(value=True)
+        ttk.Checkbutton(scrollable_frame, text="Imprimir tablas con color", variable=self.var_usar_colores).grid(row=row, column=0, sticky='w', padx=20)
+        row += 1
+
+        color_tabla_frame = ttk.Frame(scrollable_frame)
+        color_tabla_frame.grid(row=row, column=0, sticky='w', padx=40, pady=10)
+
+        ttk.Label(color_tabla_frame, text="Color de encabezados y acentos:").grid(row=0, column=0, sticky='w')
+        self.btn_color_encabezado = tk.Button(color_tabla_frame, text="  ", bg="#1565c0", width=5, command=lambda: self._seleccionar_color('encabezado'))
+        self.btn_color_encabezado.grid(row=0, column=1, padx=10)
+        self.color_encabezado = "#1565c0"
+
+        ttk.Label(color_tabla_frame, text="Vista previa:", font=('Segoe UI', 9)).grid(row=1, column=0, sticky='w', pady=(10, 0))
+        self.preview_encabezado = tk.Label(color_tabla_frame, text="  ENCABEZADO DE TABLA  ", bg="#1565c0", fg="white",
+                                           font=('Segoe UI', 9, 'bold'), relief='flat', padx=8, pady=2)
+        self.preview_encabezado.grid(row=1, column=1, padx=10, pady=(10, 0))
+
+        ttk.Label(color_tabla_frame,
+                 text="Este color se usara en los encabezados, secciones\ny acentos de las tablas del reporte PDF.",
+                 font=('Segoe UI', 9), foreground='gray').grid(row=2, column=0, columnspan=2, sticky='w', pady=(5, 0))
+
     def _crear_tab_financiera(self):
-        """Crea la pestaña de configuración financiera."""
+        """Crea la pestana de configuracion financiera, IGTF y tasas de cambio."""
         tab, scrollable_frame = self._crear_tab_con_scroll("💰 Financiera")
 
         row = 0
 
-        # Moneda
-        ttk.Label(scrollable_frame, text="Configuración de Moneda:", font=('Segoe UI', 11, 'bold')).grid(row=row, column=0, sticky='w', pady=10)
+        # ── Moneda ────────────────────────────────────────────────────
+        ttk.Label(scrollable_frame, text="Configuracion de Moneda:", font=('Segoe UI', 11, 'bold')).grid(row=row, column=0, sticky='w', pady=10)
         row += 1
 
         mon_frame = ttk.Frame(scrollable_frame)
@@ -375,7 +405,7 @@ class VentanaConfigAdministrativa:
         self.combo_moneda['values'] = ('USD', 'VES', 'EUR', 'COP', 'MXN')
         self.combo_moneda.grid(row=0, column=1, padx=5)
 
-        ttk.Label(mon_frame, text="Símbolo:").grid(row=0, column=2, sticky='w', padx=15)
+        ttk.Label(mon_frame, text="Simbolo:").grid(row=0, column=2, sticky='w', padx=15)
         self.entry_simbolo = ttk.Entry(mon_frame, width=10)
         self.entry_simbolo.grid(row=0, column=3, padx=5)
 
@@ -388,7 +418,7 @@ class VentanaConfigAdministrativa:
         ttk.Separator(scrollable_frame, orient='horizontal').grid(row=row, column=0, columnspan=2, sticky='ew', pady=15)
         row += 1
 
-        # IVA y Descuentos
+        # ── IVA y Descuentos ──────────────────────────────────────────
         ttk.Label(scrollable_frame, text="Impuestos y Descuentos:", font=('Segoe UI', 11, 'bold')).grid(row=row, column=0, sticky='w', pady=10)
         row += 1
 
@@ -399,9 +429,167 @@ class VentanaConfigAdministrativa:
         self.spin_iva = ttk.Spinbox(imp_frame, from_=0, to=100, increment=0.5, width=15)
         self.spin_iva.grid(row=0, column=1, padx=5)
 
-        ttk.Label(imp_frame, text="Descuento Máximo (%):").grid(row=1, column=0, sticky='w', padx=5, pady=5)
+        ttk.Label(imp_frame, text="Descuento Maximo (%):").grid(row=1, column=0, sticky='w', padx=5, pady=5)
         self.spin_desc_max = ttk.Spinbox(imp_frame, from_=0, to=100, increment=5, width=15)
         self.spin_desc_max.grid(row=1, column=1, padx=5, pady=5)
+
+        row += 1
+
+        ttk.Separator(scrollable_frame, orient='horizontal').grid(row=row, column=0, columnspan=2, sticky='ew', pady=15)
+        row += 1
+
+        # ── IGTF (Grandes Transacciones Financieras) ─────────────────
+        ttk.Label(scrollable_frame, text="IGTF (Grandes Transacciones Financieras):",
+                  font=('Segoe UI', 11, 'bold')).grid(row=row, column=0, sticky='w', pady=10)
+        row += 1
+
+        igtf_frame = ttk.Frame(scrollable_frame)
+        igtf_frame.grid(row=row, column=0, sticky='w', padx=20, pady=5)
+
+        self.var_igtf_activo = tk.BooleanVar(value=True)
+        ttk.Checkbutton(igtf_frame, text="IGTF Activo",
+                        variable=self.var_igtf_activo).grid(row=0, column=0, columnspan=2, sticky='w', padx=5)
+
+        ttk.Label(igtf_frame, text="Tasa IGTF (%):").grid(row=1, column=0, sticky='w', padx=5, pady=5)
+        self.spin_igtf = ttk.Spinbox(igtf_frame, from_=0, to=10, increment=0.5, width=10)
+        self.spin_igtf.grid(row=1, column=1, padx=5, pady=5)
+
+        ttk.Label(igtf_frame, text="Tipo Contribuyente:").grid(row=2, column=0, sticky='w', padx=5, pady=5)
+        self.combo_tipo_contrib = ttk.Combobox(igtf_frame, values=['Ordinario', 'Especial'],
+                                                state='readonly', width=15)
+        self.combo_tipo_contrib.set('Ordinario')
+        self.combo_tipo_contrib.grid(row=2, column=1, padx=5, pady=5)
+
+        ttk.Label(igtf_frame,
+                  text="Se aplica automaticamente a pagos en Divisa/Zelle (3%)",
+                  foreground='gray', font=('Segoe UI', 9)).grid(row=3, column=0, columnspan=3, sticky='w', padx=5, pady=(2, 0))
+
+        row += 1
+
+        ttk.Separator(scrollable_frame, orient='horizontal').grid(row=row, column=0, columnspan=2, sticky='ew', pady=15)
+        row += 1
+
+        # ── Tasas de Cambio ───────────────────────────────────────────
+        ttk.Label(scrollable_frame, text="Tasas de Cambio (BCV):",
+                  font=('Segoe UI', 11, 'bold')).grid(row=row, column=0, sticky='w', pady=10)
+        row += 1
+
+        tasas_frame = ttk.Frame(scrollable_frame)
+        tasas_frame.grid(row=row, column=0, sticky='w', padx=20, pady=5)
+
+        # Tasa USD/Bs (solo lectura, se actualiza del BCV)
+        ttk.Label(tasas_frame, text="Tasa BCV USD/Bs:",
+                  font=('Segoe UI', 10)).grid(row=0, column=0, sticky='w', padx=5)
+        self.label_tasa_usd = ttk.Label(tasas_frame, text="--",
+                                         font=('Segoe UI', 10, 'bold'), foreground='#1565c0')
+        self.label_tasa_usd.grid(row=0, column=1, sticky='w', padx=10)
+
+        # Tasa EUR/Bs (solo lectura)
+        ttk.Label(tasas_frame, text="Tasa BCV EUR/Bs:",
+                  font=('Segoe UI', 10)).grid(row=1, column=0, sticky='w', padx=5, pady=3)
+        self.label_tasa_eur = ttk.Label(tasas_frame, text="--",
+                                         font=('Segoe UI', 10, 'bold'), foreground='#1565c0')
+        self.label_tasa_eur.grid(row=1, column=1, sticky='w', padx=10, pady=3)
+
+        # Tasa COP/USD (manual)
+        ttk.Label(tasas_frame, text="Tasa COP/USD (manual):",
+                  font=('Segoe UI', 10)).grid(row=2, column=0, sticky='w', padx=5, pady=3)
+        self.entry_tasa_cop = ttk.Entry(tasas_frame, width=15, font=('Segoe UI', 10))
+        self.entry_tasa_cop.grid(row=2, column=1, sticky='w', padx=10, pady=3)
+        ttk.Label(tasas_frame, text="COP por 1 USD",
+                  foreground='gray', font=('Segoe UI', 9)).grid(row=2, column=2, sticky='w', padx=5)
+
+        row += 1
+
+        # Boton actualizar y timestamp
+        btn_tasas_frame = ttk.Frame(scrollable_frame)
+        btn_tasas_frame.grid(row=row, column=0, sticky='w', padx=20, pady=5)
+
+        ttk.Button(btn_tasas_frame, text="Actualizar Tasas BCV",
+                   command=self._actualizar_tasas_bcv).pack(side=tk.LEFT, padx=5)
+
+        self.label_ultima_act = ttk.Label(btn_tasas_frame,
+                                           text="Ultima actualizacion: --",
+                                           foreground='gray', font=('Segoe UI', 9))
+        self.label_ultima_act.pack(side=tk.LEFT, padx=15)
+
+    def _actualizar_tasas_bcv(self):
+        """Consulta las tasas BCV y actualiza la interfaz."""
+        try:
+            from modulos.tasas_cambio import GestorTasasCambio
+            gestor = GestorTasasCambio(self.db)
+            tasas = gestor.actualizar_tasas_bcv()
+
+            if 'USD' in tasas:
+                self.label_tasa_usd.config(text=f"Bs. {tasas['USD']:,.4f}")
+                # Guardar tasa USD/Bs en ConfiguracionAdministrativa para uso global
+                try:
+                    self.configurador.actualizar_configuracion_tasas({
+                        'TasaCambio': tasas['USD']
+                    })
+                except Exception:
+                    pass
+            if 'EUR' in tasas:
+                self.label_tasa_eur.config(text=f"Bs. {tasas['EUR']:,.4f}")
+
+            from datetime import datetime
+            self.label_ultima_act.config(
+                text=f"Ultima actualizacion: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+
+            messagebox.showinfo("Tasas Actualizadas",
+                                f"Tasas BCV actualizadas correctamente.\n\n"
+                                f"USD/Bs: {tasas.get('USD', '--')}\n"
+                                f"EUR/Bs: {tasas.get('EUR', '--')}")
+
+        except RuntimeError as e:
+            messagebox.showwarning("pyBCV no disponible", str(e))
+        except ImportError:
+            messagebox.showwarning("Modulo no disponible",
+                                   "El modulo tasas_cambio no esta disponible.\n"
+                                   "Ejecute: pip install pyBCV")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al actualizar tasas BCV:\n{e}")
+
+    def _cargar_tasas_en_interfaz(self):
+        """Carga las tasas de cambio actuales en los labels de la interfaz."""
+        try:
+            from modulos.tasas_cambio import GestorTasasCambio
+            gestor = GestorTasasCambio(self.db)
+
+            tasa_usd = gestor.get_tasa_actual('USD')
+            if tasa_usd and tasa_usd != 1.0:
+                self.label_tasa_usd.config(text=f"Bs. {tasa_usd:,.4f}")
+
+            tasa_eur = gestor.get_tasa_actual('EUR')
+            if tasa_eur and tasa_eur != 1.0:
+                self.label_tasa_eur.config(text=f"Bs. {tasa_eur:,.4f}")
+
+            ultima = gestor.get_ultima_actualizacion()
+            if ultima:
+                try:
+                    self.label_ultima_act.config(
+                        text=f"Ultima actualizacion: {ultima.strftime('%d/%m/%Y %H:%M')}")
+                except AttributeError:
+                    # pywintypes.datetime puede no tener strftime directo
+                    from datetime import datetime as _dt
+                    if hasattr(ultima, 'year'):
+                        dt = _dt(ultima.year, ultima.month, ultima.day,
+                                 ultima.hour, ultima.minute, ultima.second)
+                        self.label_ultima_act.config(
+                            text=f"Ultima actualizacion: {dt.strftime('%d/%m/%Y %H:%M')}")
+        except Exception as e:
+            logging.getLogger("angeslab.ventana_config_administrativa").debug(
+                "Error cargando tasas: %s", e)
+
+        # Tasa COP/USD desde ConfiguracionAdministrativa
+        try:
+            config_admin = self.db.query_one(
+                "SELECT TasaCOP_USD FROM ConfiguracionAdministrativa")
+            if config_admin and config_admin.get('TasaCOP_USD'):
+                self.entry_tasa_cop.delete(0, tk.END)
+                self.entry_tasa_cop.insert(0, str(config_admin['TasaCOP_USD']))
+        except Exception:
+            pass
 
     def _crear_tab_firma(self):
         """Crea la pestaña de firma y autorización."""
@@ -474,14 +662,14 @@ class VentanaConfigAdministrativa:
         self.text_pie.grid(row=row, column=0, sticky='ew', padx=20, pady=5)
         row += 1
 
-        ttk.Separator(tab, orient='horizontal').grid(row=row, column=0, sticky='ew', pady=15)
+        ttk.Separator(scrollable_frame, orient='horizontal').grid(row=row, column=0, sticky='ew', pady=15)
         row += 1
 
         # Notas
-        ttk.Label(tab, text="Notas para Resultados:", font=('Segoe UI', 11, 'bold')).grid(row=row, column=0, sticky='w', pady=10)
+        ttk.Label(scrollable_frame, text="Notas para Resultados:", font=('Segoe UI', 11, 'bold')).grid(row=row, column=0, sticky='w', pady=10)
         row += 1
 
-        self.text_notas = tk.Text(tab, width=60, height=4, wrap='word')
+        self.text_notas = tk.Text(scrollable_frame, width=60, height=4, wrap='word')
         self.text_notas.grid(row=row, column=0, sticky='ew', padx=20, pady=5)
 
         scrollable_frame.columnconfigure(0, weight=1)
@@ -562,16 +750,25 @@ class VentanaConfigAdministrativa:
 
     def _seleccionar_color(self, tipo):
         """Permite seleccionar un color."""
-        color_actual = self.color_alto if tipo == 'alto' else self.color_bajo
+        if tipo == 'alto':
+            color_actual = self.color_alto
+        elif tipo == 'bajo':
+            color_actual = self.color_bajo
+        else:
+            color_actual = self.color_encabezado
         color = colorchooser.askcolor(color=color_actual)
 
         if color[1]:  # color[1] es el valor hexadecimal
             if tipo == 'alto':
                 self.color_alto = color[1]
                 self.btn_color_alto.config(bg=color[1])
-            else:
+            elif tipo == 'bajo':
                 self.color_bajo = color[1]
                 self.btn_color_bajo.config(bg=color[1])
+            elif tipo == 'encabezado':
+                self.color_encabezado = color[1]
+                self.btn_color_encabezado.config(bg=color[1])
+                self.preview_encabezado.config(bg=color[1])
 
     def _cargar_configuracion(self):
         """Carga la configuración actual en la interfaz."""
@@ -638,29 +835,29 @@ class VentanaConfigAdministrativa:
             self.var_mostrar_logo.set(config.get('MostrarLogo', True))
 
             # Forma del logo
-            forma_logo = config.get('FormaLogo', 'Cuadrado')
+            forma_logo = config.get('FormaLogo') or 'Cuadrado'
             self.combo_forma_logo.set(forma_logo)
 
             # Impresión
-            self.var_formato.set(config.get('FormatoImpresion', 'Completa'))
+            self.var_formato.set(config.get('FormatoImpresion') or 'Completa')
 
-            papel = config.get('TamanoPapel', 'Carta')
+            papel = config.get('TamanoPapel') or 'Carta'
             _papel_idx = {'Carta': 0, 'A4': 1, 'Oficio': 2, 'Media Carta': 3}
             self.combo_papel.current(_papel_idx.get(papel, 0))
 
-            self.var_orientacion.set(config.get('Orientacion', 'Vertical'))
+            self.var_orientacion.set(config.get('Orientacion') or 'Vertical')
 
             self.spin_margen_sup.delete(0, tk.END)
-            self.spin_margen_sup.insert(0, config.get('MargenSuperior', 2.0))
+            self.spin_margen_sup.insert(0, self._safe_float(config.get('MargenSuperior'), 2.0))
 
             self.spin_margen_inf.delete(0, tk.END)
-            self.spin_margen_inf.insert(0, config.get('MargenInferior', 2.0))
+            self.spin_margen_inf.insert(0, self._safe_float(config.get('MargenInferior'), 2.0))
 
             self.spin_margen_izq.delete(0, tk.END)
-            self.spin_margen_izq.insert(0, config.get('MargenIzquierdo', 2.5))
+            self.spin_margen_izq.insert(0, self._safe_float(config.get('MargenIzquierdo'), 2.5))
 
             self.spin_margen_der.delete(0, tk.END)
-            self.spin_margen_der.insert(0, config.get('MargenDerecho', 2.5))
+            self.spin_margen_der.insert(0, self._safe_float(config.get('MargenDerecho'), 2.5))
 
             # Resultados
             self.var_valores_ref.set(config.get('MostrarValoresReferencia', True))
@@ -668,26 +865,43 @@ class VentanaConfigAdministrativa:
             self.var_metodo.set(config.get('MostrarMetodo', False))
             self.var_resaltar.set(config.get('ResaltarAnormales', True))
 
-            self.color_alto = config.get('ColorAlto', '#FF0000')
+            self.color_alto = config.get('ColorAlto') or '#FF0000'
             self.btn_color_alto.config(bg=self.color_alto)
 
-            self.color_bajo = config.get('ColorBajo', '#0000FF')
+            self.color_bajo = config.get('ColorBajo') or '#0000FF'
             self.btn_color_bajo.config(bg=self.color_bajo)
 
+            # Colores de tabla
+            self.var_usar_colores.set(config.get('UsarColoresTabla', True))
+            self.color_encabezado = config.get('ColorEncabezadoTabla', '#1565c0') or '#1565c0'
+            self.btn_color_encabezado.config(bg=self.color_encabezado)
+            self.preview_encabezado.config(bg=self.color_encabezado)
+
             # Financiera
-            self.combo_moneda.set(config.get('MonedaPrincipal', 'USD'))
+            self.combo_moneda.set(config.get('MonedaPrincipal') or 'USD')
 
             self.entry_simbolo.delete(0, tk.END)
-            self.entry_simbolo.insert(0, config.get('SimboloMoneda', '$'))
+            self.entry_simbolo.insert(0, config.get('SimboloMoneda') or '$')
 
             self.spin_decimales.delete(0, tk.END)
-            self.spin_decimales.insert(0, config.get('DecimalesPrecios', 2))
+            self.spin_decimales.insert(0, config.get('DecimalesPrecios') or 2)
 
             self.spin_iva.delete(0, tk.END)
-            self.spin_iva.insert(0, config.get('IVAPorDefecto', 16.0))
+            self.spin_iva.insert(0, self._safe_float(config.get('IVAPorDefecto'), 16.0))
 
             self.spin_desc_max.delete(0, tk.END)
-            self.spin_desc_max.insert(0, config.get('DescuentoMaximo', 50.0))
+            self.spin_desc_max.insert(0, self._safe_float(config.get('DescuentoMaximo'), 50.0))
+
+            # IGTF / Fiscal
+            self.var_igtf_activo.set(config.get('IGTFActivo', True))
+
+            self.spin_igtf.delete(0, tk.END)
+            self.spin_igtf.insert(0, self._safe_float(config.get('TasaIGTF'), 3.0))
+
+            self.combo_tipo_contrib.set(config.get('TipoContribuyente') or 'Ordinario')
+
+            # Tasas de cambio
+            self._cargar_tasas_en_interfaz()
 
             # Firma
             self.entry_director.delete(0, tk.END)
@@ -717,6 +931,14 @@ class VentanaConfigAdministrativa:
         except Exception as e:
             messagebox.showerror("Error", f"Error al cargar configuración: {e}")
 
+    @staticmethod
+    def _safe_float(value, default=0.0):
+        """Convierte a float de forma segura, retornando default si falla."""
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return default
+
     def _guardar_todo(self):
         """Guarda todas las configuraciones."""
         try:
@@ -744,10 +966,10 @@ class VentanaConfigAdministrativa:
                 'FormatoImpresion': self.var_formato.get(),
                 'TamanoPapel': papel_map.get(self.combo_papel.current(), 'Carta'),
                 'Orientacion': self.var_orientacion.get(),
-                'MargenSuperior': float(self.spin_margen_sup.get()),
-                'MargenInferior': float(self.spin_margen_inf.get()),
-                'MargenIzquierdo': float(self.spin_margen_izq.get()),
-                'MargenDerecho': float(self.spin_margen_der.get()),
+                'MargenSuperior': self._safe_float(self.spin_margen_sup.get(), 2.0),
+                'MargenInferior': self._safe_float(self.spin_margen_inf.get(), 2.0),
+                'MargenIzquierdo': self._safe_float(self.spin_margen_izq.get(), 2.5),
+                'MargenDerecho': self._safe_float(self.spin_margen_der.get(), 2.5),
                 'MostrarLogo': self.var_mostrar_logo.get(),
                 'FormaLogo': self.combo_forma_logo.get()
             }
@@ -761,7 +983,9 @@ class VentanaConfigAdministrativa:
                 'MostrarMetodo': self.var_metodo.get(),
                 'ResaltarAnormales': self.var_resaltar.get(),
                 'ColorAlto': self.color_alto,
-                'ColorBajo': self.color_bajo
+                'ColorBajo': self.color_bajo,
+                'UsarColoresTabla': self.var_usar_colores.get(),
+                'ColorEncabezadoTabla': self.color_encabezado
             }
 
             self.configurador.actualizar_configuracion_resultados(datos_res)
@@ -771,11 +995,37 @@ class VentanaConfigAdministrativa:
                 'MonedaPrincipal': self.combo_moneda.get(),
                 'SimboloMoneda': self.entry_simbolo.get(),
                 'DecimalesPrecios': int(self.spin_decimales.get()),
-                'IVAPorDefecto': float(self.spin_iva.get()),
-                'DescuentoMaximo': float(self.spin_desc_max.get())
+                'IVAPorDefecto': self._safe_float(self.spin_iva.get(), 16.0),
+                'DescuentoMaximo': self._safe_float(self.spin_desc_max.get(), 50.0)
             }
 
             self.configurador.actualizar_configuracion_financiera(datos_fin)
+
+            # IGTF / Fiscal
+            datos_fiscal = {
+                'IGTFActivo': self.var_igtf_activo.get(),
+                'TasaIGTF': self._safe_float(self.spin_igtf.get(), 3.0),
+                'TipoContribuyente': self.combo_tipo_contrib.get(),
+            }
+            self.configurador.actualizar_configuracion_fiscal(datos_fiscal)
+
+            # Tasa COP/USD manual
+            try:
+                tasa_cop_str = self.entry_tasa_cop.get().strip()
+                if tasa_cop_str:
+                    tasa_cop_val = float(tasa_cop_str)
+                    self.configurador.actualizar_configuracion_tasas({
+                        'TasaCOP_USD': tasa_cop_val
+                    })
+                    # Tambien guardar en TasasCambio para historial
+                    try:
+                        from modulos.tasas_cambio import GestorTasasCambio
+                        gestor = GestorTasasCambio(self.db)
+                        gestor.guardar_tasa_manual('COP_USD', tasa_cop_val)
+                    except Exception:
+                        pass
+            except (ValueError, TypeError):
+                pass
 
             # Firma
             datos_firma = {
@@ -808,7 +1058,7 @@ class VentanaConfigAdministrativa:
                 try:
                     self.callback_guardar()
                 except Exception as callback_error:
-                    print(f"Error en callback: {callback_error}")
+                    logging.getLogger("angeslab.ventana_config_administrativa").warning("Error en callback: %s", callback_error)
 
             # Cerrar la ventana
             self.win.destroy()
@@ -825,5 +1075,9 @@ def abrir_ventana_config_administrativa(parent, db, callback_guardar=None):
         parent: Ventana padre
         db: Conexión a la base de datos
         callback_guardar: Función a llamar después de guardar exitosamente
+
+    Returns:
+        VentanaConfigAdministrativa: instancia creada
     """
-    VentanaConfigAdministrativa(parent, db, callback_guardar)
+    v = VentanaConfigAdministrativa(parent, db, callback_guardar)
+    return v

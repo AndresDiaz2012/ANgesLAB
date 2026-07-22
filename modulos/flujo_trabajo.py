@@ -16,6 +16,7 @@ Autor: Sistema ANgesLAB
 ================================================================================
 """
 
+import logging
 from datetime import datetime, timedelta
 from enum import Enum
 from modulos.config_numeracion import ConfiguradorNumeracion
@@ -91,7 +92,7 @@ class FlujoTrabajo:
         try:
             self.config_numeracion = ConfiguradorNumeracion(db)
         except Exception as e:
-            print(f"Advertencia: No se pudo inicializar configurador de numeración: {e}")
+            logging.getLogger("angeslab.flujo_trabajo").warning("No se pudo inicializar configurador de numeración: %s", e)
             self.config_numeracion = None
 
     # -------------------------------------------------------------------------
@@ -153,7 +154,7 @@ class FlujoTrabajo:
             try:
                 return self.config_numeracion.generar_numero_solicitud()
             except Exception as e:
-                print(f"Error en configurador de numeración, usando sistema legado: {e}")
+                logging.getLogger("angeslab.flujo_trabajo").warning("Error en configurador de numeración, usando sistema legado: %s", e)
 
         # Fallback al sistema legado (formato AAAA-NNNNNN)
         anio = datetime.now().strftime('%Y')
@@ -588,7 +589,7 @@ class FlujoTrabajo:
                 VALUES
                 ({solicitud_id}, '{accion.replace("'", "''")}', Now(), {usuario_id})
             """)
-        except:
+        except Exception:
             pass  # Tabla puede no existir
 
     def obtener_historial(self, solicitud_id):
@@ -601,7 +602,7 @@ class FlujoTrabajo:
                 WHERE h.SolicitudID = {solicitud_id}
                 ORDER BY h.FechaAccion DESC
             """)
-        except:
+        except Exception:
             return []
 
     # -------------------------------------------------------------------------

@@ -87,7 +87,7 @@ class PlantillasReportes:
             self.lab_telefono = (config.get('Telefono1') or config.get('Telefono') or '') if config else ''
             self.lab_whatsapp = (config.get('WhatsApp') or '') if config else ''
             self.lab_email = (config.get('Email') or '') if config else ''
-        except:
+        except Exception:
             self.lab_nombre = 'LABORATORIO CLINICO'
             self.lab_rif = ''
             self.lab_direccion = ''
@@ -710,12 +710,12 @@ class PlantillasReportes:
             <tbody>
         """
 
-        # Valores de referencia para lipidos
+        # Valores de referencia para lipidos (ATP III / ACC-AHA)
         ref_lipidos = {
             'COLESTEROL': {'deseable': '<200', 'limite': '200-239', 'alto': '>=240'},
             'TRIGLICERIDOS': {'deseable': '<150', 'limite': '150-199', 'alto': '>=200'},
-            'HDL': {'deseable': '>60', 'limite': '40-60', 'bajo': '<40'},
-            'LDL': {'deseable': '<100', 'limite': '100-159', 'alto': '>=160'},
+            'HDL': {'deseable': '>60', 'limite': 'H:40-60 M:50-60', 'bajo': 'H:<40 M:<50'},
+            'LDL': {'deseable': '<100', 'limite': '100-129 / 130-159', 'alto': '>=160'},
             'VLDL': {'deseable': '<30', 'limite': '30-40', 'alto': '>40'}
         }
 
@@ -770,12 +770,12 @@ class PlantillasReportes:
         </table>
 
         <div style="margin-top: 20px; font-size: 10pt;">
-            <strong>Interpretacion de Riesgo Cardiovascular:</strong>
+            <strong>Interpretacion de Riesgo Cardiovascular (ATP III / ACC-AHA):</strong>
             <ul>
                 <li>Colesterol Total: Deseable &lt;200, Limite 200-239, Alto &ge;240 mg/dL</li>
-                <li>Trigliceridos: Deseable &lt;150, Limite 150-199, Alto &ge;200 mg/dL</li>
-                <li>HDL (Colesterol Bueno): Deseable &gt;60, Bajo &lt;40 mg/dL</li>
-                <li>LDL (Colesterol Malo): Optimo &lt;100, Elevado &ge;160 mg/dL</li>
+                <li>Trigliceridos: Deseable &lt;150, Limite 150-199, Alto &ge;200, Severo &ge;500 mg/dL</li>
+                <li>HDL: Deseable &gt;60 (cardioprotector), Bajo: H &lt;40 / M &lt;50 mg/dL</li>
+                <li>LDL: Optimo &lt;100, Sobre optimo 100-129, Limite 130-159, Alto &ge;160, Muy alto &ge;190 mg/dL</li>
             </ul>
         </div>
         """

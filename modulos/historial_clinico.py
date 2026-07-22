@@ -18,6 +18,7 @@ Copyright 2024-2026 ANgesLAB Solutions
 """
 
 import re
+import logging
 from datetime import datetime
 
 
@@ -42,6 +43,14 @@ class GestorHistorialClinico:
             texto = (unidad.get('Simbolo') or '') if unidad else ''
         except Exception:
             texto = ''
+        # Convertir notación ^N a superíndices Unicode
+        _super = {'0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
+                  '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹'}
+        import re
+        def _repl(m):
+            return ''.join(_super.get(c, c) for c in m.group(1))
+        texto = re.sub(r'\^(\d+)', _repl, texto)
+        texto = texto.replace('mm3', 'mm³').replace('uL', 'µL')
         self._cache_unidades[unidad_id] = texto
         return texto
 
@@ -200,7 +209,7 @@ class GestorHistorialClinico:
 
             return alertas
         except Exception as e:
-            print(f"Error obteniendo alertas: {e}")
+            logging.getLogger("angeslab.historial_clinico").warning("Error obteniendo alertas: %s", e)
             return []
 
     def _verificar_fuera_de_rango(self, valor, valor_ref):
@@ -341,7 +350,7 @@ class GestorHistorialClinico:
                 f"AND s.EstadoSolicitud <> 'Anulada' "
                 f"ORDER BY a.NombreArea"
             ) or []
-        except:
+        except Exception:
             return []
 
     # ================================================================
@@ -402,7 +411,7 @@ class GestorHistorialClinico:
 
             return resultados
         except Exception as e:
-            print(f"Error obteniendo resultados detalle: {e}")
+            logging.getLogger("angeslab.historial_clinico").warning("Error obteniendo resultados detalle: %s", e)
             return []
 
     # ================================================================
@@ -544,7 +553,7 @@ class GestorHistorialClinico:
                 f"ORDER BY MAX(s.FechaSolicitud) DESC"
             ) or []
         except Exception as e:
-            print(f"Error obteniendo pruebas con resultados: {e}")
+            logging.getLogger("angeslab.historial_clinico").warning("Error obteniendo pruebas con resultados: %s", e)
             return []
 
     # ================================================================
@@ -1101,7 +1110,7 @@ class GestorHistorialClinico:
                         resultado['paciente_info']['NumeroSolicitud'] = (
                             sol_info.get('NumeroSolicitud') or '')
                 except Exception as e:
-                    print(f"[preparar_datos_para_ia] Error datos solicitud: {e}")
+                    logging.getLogger("angeslab.historial_clinico").warning("[preparar_datos_para_ia] Error datos solicitud: %s", e)
 
             # Resultados del detalle actual
             try:
@@ -1139,7 +1148,7 @@ class GestorHistorialClinico:
                 resultado['resultados_actuales'] = params_actuales
                 resultado['parametros_alterados'] = params_alterados
             except Exception as e:
-                print(f"[preparar_datos_para_ia] Error resultados actuales: {e}")
+                logging.getLogger("angeslab.historial_clinico").warning("[preparar_datos_para_ia] Error resultados actuales: %s", e)
 
             # Historial de evolucion (reutiliza metodo existente)
             try:
@@ -1149,10 +1158,10 @@ class GestorHistorialClinico:
                 resultado['n_mediciones_previas'] = max(0, n_med - 1)
                 resultado['tiene_historial_previo'] = n_med > 1
             except Exception as e:
-                print(f"[preparar_datos_para_ia] Error historial: {e}")
+                logging.getLogger("angeslab.historial_clinico").warning("[preparar_datos_para_ia] Error historial: %s", e)
 
         except Exception as e:
-            print(f"[preparar_datos_para_ia] Error general: {e}")
+            logging.getLogger("angeslab.historial_clinico").warning("[preparar_datos_para_ia] Error general: %s", e)
 
         return resultado
 
@@ -1287,7 +1296,7 @@ class GestorHistorialClinico:
                 })
 
         except Exception as e:
-            print(f"[obtener_tendencias_globales] Error: {e}")
+            logging.getLogger("angeslab.historial_clinico").warning("[obtener_tendencias_globales] Error: %s", e)
 
         return resultado
 
