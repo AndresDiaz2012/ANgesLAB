@@ -1795,7 +1795,7 @@ class MainApplication:
             (5,  'COA', 'Coagulación',     3),
             (6,  'URO', 'Uroanálisis',     4),
             (7,  'PAR', 'Parasitología',   5),
-            (8,  'TIR', 'Tiroides',        6),
+            (8,  'HOR', 'Hormonas',        6),
             (9,  'SER', 'Serología',       7),
             (10, 'MIC', 'Microbiología',   8),
         ]
@@ -4040,10 +4040,14 @@ class MainApplication:
 
         tk.Button(toolbar, text="🗑️ Eliminar", font=('Segoe UI', 10),
                  bg=COLORS['danger'], fg='white', relief='flat', padx=15, pady=8,
-                 cursor='hand2', command=self.eliminar_prueba).pack(side='left', padx=(0, 15))
+                 cursor='hand2', command=self.eliminar_prueba).pack(side='left', padx=(0, 10))
+
+        tk.Button(toolbar, text="📦 Reubicar área", font=('Segoe UI', 10, 'bold'),
+                 bg=COLORS['info'], fg='white', relief='flat', padx=15, pady=8,
+                 cursor='hand2', command=self.reubicar_pruebas_area).pack(side='left', padx=(0, 15))
 
         tk.Label(toolbar, text="🔍", font=('Segoe UI', 12), bg=COLORS['bg']).pack(side='left')
-        self.search_pru = tk.Entry(toolbar, font=('Segoe UI', 11), width=30, relief='flat',
+        self.search_pru = tk.Entry(toolbar, font=('Segoe UI', 11), width=24, relief='flat',
                                    bg='white', highlightthickness=1, highlightbackground=COLORS['border'])
         self.search_pru.pack(side='left', padx=5, ipady=6)
         self.search_pru.bind('<Return>', lambda e: self.buscar_pruebas())
@@ -4051,6 +4055,22 @@ class MainApplication:
         tk.Button(toolbar, text="Buscar", font=('Segoe UI', 10), bg=COLORS['success'],
                  fg='white', relief='flat', padx=15, cursor='hand2',
                  command=self.buscar_pruebas).pack(side='left', padx=5)
+
+        # Filtro por área: imprescindible para detectar pruebas mal clasificadas
+        tk.Label(toolbar, text="Área:", font=('Segoe UI', 10), bg=COLORS['bg'],
+                 fg=COLORS['text_light']).pack(side='left', padx=(15, 4))
+        self._areas_filtro = db.query(
+            "SELECT AreaID, NombreArea FROM Areas ORDER BY Secuencia, NombreArea") or []
+        valores = ['Todas'] + [a['NombreArea'] for a in self._areas_filtro]
+        self.combo_area_pru = ttk.Combobox(toolbar, values=valores, state='readonly',
+                                           font=('Segoe UI', 10), width=18)
+        self.combo_area_pru.current(0)
+        self.combo_area_pru.pack(side='left', ipady=2)
+        self.combo_area_pru.bind('<<ComboboxSelected>>', lambda e: self.buscar_pruebas())
+
+        self.lbl_conteo_pru = tk.Label(toolbar, text="", font=('Segoe UI', 9),
+                                       bg=COLORS['bg'], fg=COLORS['text_light'])
+        self.lbl_conteo_pru.pack(side='left', padx=12)
 
         list_frame = tk.Frame(scrollable, bg='white')
         list_frame.pack(fill='both', expand=True)
@@ -4072,13 +4092,18 @@ class MainApplication:
         self.tree_pru.bind('<Double-1>', self.editar_prueba)
         self.cargar_pruebas()
 
-    def cargar_pruebas(self, filtro=""):
+    def cargar_pruebas(self, filtro="", area_id=None):
         for item in self.tree_pru.get_children():
             self.tree_pru.delete(item)
 
-        where = ""
+        condiciones = []
         if filtro:
-            where = f"WHERE p.NombrePrueba LIKE '%{filtro}%' OR p.CodigoPrueba LIKE '%{filtro}%'"
+            seguro = filtro.replace("'", "''")
+            condiciones.append(f"(p.NombrePrueba LIKE '%{seguro}%' "
+                               f"OR p.CodigoPrueba LIKE '%{seguro}%')")
+        if area_id is not None:
+            condiciones.append(f"p.AreaID = {int(area_id)}")
+        where = ("WHERE " + " AND ".join(condiciones)) if condiciones else ""
 
         try:
             data = db.query(f"""
@@ -4091,11 +4116,122 @@ class MainApplication:
                     r['PruebaID'], r['CodigoPrueba'] or '', r['NombrePrueba'] or '',
                     r['NombreArea'] or '', 'Sí' if r['Activo'] else 'No'
                 ))
+            if hasattr(self, 'lbl_conteo_pru'):
+                self.lbl_conteo_pru.config(text=f"{len(data)} prueba(s)")
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
+    def _area_id_filtro_pruebas(self):
+        """AreaID seleccionado en el filtro del catálogo, o None si es 'Todas'."""
+        if not hasattr(self, 'combo_area_pru'):
+            return None
+        idx = self.combo_area_pru.current()
+        if idx <= 0:
+            return None
+        return self._areas_filtro[idx - 1]['AreaID']
+
     def buscar_pruebas(self):
-        self.cargar_pruebas(self.search_pru.get().strip())
+        self.cargar_pruebas(self.search_pru.get().strip(),
+                            self._area_id_filtro_pruebas())
+
+    def reubicar_pruebas_area(self):
+        """Cambia el área de todas las pruebas seleccionadas de una sola vez.
+
+        Reclasificar el catálogo prueba por prueba es inviable cuando hay
+        decenas mal ubicadas, por eso la reubicación es en bloque.
+        """
+        sel = self.tree_pru.selection()
+        if not sel:
+            messagebox.showwarning(
+                "Aviso",
+                "Seleccione una o más pruebas para reubicar.\n\n"
+                "Use el filtro por área para listarlas y seleccione con "
+                "Ctrl+clic o Mayús+clic.")
+            return
+
+        pruebas = [(self.tree_pru.item(i)['values'][0],
+                    self.tree_pru.item(i)['values'][2]) for i in sel]
+
+        # Mismas áreas que el filtro: 'General' está inactiva pero se sigue
+        # usando como destino para pruebas sin área específica
+        areas = db.query("SELECT AreaID, NombreArea FROM Areas "
+                         "ORDER BY Secuencia, NombreArea") or []
+        if not areas:
+            messagebox.showerror("Error", "No hay áreas configuradas.")
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title("Reubicar pruebas")
+        win.configure(bg='white')
+        win.transient(self.root)
+        win.grab_set()
+        hacer_ventana_responsiva(win, 520, 420, min_ancho=440, min_alto=360)
+
+        tk.Label(win, text="📦  Reubicar pruebas de área", font=('Segoe UI', 13, 'bold'),
+                 bg='white', fg=COLORS['primary']).pack(pady=(18, 6))
+        tk.Label(win, text=f"{len(pruebas)} prueba(s) seleccionada(s)",
+                 font=('Segoe UI', 10), bg='white', fg='#555').pack()
+
+        marco = tk.Frame(win, bg='white')
+        marco.pack(fill='both', expand=True, padx=25, pady=10)
+        lista = tk.Listbox(marco, font=('Segoe UI', 9), height=8,
+                           bg='#f8f9fa', relief='solid', bd=1)
+        sb = ttk.Scrollbar(marco, orient='vertical', command=lista.yview)
+        lista.configure(yscrollcommand=sb.set)
+        lista.pack(side='left', fill='both', expand=True)
+        sb.pack(side='right', fill='y')
+        for _pid, nombre in pruebas:
+            lista.insert('end', f"  {nombre}")
+
+        fila = tk.Frame(win, bg='white')
+        fila.pack(fill='x', padx=25, pady=(4, 0))
+        tk.Label(fila, text="Nueva área:", font=('Segoe UI', 10), bg='white',
+                 width=12, anchor='w').pack(side='left')
+        combo = ttk.Combobox(fila, values=[a['NombreArea'] for a in areas],
+                             state='readonly', font=('Segoe UI', 10), width=24)
+        combo.pack(side='left', padx=5)
+
+        def aplicar():
+            idx = combo.current()
+            if idx < 0:
+                messagebox.showwarning("Aviso", "Seleccione el área de destino.", parent=win)
+                return
+            destino = areas[idx]
+            if not messagebox.askyesno(
+                    "Confirmar",
+                    f"Se moverán {len(pruebas)} prueba(s) al área "
+                    f"'{destino['NombreArea']}'.\n\n¿Continuar?", parent=win):
+                return
+            movidas = 0
+            errores = []
+            for pid, nombre in pruebas:
+                try:
+                    db.execute(f"UPDATE Pruebas SET AreaID = {destino['AreaID']} "
+                               f"WHERE PruebaID = {int(pid)}")
+                    movidas += 1
+                except Exception as e:
+                    errores.append(f"{nombre}: {e}")
+            win.destroy()
+            self.buscar_pruebas()
+            if errores:
+                messagebox.showwarning(
+                    "Reubicación parcial",
+                    f"Se movieron {movidas} de {len(pruebas)}.\n\n"
+                    "No se pudieron mover:\n" + "\n".join(errores[:8]))
+            else:
+                messagebox.showinfo(
+                    "Listo",
+                    f"{movidas} prueba(s) movida(s) al área "
+                    f"'{destino['NombreArea']}'.")
+
+        btns = tk.Frame(win, bg='white')
+        btns.pack(pady=16)
+        tk.Button(btns, text="📦  Reubicar", font=('Segoe UI', 10, 'bold'),
+                  bg=COLORS['success'], fg='white', relief='flat', width=16,
+                  cursor='hand2', command=aplicar).pack(side='left', padx=8)
+        tk.Button(btns, text="Cancelar", font=('Segoe UI', 10),
+                  bg='#95a5a6', fg='white', relief='flat', width=12,
+                  cursor='hand2', command=win.destroy).pack(side='left', padx=8)
 
     def form_prueba(self, prueba_id=None):
         win = tk.Toplevel(self.root)
@@ -15247,7 +15383,7 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
             if not messagebox.askyesno(
                 "Cargar Valores Predeterminados",
                 "Esto cargará valores de referencia por edad/sexo para los parámetros "
-                "estándar (Hematología, Química, Coagulación, Tiroides) basados en "
+                "estándar (Hematología, Química, Coagulación, Hormonas) basados en "
                 "bibliografía clínica.\n\n"
                 "Solo se cargarán para parámetros que NO tengan variantes configuradas.\n\n"
                 "¿Continuar?", parent=win):

@@ -141,8 +141,10 @@ CONFIGURACIONES_DEFECTO = {
         'incluir_firma': True
     },
     'Form_Inf_Tiroides': {
+        # El codigo se conserva por compatibilidad con configuraciones guardadas;
+        # el area 8 pasó de "Tiroides" a "Hormonas".
         'codigo': 'Form_Inf_Tiroides',
-        'nombre': 'Perfil Tiroideo',
+        'nombre': 'Perfil Hormonal',
         'tipo_reporte': 'Resultado',
         'area_id': 8,
         'tamano_papel': 'Carta',

@@ -1010,7 +1010,8 @@ class InterpretadorClinico:
     AREA_COAGULACION = 5
     AREA_UROANALIS = 6
     AREA_PARASITOLOGIA = 7
-    AREA_TIROIDES = 8
+    AREA_HORMONAS = 8
+    AREA_TIROIDES = AREA_HORMONAS   # alias histórico (el área pasó a ser Hormonas)
     AREA_SEROLOGIA = 9
     AREA_MICROBIOLOGIA = 10
     AREA_GENERAL = 29
@@ -1220,7 +1221,7 @@ class InterpretadorClinico:
                 return self.motor_reglas.interpretar_coagulacion(resultados_norm)
             elif area_id == self.AREA_UROANALIS:
                 return self.motor_reglas.interpretar_uroanalis(resultados_norm)
-            elif area_id == self.AREA_TIROIDES:
+            elif area_id == self.AREA_HORMONAS:
                 return self.motor_reglas.interpretar_tiroides(resultados_norm)
             elif area_id == self.AREA_SEROLOGIA:
                 return self.motor_reglas.interpretar_serologia(resultados_norm)
@@ -1254,7 +1255,7 @@ class InterpretadorClinico:
 
         nombres_areas = {
             1: 'Hematología', 2: 'Química Sanguínea', 5: 'Coagulación',
-            6: 'Uroanálisis', 7: 'Parasitología', 8: 'Tiroides/Hormonal',
+            6: 'Uroanálisis', 7: 'Parasitología', 8: 'Hormonas',
             9: 'Serología', 10: 'Microbiología', 29: 'General'
         }
         area_nombre = nombres_areas.get(area_id, f'Área {area_id}')

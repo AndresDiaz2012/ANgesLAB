@@ -48,7 +48,7 @@ COLORES_AREA = {
     5:  {'nombre': 'Coagulación',    'abrev': 'COA', 'color': '#8e24aa', 'color_texto': '#ffffff'},  # Púrpura
     6:  {'nombre': 'Uroanálisis',    'abrev': 'URO', 'color': '#f9a825', 'color_texto': '#000000'},  # Amarillo
     7:  {'nombre': 'Parasitología',  'abrev': 'PAR', 'color': '#6d4c41', 'color_texto': '#ffffff'},  # Marrón
-    8:  {'nombre': 'Tiroides',       'abrev': 'TIR', 'color': '#00acc1', 'color_texto': '#ffffff'},  # Cyan
+    8:  {'nombre': 'Hormonas',       'abrev': 'HOR', 'color': '#00acc1', 'color_texto': '#ffffff'},  # Cyan
     9:  {'nombre': 'Serología',      'abrev': 'SER', 'color': '#e91e63', 'color_texto': '#ffffff'},  # Rosa
     10: {'nombre': 'Microbiología',  'abrev': 'MIC', 'color': '#43a047', 'color_texto': '#ffffff'},  # Verde
     29: {'nombre': 'General',        'abrev': 'GEN', 'color': '#546e7a', 'color_texto': '#ffffff'},  # Gris

@@ -44,7 +44,7 @@ AREAS_LAB = {
     5:  {'nombre': 'Coagulación',    'abrev': 'COA'},
     6:  {'nombre': 'Uroanálisis',    'abrev': 'URO'},
     7:  {'nombre': 'Parasitología',  'abrev': 'PAR'},
-    8:  {'nombre': 'Tiroides/Hormonas', 'abrev': 'TIR'},
+    8:  {'nombre': 'Hormonas',       'abrev': 'HOR'},
     9:  {'nombre': 'Serología',      'abrev': 'SER'},
     10: {'nombre': 'Microbiología',  'abrev': 'MIC'},
     29: {'nombre': 'General',        'abrev': 'GEN'},

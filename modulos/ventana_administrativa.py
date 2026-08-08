@@ -1609,7 +1609,7 @@ class VentanaAdministrativa:
 
         areas_info = [
             (1, 'Hematologia'), (2, 'Quimica'), (5, 'Coagulacion'),
-            (6, 'Uroanalisis'), (7, 'Parasitologia'), (8, 'Tiroides/Hormonas'),
+            (6, 'Uroanalisis'), (7, 'Parasitologia'), (8, 'Hormonas'),
             (9, 'Serologia'), (10, 'Microbiologia'), (29, 'General'),
         ]
 
