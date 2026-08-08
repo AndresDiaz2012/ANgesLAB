@@ -160,6 +160,7 @@ Source: "..\ANgesLAB.accdb"; DestDir: "{app}"; Components: database; Flags: only
 Source: "..\db_config.json"; DestDir: "{app}"; Components: main; Flags: onlyifdoesntexist uninsneveruninstall
 Source: "..\backup_config.json"; DestDir: "{app}"; Components: main; Flags: onlyifdoesntexist uninsneveruninstall
 Source: "..\config_ia.json"; DestDir: "{app}"; Components: ia; Flags: onlyifdoesntexist uninsneveruninstall
+Source: "..\config_whatsapp.json"; DestDir: "{app}"; Components: main; Flags: onlyifdoesntexist uninsneveruninstall
 
 ; --- Logos (personalizables por el laboratorio) ---
 Source: "..\logos\*"; DestDir: "{app}\logos"; Components: resources; Flags: ignoreversion skipifsourcedoesntexist; \
@@ -197,6 +198,7 @@ Source: "..\modulos\ventana_config_administrativa.py"; DestDir: "{app}\modulos";
 Source: "..\modulos\ventana_config_numeracion.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\ventana_configuracion_completa.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\veterinario.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
+Source: "..\modulos\whatsapp_envio.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 
 ; --- Modulos de Inventario, Equipos, Etiquetas, Hojas de Trabajo ---
 Source: "..\modulos\inventario.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
@@ -288,6 +290,7 @@ Type: files; Name: "{app}\modulos\*.pyc"
 Type: files; Name: "{app}\*.pyc"
 Type: files; Name: "{app}\logs\*.log"
 Type: files; Name: "{app}\config_ia.json"
+Type: files; Name: "{app}\config_whatsapp.json"
 Type: dirifempty; Name: "{app}\logs"
 Type: dirifempty; Name: "{app}\backups"
 Type: dirifempty; Name: "{app}\firmas"

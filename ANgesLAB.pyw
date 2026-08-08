@@ -181,6 +181,16 @@ try:
 except ImportError:
     control_intentos = None
 
+# Importar módulo de envío por WhatsApp con adjunto automático
+try:
+    from modulos.whatsapp_envio import (
+        EnviadorWhatsApp, ConfigWhatsApp, crear_enviador_whatsapp,
+        normalizar_telefono, formatear_para_mostrar, validar_numero_whatsapp
+    )
+    WHATSAPP_ENVIO_DISPONIBLE = True
+except ImportError:
+    WHATSAPP_ENVIO_DISPONIBLE = False
+
 # ============================================================
 # MÓDULO DE BASE DE DATOS
 # ============================================================
@@ -649,6 +659,33 @@ class LoginWindow:
 # ============================================================
 # UTILIDADES PARA VENTANAS RESPONSIVAS
 # ============================================================
+
+def componer_telefono_internacional(codigo_pais, numero):
+    """Une el código de país con el número evitando duplicarlo.
+
+    El usuario escribe indistintamente '04121234567', '4121234567' o
+    '+584121234567'; concatenar sin más produce '+5804121234567' o
+    '+58+584121234567', formatos que WhatsApp rechaza con "el número no está
+    registrado" aunque la línea sí tenga WhatsApp.
+    """
+    numero = str(numero or '').strip()
+    if not numero:
+        return ''
+    cp = ''.join(ch for ch in str(codigo_pais or '') if ch.isdigit()) or '58'
+
+    if WHATSAPP_ENVIO_DISPONIBLE:
+        normalizado = normalizar_telefono(numero, cp)
+        if normalizado:
+            return '+' + normalizado
+
+    # Respaldo si el módulo de WhatsApp no está disponible
+    digitos = ''.join(ch for ch in numero if ch.isdigit())
+    if digitos.startswith(cp + cp):
+        digitos = digitos[len(cp):]
+    if digitos.startswith(cp):
+        digitos = digitos[len(cp):]
+    return '+' + cp + digitos.lstrip('0')
+
 
 def hacer_ventana_responsiva(ventana, ancho_deseado, alto_deseado, min_ancho=400, min_alto=300, permitir_redimensionar=True):
     """
@@ -2926,7 +2963,7 @@ class MainApplication:
             telefono_completo = ''
             if tiene_whatsapp:
                 codigo_pais = entries['codigo_pais'].get().split()[0]  # Obtiene solo el código (+58)
-                telefono_completo = codigo_pais + tiene_whatsapp
+                telefono_completo = componer_telefono_internacional(codigo_pais, tiene_whatsapp)
 
             data = {
                 'TipoDocumento': entries['tipo_doc'].get().strip(),
@@ -3184,7 +3221,7 @@ class MainApplication:
             telefono_completo = ''
             if tiene_whatsapp:
                 codigo_pais = entries['codigo_pais'].get().split()[0]  # Obtiene solo el código (+58)
-                telefono_completo = codigo_pais + tiene_whatsapp
+                telefono_completo = componer_telefono_internacional(codigo_pais, tiene_whatsapp)
 
             try:
                 _comision = float(entries['comision'].get().strip().replace(',', '.'))
@@ -5627,8 +5664,9 @@ class MainApplication:
         sexo_val = self.pac_sexo.get()
         sexo = sexo_val[0] if sexo_val else None
 
-        # Teléfono
-        telefono = self.pac_telefono.get().strip()
+        # Teléfono (se normaliza para que WhatsApp lo acepte)
+        telefono = componer_telefono_internacional(
+            self._codigo_pais_whatsapp(), self.pac_telefono.get().strip())
 
         data = {
             'TipoDocumento': self.pac_tipo_doc.get().strip() or 'V',
@@ -11326,12 +11364,331 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
         except Exception as e:
             messagebox.showerror("Error", f"Error al imprimir resultados:\n{str(e)}")
 
-    def enviar_whatsapp_resultado(self):
-        """Envía el resultado por WhatsApp al paciente"""
+    # ══════════════════════════════════════════════════════════════════
+    # ENVÍO POR WHATSAPP (el PDF se adjunta automáticamente)
+    # ══════════════════════════════════════════════════════════════════
+
+    CODIGOS_PAIS_WHATSAPP = [
+        ('+58  Venezuela', '58'), ('+57  Colombia', '57'), ('+1   EEUU / Canadá', '1'),
+        ('+34  España', '34'), ('+51  Perú', '51'), ('+56  Chile', '56'),
+        ('+52  México', '52'), ('+54  Argentina', '54'), ('+55  Brasil', '55'),
+        ('+593 Ecuador', '593'), ('+507 Panamá', '507'), ('+506 Costa Rica', '506'),
+    ]
+
+    def _codigo_pais_whatsapp(self):
+        """Código de país configurado para WhatsApp (Venezuela por defecto)."""
+        if WHATSAPP_ENVIO_DISPONIBLE:
+            try:
+                return str(ConfigWhatsApp().get('codigo_pais', '58'))
+            except Exception:
+                pass
+        return '58'
+
+    def _numero_whatsapp_utilizable(self, telefono, codigo_pais=None):
+        """Devuelve (es_utilizable, motivo) para un teléfono almacenado."""
+        if not WHATSAPP_ENVIO_DISPONIBLE:
+            return bool(str(telefono or '').strip()), "No hay número registrado."
+        return validar_numero_whatsapp(telefono,
+                                       codigo_pais or self._codigo_pais_whatsapp())
+
+    def _pedir_numero_whatsapp(self, destinatario, sugerido='', paciente_id=None,
+                               medico_id=None, motivo=''):
+        """Pide el número de WhatsApp cuando el registrado falta o no es válido.
+
+        Devuelve dict {'telefono', 'codigo_pais', 'guardar'} o None si se cancela.
+        """
+        cp_actual = self._codigo_pais_whatsapp()
+
+        win = tk.Toplevel(self.root)
+        win.title("Número de WhatsApp")
+        win.configure(bg='white')
+        win.transient(self.root)
+        win.grab_set()
+        hacer_ventana_responsiva(win, 480, 330, min_ancho=420, min_alto=300)
+
+        tk.Label(win, text="📱  Número de WhatsApp", font=('Segoe UI', 13, 'bold'),
+                 bg='white', fg=COLORS['primary']).pack(pady=(18, 4))
+
+        aviso = (f"{destinatario} no tiene un número de WhatsApp válido registrado.\n"
+                 "Indique el número al que se enviarán los resultados.")
+        tk.Label(win, text=aviso, font=('Segoe UI', 9), bg='white', fg='#555',
+                 justify='center', wraplength=420).pack(pady=(0, 4))
+
+        if motivo:
+            tk.Label(win, text=f"⚠  {motivo}", font=('Segoe UI', 8, 'bold'),
+                     bg='#fff8e1', fg='#b26a00', justify='center', wraplength=420,
+                     padx=10, pady=6).pack(fill='x', padx=25, pady=(0, 10))
+        else:
+            tk.Frame(win, bg='white', height=6).pack()
+
+        form = tk.Frame(win, bg='white')
+        form.pack(fill='x', padx=30)
+
+        fila = tk.Frame(form, bg='white')
+        fila.pack(fill='x', pady=6)
+        tk.Label(fila, text="País:", font=('Segoe UI', 9), bg='white',
+                 width=8, anchor='w').pack(side='left')
+
+        etiquetas = [e for e, _ in self.CODIGOS_PAIS_WHATSAPP]
+        combo_pais = ttk.Combobox(fila, values=etiquetas, state='readonly',
+                                  font=('Segoe UI', 9), width=22)
+        idx = next((i for i, (_, c) in enumerate(self.CODIGOS_PAIS_WHATSAPP)
+                    if c == cp_actual), 0)
+        combo_pais.current(idx)
+        combo_pais.pack(side='left', padx=5)
+
+        fila2 = tk.Frame(form, bg='white')
+        fila2.pack(fill='x', pady=6)
+        tk.Label(fila2, text="Número:", font=('Segoe UI', 9), bg='white',
+                 width=8, anchor='w').pack(side='left')
+        entry_num = tk.Entry(fila2, font=('Segoe UI', 12), width=20,
+                             relief='solid', bd=1)
+        entry_num.insert(0, str(sugerido or ''))
+        entry_num.pack(side='left', padx=5, ipady=4)
+
+        lbl_prev = tk.Label(form, text="", font=('Segoe UI', 9, 'bold'),
+                            bg='white', fg='#2e7d32')
+        lbl_prev.pack(anchor='w', padx=60, pady=(2, 6))
+
+        var_guardar = tk.BooleanVar(value=bool(paciente_id or medico_id))
+        if paciente_id or medico_id:
+            destino_ficha = "del paciente" if paciente_id else "del médico"
+            tk.Checkbutton(form, text=f"Guardar este número en la ficha {destino_ficha}",
+                           variable=var_guardar, bg='white', font=('Segoe UI', 9),
+                           anchor='w').pack(anchor='w', pady=(0, 6))
+
+        def _cp():
+            return self.CODIGOS_PAIS_WHATSAPP[combo_pais.current()][1]
+
+        def _refrescar(*_):
+            if not WHATSAPP_ENVIO_DISPONIBLE:
+                return
+            norm = normalizar_telefono(entry_num.get(), _cp())
+            ok, razon = validar_numero_whatsapp(entry_num.get(), _cp())
+            if ok:
+                lbl_prev.config(text=f"✔ Se enviará a: {formatear_para_mostrar(norm)}",
+                                fg='#2e7d32')
+            elif norm:
+                lbl_prev.config(text=f"⚠ {formatear_para_mostrar(norm)} — {razon}",
+                                fg='#c62828')
+            else:
+                lbl_prev.config(text="Número incompleto", fg='#c62828')
+
+        entry_num.bind('<KeyRelease>', _refrescar)
+        combo_pais.bind('<<ComboboxSelected>>', _refrescar)
+        _refrescar()
+
+        resultado = {}
+
+        def aceptar():
+            numero = entry_num.get().strip()
+            cp = _cp()
+            if WHATSAPP_ENVIO_DISPONIBLE:
+                if not normalizar_telefono(numero, cp):
+                    messagebox.showwarning("Aviso", "Ingrese un número de WhatsApp válido.",
+                                           parent=win)
+                    return
+                ok, razon = validar_numero_whatsapp(numero, cp)
+                if not ok:
+                    # Se permite continuar: las reglas por país pueden quedar cortas
+                    if not messagebox.askyesno(
+                            "Número dudoso",
+                            f"{razon}\n\nSi el número no tiene WhatsApp, la aplicación "
+                            "mostrará 'el número no está registrado'.\n\n"
+                            "¿Intentar el envío de todos modos?", parent=win):
+                        return
+            elif not ''.join(filter(str.isdigit, numero)):
+                messagebox.showwarning("Aviso", "Ingrese un número de WhatsApp válido.",
+                                       parent=win)
+                return
+            resultado.update({'telefono': numero, 'codigo_pais': cp,
+                              'guardar': bool(var_guardar.get())})
+            win.destroy()
+
+        btns = tk.Frame(win, bg='white')
+        btns.pack(pady=16)
+        tk.Button(btns, text="📤  Enviar", font=('Segoe UI', 10, 'bold'),
+                  bg=COLORS['success'], fg='white', relief='flat', width=14,
+                  cursor='hand2', command=aceptar).pack(side='left', padx=8)
+        tk.Button(btns, text="Cancelar", font=('Segoe UI', 10),
+                  bg='#95a5a6', fg='white', relief='flat', width=12,
+                  cursor='hand2', command=win.destroy).pack(side='left', padx=8)
+
+        entry_num.focus_set()
+        win.bind('<Return>', lambda e: aceptar())
+        self.root.wait_window(win)
+
+        return resultado or None
+
+    def _guardar_telefono_contacto(self, telefono, paciente_id=None, medico_id=None):
+        """Guarda en la ficha el número usado en el envío."""
         try:
-            # Obtener datos del paciente
+            tel = str(telefono).strip()
+            if not tel:
+                return
+            if paciente_id:
+                db.execute(f"UPDATE Pacientes SET Telefono1 = '{tel.replace(chr(39), chr(39)*2)}' "
+                           f"WHERE PacienteID = {paciente_id}")
+            elif medico_id:
+                db.execute(f"UPDATE Medicos SET Telefono1 = '{tel.replace(chr(39), chr(39)*2)}' "
+                           f"WHERE MedicoID = {medico_id}")
+        except Exception as e:
+            _log.warning("No se pudo guardar el teléfono de contacto: %s", e)
+
+    def _dialogo_resultado_whatsapp(self, titulo, texto, color='#059669'):
+        """Resultado del envío con opción de reintentar con otro número.
+
+        Devuelve 'ok' o 'reintentar'.
+        """
+        win = tk.Toplevel(self.root)
+        win.title(titulo)
+        win.configure(bg='white')
+        win.transient(self.root)
+        win.grab_set()
+        hacer_ventana_responsiva(win, 520, 320, min_ancho=440, min_alto=280)
+
+        tk.Label(win, text=titulo, font=('Segoe UI', 12, 'bold'),
+                 bg='white', fg=color).pack(pady=(18, 8))
+        tk.Label(win, text=texto, font=('Segoe UI', 9), bg='white', fg='#333',
+                 justify='left', wraplength=450).pack(padx=25, pady=(0, 10))
+
+        tk.Label(win, text="Si WhatsApp indicó que el número no está registrado, "
+                           "puede reintentar con otro número.",
+                 font=('Segoe UI', 8), bg='white', fg='#777',
+                 justify='center', wraplength=450).pack(padx=25, pady=(0, 4))
+
+        accion = {'v': 'ok'}
+
+        def _cerrar(valor):
+            accion['v'] = valor
+            win.destroy()
+
+        btns = tk.Frame(win, bg='white')
+        btns.pack(pady=16)
+        tk.Button(btns, text="Aceptar", font=('Segoe UI', 10, 'bold'),
+                  bg=COLORS['primary'], fg='white', relief='flat', width=14,
+                  cursor='hand2', command=lambda: _cerrar('ok')).pack(side='left', padx=8)
+        tk.Button(btns, text="📱  Probar con otro número", font=('Segoe UI', 10),
+                  bg=COLORS['warning'], fg='white', relief='flat', width=24,
+                  cursor='hand2',
+                  command=lambda: _cerrar('reintentar')).pack(side='left', padx=8)
+
+        win.bind('<Return>', lambda e: _cerrar('ok'))
+        win.bind('<Escape>', lambda e: _cerrar('ok'))
+        self.root.wait_window(win)
+        return accion['v']
+
+    def _ejecutar_envio_whatsapp(self, telefono, mensaje, pdf_path,
+                                 codigo_pais=None, titulo="WhatsApp",
+                                 contexto=None):
+        """Abre WhatsApp, adjunta el PDF y lo envía sin pasos manuales.
+
+        contexto: dict opcional {'destinatario', 'paciente_id', 'medico_id'}
+                  que permite reintentar con otro número si WhatsApp rechaza
+                  el actual por no estar registrado.
+        """
+        if not WHATSAPP_ENVIO_DISPONIBLE:
+            # Respaldo: comportamiento clásico (adjuntar a mano)
+            import urllib.parse
+            num = ''.join(filter(str.isdigit, str(telefono or '')))
+            webbrowser.open(f"https://wa.me/{num}?text={urllib.parse.quote(mensaje)}")
+            messagebox.showinfo(titulo,
+                                "Se abrió WhatsApp.\n\nAdjunte manualmente el PDF:\n"
+                                f"{pdf_path}")
+            return
+
+        import threading
+
+        enviador = crear_enviador_whatsapp()
+
+        estado = tk.Toplevel(self.root)
+        estado.title("Enviando por WhatsApp")
+        estado.configure(bg='white')
+        estado.transient(self.root)
+        estado.resizable(False, False)
+        estado.attributes('-topmost', True)
+        tk.Label(estado, text="📤  Enviando resultados por WhatsApp…",
+                 font=('Segoe UI', 11, 'bold'), bg='white',
+                 fg=COLORS['primary']).pack(padx=30, pady=(20, 6))
+        tk.Label(estado, text="No use el teclado ni el ratón hasta que termine.",
+                 font=('Segoe UI', 9), bg='white', fg='#c62828').pack(padx=30, pady=(0, 18))
+        estado.update_idletasks()
+        ancho, alto = estado.winfo_reqwidth(), estado.winfo_reqheight()
+        x = self.root.winfo_rootx() + (self.root.winfo_width() - ancho) // 2
+        y = self.root.winfo_rooty() + 60
+        estado.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        estado.update()
+
+        salida = {}
+
+        def _trabajo():
+            try:
+                salida['r'] = enviador.enviar_documento(
+                    telefono, pdf_path, mensaje, codigo_pais=codigo_pais)
+            except Exception as e:
+                salida['r'] = {'exito': False, 'enviado': False,
+                               'mensaje': f'Error al enviar: {e}'}
+
+        hilo = threading.Thread(target=_trabajo, daemon=True)
+        hilo.start()
+
+        def _revisar():
+            if hilo.is_alive():
+                self.root.after(300, _revisar)
+                return
+            try:
+                estado.destroy()
+            except Exception:
+                pass
+
+            r = salida.get('r') or {}
+            num_txt = formatear_para_mostrar(r.get('telefono')) or str(telefono)
+
+            if r.get('enviado'):
+                texto = (f"Resultados enviados a {num_txt}\n\n"
+                         "El PDF se adjuntó y envió automáticamente.\n"
+                         "Verifique la conversación en WhatsApp.")
+                color = COLORS['success']
+            elif r.get('exito'):
+                texto = f"{r.get('mensaje', '')}\n\nNúmero: {num_txt}"
+                color = COLORS['primary']
+            else:
+                texto = (f"No se completó el envío automático.\n\n"
+                         f"{r.get('mensaje', 'Error desconocido')}\n\n"
+                         f"El PDF está en:\n{pdf_path}")
+                color = COLORS['danger']
+
+            accion = self._dialogo_resultado_whatsapp(titulo, texto, color)
+
+            if accion == 'reintentar':
+                ctx = contexto or {}
+                datos = self._pedir_numero_whatsapp(
+                    destinatario=ctx.get('destinatario', 'El destinatario'),
+                    sugerido='',
+                    paciente_id=ctx.get('paciente_id'),
+                    medico_id=ctx.get('medico_id'),
+                    motivo="WhatsApp no aceptó el número anterior. "
+                           "Verifique que sea un celular con WhatsApp activo.")
+                if not datos:
+                    return
+                if datos.get('guardar'):
+                    self._guardar_telefono_contacto(
+                        datos['telefono'],
+                        paciente_id=ctx.get('paciente_id'),
+                        medico_id=ctx.get('medico_id'))
+                self._ejecutar_envio_whatsapp(
+                    datos['telefono'], mensaje, pdf_path,
+                    codigo_pais=datos['codigo_pais'], titulo=titulo,
+                    contexto=contexto)
+
+        self.root.after(400, _revisar)
+
+    def enviar_whatsapp_resultado(self):
+        """Envía el resultado por WhatsApp al paciente, con el PDF adjunto."""
+        try:
             sol = db.query_one(f"""
-                SELECT s.NumeroSolicitud, p.Nombres, p.Apellidos, p.Telefono1
+                SELECT s.NumeroSolicitud, s.PacienteID,
+                       p.Nombres, p.Apellidos, p.Telefono1
                 FROM Solicitudes s
                 LEFT JOIN Pacientes p ON s.PacienteID = p.PacienteID
                 WHERE s.SolicitudID = {self.sol_id_resultado}
@@ -11341,49 +11698,54 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                 messagebox.showwarning("Aviso", "No se encontró la solicitud")
                 return
 
-            telefono = sol.get('Telefono1') or ''
+            nombre_paciente = f"{sol.get('Nombres') or ''} {sol.get('Apellidos') or ''}".strip()
+            paciente_id = sol.get('PacienteID')
+            codigo_pais = self._codigo_pais_whatsapp()
+
+            destinatario = (f"El paciente {nombre_paciente}".strip()
+                            if nombre_paciente else "El paciente")
+
+            # Teléfono registrado; si falta o WhatsApp no lo aceptaría, se pide
+            # el número en el momento (por ejemplo, el que dan en el ingreso)
+            telefono = (sol.get('Telefono1') or '').strip()
+            valido, motivo = self._numero_whatsapp_utilizable(telefono, codigo_pais)
             if not telefono:
-                messagebox.showwarning("Aviso", "El paciente no tiene número de teléfono registrado.\n\nPor favor, actualice los datos del paciente.")
-                return
+                motivo = ''
 
-            # Limpiar número de teléfono (solo dígitos)
-            telefono_limpio = ''.join(filter(str.isdigit, telefono))
-
-            # Si no tiene código de país, agregar el de Venezuela
-            if len(telefono_limpio) == 10:
-                telefono_limpio = '58' + telefono_limpio
-            elif len(telefono_limpio) == 11 and telefono_limpio.startswith('0'):
-                telefono_limpio = '58' + telefono_limpio[1:]
+            guardar_en_ficha = False
+            if not valido:
+                datos = self._pedir_numero_whatsapp(
+                    destinatario=destinatario,
+                    sugerido=telefono,
+                    paciente_id=paciente_id,
+                    motivo=motivo)
+                if not datos:
+                    return
+                telefono = datos['telefono']
+                codigo_pais = datos['codigo_pais']
+                guardar_en_ficha = datos['guardar']
 
             # Generar PDF
             pdf_path = self.generar_pdf_resultados(guardar_como=False)
             if not pdf_path:
                 return
 
-            nombre_paciente = f"{sol.get('Nombres') or ''} {sol.get('Apellidos') or ''}".strip()
+            if guardar_en_ficha and paciente_id:
+                self._guardar_telefono_contacto(telefono, paciente_id=paciente_id)
 
-            # Crear mensaje
             mensaje = f"""Estimado/a {nombre_paciente},
 
 Sus resultados de laboratorio (Solicitud N° {sol['NumeroSolicitud']}) están listos.
 
-Por favor, revise el archivo PDF adjunto con sus resultados.
+Adjunto encontrará el PDF con sus resultados.
 
 _ANgesLAB - Laboratorio Clínico_"""
 
-            # Codificar mensaje para URL
-            import urllib.parse
-            mensaje_encoded = urllib.parse.quote(mensaje)
-
-            # Abrir WhatsApp Web
-            whatsapp_url = f"https://wa.me/{telefono_limpio}?text={mensaje_encoded}"
-            webbrowser.open(whatsapp_url)
-
-            # Mostrar instrucciones
-            messagebox.showinfo("WhatsApp",
-                f"Se ha abierto WhatsApp Web con el número:\n{telefono}\n\n"
-                f"El PDF se ha guardado en:\n{pdf_path}\n\n"
-                "Por favor, adjunte el PDF manualmente en la conversación de WhatsApp.")
+            self._ejecutar_envio_whatsapp(telefono, mensaje, pdf_path,
+                                          codigo_pais=codigo_pais,
+                                          titulo="WhatsApp - Paciente",
+                                          contexto={'destinatario': destinatario,
+                                                    'paciente_id': paciente_id})
 
         except Exception as e:
             messagebox.showerror("Error", f"Error al enviar por WhatsApp:\n{str(e)}")
@@ -11587,52 +11949,54 @@ ANgesLAB - Laboratorio Clínico""")
                 messagebox.showwarning("Aviso", "Esta solicitud no tiene un médico asignado.\n\nPor favor, asigne un médico a la solicitud.")
                 return
 
-            telefono_medico = sol.get('TelefonoMedico') or ''
+            nombre_paciente = sol.get('Paciente') or 'N/A'
+            nombre_medico = sol.get('NombreMedico') or 'Dr.'
+            medico_id = sol.get('MedicoID')
+            codigo_pais = self._codigo_pais_whatsapp()
+
+            destinatario = f"El médico {nombre_medico}".strip()
+
+            # Teléfono registrado; si falta o WhatsApp no lo aceptaría, se pide
+            # el número en el momento
+            telefono_medico = (sol.get('TelefonoMedico') or '').strip()
+            valido, motivo = self._numero_whatsapp_utilizable(telefono_medico, codigo_pais)
             if not telefono_medico:
-                messagebox.showwarning("Aviso", f"El médico {sol.get('NombreMedico', '')} no tiene número de teléfono registrado.\n\nPor favor, actualice los datos del médico.")
-                return
+                motivo = ''
 
-            # Limpiar número de teléfono (solo dígitos)
-            telefono_limpio = ''.join(filter(str.isdigit, telefono_medico))
-
-            # Si no tiene código de país, agregar el de Venezuela
-            if len(telefono_limpio) == 10:
-                telefono_limpio = '58' + telefono_limpio
-            elif len(telefono_limpio) == 11 and telefono_limpio.startswith('0'):
-                telefono_limpio = '58' + telefono_limpio[1:]
+            guardar_en_ficha = False
+            if not valido:
+                datos = self._pedir_numero_whatsapp(
+                    destinatario=destinatario,
+                    sugerido=telefono_medico,
+                    medico_id=medico_id,
+                    motivo=motivo)
+                if not datos:
+                    return
+                telefono_medico = datos['telefono']
+                codigo_pais = datos['codigo_pais']
+                guardar_en_ficha = datos['guardar']
 
             # Generar PDF
             pdf_path = self.generar_pdf_resultados(guardar_como=False)
             if not pdf_path:
                 return
 
-            nombre_paciente = sol.get('Paciente') or 'N/A'
-            nombre_medico = sol.get('NombreMedico') or 'Dr.'
+            if guardar_en_ficha and medico_id:
+                self._guardar_telefono_contacto(telefono_medico, medico_id=medico_id)
 
-            # Crear mensaje
             mensaje = f"""Estimado/a Dr. {nombre_medico},
 
 Le enviamos los resultados de laboratorio del paciente {nombre_paciente} (Solicitud N° {sol['NumeroSolicitud']}).
 
-Por favor, revise el archivo PDF adjunto con los resultados.
+Adjunto encontrará el PDF con los resultados.
 
 _ANgesLAB - Laboratorio Clínico_"""
 
-            # Codificar mensaje para URL
-            import urllib.parse
-            mensaje_encoded = urllib.parse.quote(mensaje)
-
-            # Abrir WhatsApp Web
-            whatsapp_url = f"https://wa.me/{telefono_limpio}?text={mensaje_encoded}"
-            webbrowser.open(whatsapp_url)
-
-            # Mostrar instrucciones
-            messagebox.showinfo("WhatsApp - Médico",
-                f"Se ha abierto WhatsApp Web con el número del médico:\n{telefono_medico}\n\n"
-                f"Médico: {nombre_medico}\n"
-                f"Paciente: {nombre_paciente}\n\n"
-                f"El PDF se ha guardado en:\n{pdf_path}\n\n"
-                "Por favor, adjunte el PDF manualmente en la conversación de WhatsApp.")
+            self._ejecutar_envio_whatsapp(telefono_medico, mensaje, pdf_path,
+                                          codigo_pais=codigo_pais,
+                                          titulo="WhatsApp - Médico",
+                                          contexto={'destinatario': destinatario,
+                                                    'medico_id': medico_id})
 
         except Exception as e:
             messagebox.showerror("Error", f"Error al enviar por WhatsApp al médico:\n{str(e)}")

@@ -1,0 +1,9 @@
+{
+  "metodo": "auto",
+  "codigo_pais": "58",
+  "autoenviar": true,
+  "espera_apertura": 15.0,
+  "espera_chat": 3.0,
+  "espera_adjunto": 3.5,
+  "espera_envio": 1.2
+}

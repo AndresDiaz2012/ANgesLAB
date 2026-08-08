@@ -186,6 +186,36 @@ def aplicar_migracion(install: Path):
     return True
 
 
+def corregir_telefonos(install: Path):
+    """Normaliza los telefonos guardados para que WhatsApp los acepte.
+
+    El formulario antiguo concatenaba el codigo de pais con lo que escribia
+    el usuario ('+58' + '0412...'), dejando numeros que WhatsApp rechaza con
+    "el numero no esta registrado". El script es idempotente y hace su propia
+    copia de seguridad.
+    """
+    bd = install / 'ANgesLAB.accdb'
+    if not bd.exists():
+        return False
+    script = ORIGEN / 'corregir_telefonos.py'
+    if not script.exists():
+        log(f"[AVISO] No se encontro el script de telefonos: {script}")
+        return False
+    log("  Corrigiendo formato de telefonos para WhatsApp...")
+    r = subprocess.run(
+        [sys.executable, str(script), '--aplicar', str(bd)],
+        capture_output=True, text=True
+    )
+    for linea in (r.stdout or '').splitlines():
+        log(f"     {linea}")
+    if r.returncode != 0:
+        log(f"  [AVISO] La correccion de telefonos termino con codigo {r.returncode}.")
+        if r.stderr:
+            log(f"     {r.stderr.strip()[:300]}")
+        return False
+    return True
+
+
 def _leer_password(prompt_txt):
     """Lee una contrasena mostrando asteriscos (msvcrt) o, si no hay consola,
     con getpass (sin eco). Soporta backspace y Ctrl+C."""
@@ -386,6 +416,7 @@ def main(argv):
 
     log("\n[3/4] Aplicando migracion de base de datos...")
     migrado = aplicar_migracion(install)
+    corregir_telefonos(install)
 
     log("\n[4/4] Acceso del usuario 'developer' (opcional)...")
     dev = resetear_developer(install, argv)

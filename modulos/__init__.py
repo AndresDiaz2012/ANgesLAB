@@ -26,6 +26,7 @@ Modulos auxiliares (disponibles para uso futuro):
 - utilidades_db: Utilidades de mantenimiento de BD
 - reportes_especificaciones: Reportes segun especificaciones tecnicas
 - envio_resultados: Envio de resultados por email/PDF
+- whatsapp_envio: Envio por WhatsApp con el PDF adjuntado automaticamente
 
 Copyright 2024-2026 ANgesLAB Solutions
 ================================================================================
