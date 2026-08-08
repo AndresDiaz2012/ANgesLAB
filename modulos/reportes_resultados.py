@@ -79,6 +79,18 @@ class ConfigReportes:
             "nombre": "MICROBIOLOGIA / BACTERIOLOGIA",
             "secciones": ["Datos de Muestra", "Resultado del Cultivo", "Identificacion del Germen",
                           "Recuento de Colonias", "Coloracion de Gram", "Antibiograma", "Observaciones"]
+        },
+        11: {  # Pruebas Especiales
+            "nombre": "PRUEBAS ESPECIALES",
+            "secciones": ["Marcadores", "Biologia Molecular", "Genetica", "Otros"]
+        },
+        12: {  # Infecciosas
+            "nombre": "PRUEBAS INFECCIOSAS",
+            "secciones": ["Hepatitis", "VIH", "TORCH", "Bacterianas", "Virales", "Otras"]
+        },
+        13: {  # Inmunologicas
+            "nombre": "PRUEBAS INMUNOLOGICAS",
+            "secciones": ["Autoinmunes", "Complemento", "Inmunoglobulinas", "Alergia", "Otras"]
         }
     }
 

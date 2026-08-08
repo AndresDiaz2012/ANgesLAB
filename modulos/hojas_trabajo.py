@@ -47,6 +47,9 @@ AREAS_LAB = {
     8:  {'nombre': 'Hormonas',       'abrev': 'HOR'},
     9:  {'nombre': 'Serología',      'abrev': 'SER'},
     10: {'nombre': 'Microbiología',  'abrev': 'MIC'},
+    11: {'nombre': 'Pruebas Especiales', 'abrev': 'ESP'},
+    12: {'nombre': 'Infecciosas',    'abrev': 'INF'},
+    13: {'nombre': 'Inmunológicas',  'abrev': 'INM'},
     29: {'nombre': 'General',        'abrev': 'GEN'},
 }
 

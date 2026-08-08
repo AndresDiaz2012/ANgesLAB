@@ -1256,7 +1256,8 @@ class InterpretadorClinico:
         nombres_areas = {
             1: 'Hematología', 2: 'Química Sanguínea', 5: 'Coagulación',
             6: 'Uroanálisis', 7: 'Parasitología', 8: 'Hormonas',
-            9: 'Serología', 10: 'Microbiología', 29: 'General'
+            9: 'Serología', 10: 'Microbiología', 11: 'Pruebas Especiales',
+            12: 'Infecciosas', 13: 'Inmunológicas', 29: 'General'
         }
         area_nombre = nombres_areas.get(area_id, f'Área {area_id}')
 

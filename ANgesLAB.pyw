@@ -1788,7 +1788,9 @@ class MainApplication:
         Corrige nombres inconsistentes y elimina duplicados innecesarios.
         """
         # Areas requeridas: (AreaID, CodigoArea, NombreArea, Secuencia)
-        # IDs 1,2,5,6,7,8,9,10 estan fijos en plantillas_reportes.py y form_inf_config.py
+        # IDs 1,2,5,6,7,8,9,10 estan fijos en plantillas_reportes.py y form_inf_config.py.
+        # Las areas 11,12,13 se agregaron despues: no tienen plantilla propia y usan
+        # el formulario generico 'Form_Inf_Resultado' (ver form_inf_config.mapeo_areas).
         AREAS_REQUERIDAS = [
             (1,  'HEM', 'Hematología',    1),
             (2,  'QUI', 'Química',         2),
@@ -1798,9 +1800,12 @@ class MainApplication:
             (8,  'HOR', 'Hormonas',        6),
             (9,  'SER', 'Serología',       7),
             (10, 'MIC', 'Microbiología',   8),
+            (11, 'ESP', 'Pruebas Especiales', 9),
+            (12, 'INF', 'Infecciosas',    10),
+            (13, 'INM', 'Inmunológicas',  11),
         ]
         # El area 'General' no tiene ID fijo; se usa para bioanalistas sin area especifica
-        AREA_GENERAL = ('GEN', 'General', 9)
+        AREA_GENERAL = ('GEN', 'General', 12)
 
         try:
             for area_id, codigo, nombre, secuencia in AREAS_REQUERIDAS:

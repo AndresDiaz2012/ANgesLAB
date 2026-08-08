@@ -171,6 +171,26 @@ CONFIGURACIONES_DEFECTO = {
         'mostrar_referencia': True,
         'resaltar_anormales': True
     },
+    'Form_Inf_Resultado': {
+        # Formulario generico: lo usan las areas sin plantilla propia
+        # (Pruebas Especiales, Infecciosas, Inmunologicas, General).
+        # Sin esta entrada, obtener_configuracion_por_area() devolvia None.
+        'codigo': 'Form_Inf_Resultado',
+        'nombre': 'Resultado de Laboratorio',
+        'tipo_reporte': 'Resultado',
+        'area_id': None,
+        'tamano_papel': 'Carta',
+        'orientacion': 'Vertical',
+        'margen_superior': 1.0,
+        'margen_inferior': 1.5,
+        'margen_izquierdo': 1.5,
+        'margen_derecho': 1.5,
+        'incluir_logo': True,
+        'incluir_firma': True,
+        'secciones': ['encabezado', 'paciente', 'resultados', 'observaciones', 'firma'],
+        'mostrar_referencia': True,
+        'resaltar_anormales': True
+    },
     'Form_Inf_AntigenosFebriles': {
         'codigo': 'Form_Inf_AntigenosFebriles',
         'nombre': 'Antigenos Febriles',

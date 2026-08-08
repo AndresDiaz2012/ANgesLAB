@@ -51,6 +51,9 @@ COLORES_AREA = {
     8:  {'nombre': 'Hormonas',       'abrev': 'HOR', 'color': '#00acc1', 'color_texto': '#ffffff'},  # Cyan
     9:  {'nombre': 'Serología',      'abrev': 'SER', 'color': '#e91e63', 'color_texto': '#ffffff'},  # Rosa
     10: {'nombre': 'Microbiología',  'abrev': 'MIC', 'color': '#43a047', 'color_texto': '#ffffff'},  # Verde
+    11: {'nombre': 'Pruebas Especiales', 'abrev': 'ESP', 'color': '#5e35b1', 'color_texto': '#ffffff'},  # Violeta
+    12: {'nombre': 'Infecciosas',    'abrev': 'INF', 'color': '#ef6c00', 'color_texto': '#ffffff'},  # Naranja
+    13: {'nombre': 'Inmunológicas',  'abrev': 'INM', 'color': '#00897b', 'color_texto': '#ffffff'},  # Verde azulado
     29: {'nombre': 'General',        'abrev': 'GEN', 'color': '#546e7a', 'color_texto': '#ffffff'},  # Gris
 }
 
