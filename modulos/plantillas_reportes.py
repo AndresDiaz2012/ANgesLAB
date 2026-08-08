@@ -1005,7 +1005,9 @@ class PlantillasReportes:
         if not sol:
             return "<html><body>Solicitud no encontrada</body></html>"
 
-        # Obtener resultados de serologia (Area 9)
+        # Resultados serologicos: area 9 (Serologia) y las areas en que se
+        # repartio su contenido, 12 (Infecciosas) y 13 (Inmunologicas).
+        # Sin las tres, este reporte dejaria fuera los antigenos febriles.
         resultados = self.db.query(f"""
             SELECT rp.*, param.NombreParametro, param.Seccion, param.CodigoParametro,
                    param.Observaciones as ValorReferencia,
@@ -1016,7 +1018,7 @@ class PlantillasReportes:
             LEFT JOIN Unidades u ON param.UnidadID = u.UnidadID
             INNER JOIN DetalleSolicitudes ds ON rp.DetalleID = ds.DetalleID
             INNER JOIN Pruebas pr ON ds.PruebaID = pr.PruebaID
-            WHERE ds.SolicitudID = {solicitud_id} AND pr.AreaID = 9
+            WHERE ds.SolicitudID = {solicitud_id} AND pr.AreaID IN (9, 12, 13)
             ORDER BY param.Seccion, rp.ResultadoParamID
         """)
 

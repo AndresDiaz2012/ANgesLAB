@@ -1014,6 +1014,9 @@ class InterpretadorClinico:
     AREA_TIROIDES = AREA_HORMONAS   # alias histórico (el área pasó a ser Hormonas)
     AREA_SEROLOGIA = 9
     AREA_MICROBIOLOGIA = 10
+    AREA_ESPECIALES = 11
+    AREA_INFECCIOSAS = 12
+    AREA_INMUNOLOGICAS = 13
     AREA_GENERAL = 29
 
     def __init__(self, config=None):
@@ -1223,7 +1226,9 @@ class InterpretadorClinico:
                 return self.motor_reglas.interpretar_uroanalis(resultados_norm)
             elif area_id == self.AREA_HORMONAS:
                 return self.motor_reglas.interpretar_tiroides(resultados_norm)
-            elif area_id == self.AREA_SEROLOGIA:
+            elif area_id in (self.AREA_SEROLOGIA, self.AREA_INFECCIOSAS,
+                             self.AREA_INMUNOLOGICAS):
+                # Infecciosas e Inmunologicas salieron de Serologia: comparten reglas
                 return self.motor_reglas.interpretar_serologia(resultados_norm)
             elif area_id == self.AREA_MICROBIOLOGIA:
                 return ["Resultados de microbiología disponibles. Evaluar antibiograma y sensibilidad para orientar tratamiento antibiótico."]

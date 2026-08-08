@@ -171,6 +171,42 @@ CONFIGURACIONES_DEFECTO = {
         'mostrar_referencia': True,
         'resaltar_anormales': True
     },
+    'Form_Inf_Infecciosas': {
+        # Area 12: hereda el diseño de Serologia, de donde salio su contenido
+        'codigo': 'Form_Inf_Infecciosas',
+        'nombre': 'Resultado de Pruebas Infecciosas',
+        'tipo_reporte': 'Resultado',
+        'area_id': 12,
+        'tamano_papel': 'Carta',
+        'orientacion': 'Vertical',
+        'margen_superior': 1.0,
+        'margen_inferior': 1.5,
+        'margen_izquierdo': 1.5,
+        'margen_derecho': 1.5,
+        'incluir_logo': True,
+        'incluir_firma': True,
+        'secciones': ['encabezado', 'paciente', 'antigenos_febriles', 'otros_serologicos', 'observaciones', 'firma'],
+        'mostrar_referencia': True,
+        'resaltar_anormales': True
+    },
+    'Form_Inf_Inmunologicas': {
+        # Area 13: autoanticuerpos, complemento e inmunoglobulinas
+        'codigo': 'Form_Inf_Inmunologicas',
+        'nombre': 'Resultado de Pruebas Inmunologicas',
+        'tipo_reporte': 'Resultado',
+        'area_id': 13,
+        'tamano_papel': 'Carta',
+        'orientacion': 'Vertical',
+        'margen_superior': 1.0,
+        'margen_inferior': 1.5,
+        'margen_izquierdo': 1.5,
+        'margen_derecho': 1.5,
+        'incluir_logo': True,
+        'incluir_firma': True,
+        'secciones': ['encabezado', 'paciente', 'resultados', 'observaciones', 'firma'],
+        'mostrar_referencia': True,
+        'resaltar_anormales': True
+    },
     'Form_Inf_Resultado': {
         # Formulario generico: lo usan las areas sin plantilla propia
         # (Pruebas Especiales, Infecciosas, Inmunologicas, General).
@@ -489,7 +525,9 @@ class FormInfConfig:
             7: 'Form_Inf_Heces',
             8: 'Form_Inf_Tiroides',
             9: 'Form_Inf_Serologia',
-            10: 'Form_Inf_Microbiologia'
+            10: 'Form_Inf_Microbiologia',
+            12: 'Form_Inf_Infecciosas',
+            13: 'Form_Inf_Inmunologicas'
         }
 
         codigo = mapeo_areas.get(area_id, 'Form_Inf_Resultado')
