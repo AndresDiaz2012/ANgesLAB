@@ -10620,13 +10620,13 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                 textColor=colors.black
             )
 
-            # Colores para antibiograma de microbiologia
-            COLOR_SENSIBLE = colors.HexColor('#2e7d32')      # Verde
-            COLOR_INTERMEDIO = colors.HexColor('#f57f17')     # Naranja/Amarillo
-            COLOR_RESISTENTE = colors.HexColor('#c62828')     # Rojo
-            COLOR_GERMEN = colors.HexColor('#b71c1c')         # Rojo oscuro
-            COLOR_MICRO_HEADER = PDF_COLOR_HEADER_DARK
-            COLOR_MICRO_SECCION = colors.HexColor('#455a64')  # Gris azulado
+            # Microbiologia usa la MISMA colorimetria que el resto de las areas:
+            # el color configurado del reporte, sin verde/naranja/rojo para S/I/R
+            # ni rojo para el germen. Una sola paleta en todo el informe.
+            COLOR_MICRO_HEADER = PDF_COLOR_HEADER
+            COLOR_MICRO_SECCION = PDF_COLOR_SECCION_BG
+            COLOR_MICRO_SECCION_TEXT = PDF_COLOR_SECCION_TEXT
+            COLOR_MICRO_BORDE = colors.HexColor('#bdbdbd')
 
             # Procesar cada prueba — agrupar por área
             _area_actual = None          # AreaID del bloque abierto
@@ -10852,20 +10852,8 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
 
                     prueba_elements = []
 
-                    # Titulo de la prueba con fondo azul oscuro
-                    titulo_micro_style = ParagraphStyle(
-                        'TituloMicro',
-                        parent=styles['Heading2'],
-                        fontSize=9,
-                        fontName='Helvetica-Bold',
-                        alignment=TA_CENTER,
-                        spaceAfter=6,
-                        spaceBefore=12,
-                        textColor=colors.white,
-                        backColor=COLOR_MICRO_HEADER,
-                        borderPadding=(6, 6, 6, 6),
-                    )
-                    prueba_elements.append(Paragraph(nombre_area, titulo_micro_style))
+                    # Titulo de la prueba: mismo estilo que las demas areas
+                    prueba_elements.append(Paragraph(nombre_area, titulo_prueba_style))
 
                     # Clasificar parametros por seccion
                     secciones_micro = {}
@@ -10941,7 +10929,8 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                         # Elementos de ESTA seccion (para KeepTogether por seccion, no por prueba completa)
                         seccion_elements = []
 
-                        # Titulo de seccion con fondo gris azulado
+                        # Titulo de seccion con el mismo fondo/texto que las
+                        # filas de seccion del resto de las areas
                         seccion_micro_style = ParagraphStyle(
                             'SeccionMicro',
                             parent=styles['Normal'],
@@ -10950,87 +10939,113 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                             alignment=TA_LEFT,
                             spaceBefore=8,
                             spaceAfter=3,
-                            textColor=colors.white,
+                            textColor=COLOR_MICRO_SECCION_TEXT,
                             backColor=COLOR_MICRO_SECCION,
                             borderPadding=(4, 4, 4, 4),
                         )
                         seccion_elements.append(Paragraph(seccion_upper, seccion_micro_style))
 
                         if es_antibiograma:
-                            # ---- TABLA DE ANTIBIOGRAMA con colores S/I/R ----
-                            atb_header = [['Antibiotico', 'Resultado', 'Interpretacion']]
-                            atb_col_widths = layout.atb_col_widths if layout else [3.0*inch, 1.5*inch, 2.0*inch]
+                            # ---- ANTIBIOGRAMA EN 3 COLUMNAS: S / I / R ----
+                            # Cada antibiotico se lista bajo la columna que le
+                            # corresponde; no se colorea por interpretacion.
+                            _atb_w = layout.atb_col_widths if layout else [3.0*inch, 1.5*inch, 2.0*inch]
+                            _ancho_total = sum(_atb_w)
+                            atb_col_widths = [_ancho_total / 3.0] * 3
 
-                            atb_header_table = Table(atb_header, colWidths=atb_col_widths)
-                            atb_header_table.setStyle(TableStyle([
-                                ('BOX', (0, 0), (-1, -1), 1, colors.black),
-                                ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.black),
-                                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                                ('FONTSIZE', (0, 0), (-1, 0), 9),
-                                ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-                                ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
-                                ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
-                                ('TOPPADDING', (0, 0), (-1, 0), 5),
-                                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#263238')),
-                                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                            ]))
-                            seccion_elements.append(atb_header_table)
-
-                            atb_data = []
-                            atb_colores = []  # (fila, color) para aplicar despues
-
+                            sensibles, intermedios, resistentes, otros = [], [], [], []
                             for p in params_seccion:
                                 valor_upper = p['valor'].upper().strip()
                                 if valor_upper in ['S', 'SENSIBLE']:
-                                    interpretacion = 'SENSIBLE'
-                                    color_sir = COLOR_SENSIBLE
+                                    sensibles.append(p['nombre'])
                                 elif valor_upper in ['I', 'INTERMEDIO', 'SDD']:
-                                    interpretacion = 'INTERMEDIO'
-                                    color_sir = COLOR_INTERMEDIO
+                                    intermedios.append(p['nombre'])
                                 elif valor_upper in ['R', 'RESISTENTE']:
-                                    interpretacion = 'RESISTENTE'
-                                    color_sir = COLOR_RESISTENTE
+                                    resistentes.append(p['nombre'])
                                 else:
-                                    interpretacion = p['valor']
-                                    color_sir = colors.black
+                                    # Valores que no son S/I/R (p.ej. CIM) se
+                                    # listan aparte para no perderlos
+                                    otros.append((p['nombre'], p['valor']))
 
-                                atb_data.append([
-                                    '   ' + p['nombre'],
-                                    p['valor'],
-                                    interpretacion
-                                ])
-                                atb_colores.append(color_sir)
+                            filas = max(len(sensibles), len(intermedios), len(resistentes))
+                            if filas:
+                                atb_data = [['SENSIBLE', 'INTERMEDIO', 'RESISTENTE']]
+                                for i in range(filas):
+                                    atb_data.append([
+                                        sensibles[i] if i < len(sensibles) else '',
+                                        intermedios[i] if i < len(intermedios) else '',
+                                        resistentes[i] if i < len(resistentes) else '',
+                                    ])
 
-                            if atb_data:
-                                atb_table = Table(atb_data, colWidths=atb_col_widths)
-                                atb_style = [
-                                    ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-                                    ('FONTSIZE', (0, 0), (-1, -1), 8),
-                                    ('ALIGN', (1, 0), (1, -1), 'CENTER'),
-                                    ('ALIGN', (2, 0), (2, -1), 'CENTER'),
+                                atb_table = Table(atb_data, colWidths=atb_col_widths,
+                                                  repeatRows=1)
+                                atb_table.setStyle(TableStyle([
+                                    # Encabezado con el color general del reporte
+                                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                                    ('FONTSIZE', (0, 0), (-1, 0), 9),
+                                    ('BACKGROUND', (0, 0), (-1, 0), COLOR_MICRO_HEADER),
+                                    ('TEXTCOLOR', (0, 0), (-1, 0), PDF_HEADER_TEXT),
+                                    ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
+                                    ('TOPPADDING', (0, 0), (-1, 0), 5),
+                                    # Datos: una sola colorimetria, sin franjas
+                                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                                    ('FONTSIZE', (0, 1), (-1, -1), 8),
+                                    ('BOTTOMPADDING', (0, 1), (-1, -1), 2),
+                                    ('TOPPADDING', (0, 1), (-1, -1), 2),
+                                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                                     ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                                    ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
-                                    ('TOPPADDING', (0, 0), (-1, -1), 1),
-                                    ('LEFTPADDING', (0, 0), (0, -1), 8),
-                                    ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#cccccc')),
-                                    ('INNERGRID', (0, 0), (-1, -1), 0.25, colors.HexColor('#cccccc')),
-                                ]
-
-                                # Aplicar colores por fila y fondo alterno
-                                for idx, color_sir in enumerate(atb_colores):
-                                    atb_style.append(('TEXTCOLOR', (1, idx), (2, idx), color_sir))
-                                    atb_style.append(('FONTNAME', (1, idx), (2, idx), 'Helvetica-Bold'))
-                                    if idx % 2 == 1:
-                                        atb_style.append(('BACKGROUND', (0, idx), (-1, idx), colors.HexColor('#f5f5f5')))
-
-                                atb_table.setStyle(TableStyle(atb_style))
+                                    ('BOX', (0, 0), (-1, -1), 0.5, COLOR_MICRO_BORDE),
+                                    ('INNERGRID', (0, 0), (-1, -1), 0.25, COLOR_MICRO_BORDE),
+                                ]))
                                 seccion_elements.append(atb_table)
+
+                            if otros:
+                                otros_data = [['Antibiótico', 'Resultado']]
+                                otros_data += [[n, v] for n, v in otros]
+                                otros_table = Table(
+                                    otros_data,
+                                    colWidths=[_ancho_total * 0.65, _ancho_total * 0.35],
+                                    repeatRows=1)
+                                otros_table.setStyle(TableStyle([
+                                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                                    ('FONTSIZE', (0, 0), (-1, 0), 8),
+                                    ('BACKGROUND', (0, 0), (-1, 0), COLOR_MICRO_SECCION),
+                                    ('TEXTCOLOR', (0, 0), (-1, 0), COLOR_MICRO_SECCION_TEXT),
+                                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                                    ('FONTSIZE', (0, 1), (-1, -1), 8),
+                                    ('ALIGN', (1, 0), (1, -1), 'CENTER'),
+                                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                                    ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+                                    ('TOPPADDING', (0, 0), (-1, -1), 2),
+                                    ('LEFTPADDING', (0, 0), (0, -1), 8),
+                                    ('BOX', (0, 0), (-1, -1), 0.5, COLOR_MICRO_BORDE),
+                                    ('INNERGRID', (0, 0), (-1, -1), 0.25, COLOR_MICRO_BORDE),
+                                ]))
+                                seccion_elements.append(Spacer(1, 0.04*inch))
+                                seccion_elements.append(otros_table)
 
                         else:
                             # ---- SECCIONES NORMALES DE MICROBIOLOGIA ----
                             # (Datos de muestra, Gram, Germen, Recuento, etc.)
+                            # Las celdas van como Paragraph para que los textos
+                            # largos (valores de referencia del cultivo) se ajusten
+                            # dentro de la columna en vez de desbordar la tabla.
+                            _celda_izq = ParagraphStyle(
+                                'MicroCeldaIzq', parent=styles['Normal'],
+                                fontName='Helvetica', fontSize=8, leading=9.5,
+                                alignment=TA_LEFT, leftIndent=4)
+                            _celda_izq_bold = ParagraphStyle(
+                                'MicroCeldaIzqBold', parent=_celda_izq,
+                                fontName='Helvetica-Bold')
+                            _celda_centro = ParagraphStyle(
+                                'MicroCeldaCentro', parent=styles['Normal'],
+                                fontName='Helvetica', fontSize=8, leading=9.5,
+                                alignment=TA_CENTER)
+                            _celda_centro_bold = ParagraphStyle(
+                                'MicroCeldaCentroBold', parent=_celda_centro,
+                                fontName='Helvetica-Bold', fontSize=9, leading=10.5)
+
                             micro_data = []
-                            micro_estilos_fila = []  # Para aplicar estilos especiales
 
                             for p in params_seccion:
                                 nombre_upper = p['nombre'].upper()
@@ -11042,49 +11057,43 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                                     'RESULTADO DEL CULTIVO', 'RESULTADO CULTIVO',
                                     'CRECIMIENTO', 'DESARROLLO BACTERIANO'
                                 ])
+                                # Germen y resultado del cultivo: solo negrita,
+                                # sin color propio
+                                _destacar = es_germen or es_resultado_cultivo
+                                _st_nom = _celda_izq_bold if _destacar else _celda_izq
+                                _st_val = _celda_centro_bold if _destacar else _celda_centro
 
                                 micro_data.append([
-                                    '   ' + p['nombre'],
-                                    p['valor'],
-                                    p.get('unidad_simbolo') or '',
-                                    p['valor_ref']
+                                    Paragraph(p['nombre'], _st_nom),
+                                    Paragraph(str(p['valor']), _st_val),
+                                    Paragraph(str(p.get('unidad_simbolo') or ''), _celda_centro),
+                                    Paragraph(str(p['valor_ref'] or ''), _celda_izq),
                                 ])
-                                micro_estilos_fila.append({
-                                    'es_germen': es_germen,
-                                    'es_resultado_cultivo': es_resultado_cultivo
-                                })
 
                             if micro_data:
                                 micro_col_widths = layout.micro_col_widths if layout else [2.5*inch, 2.0*inch, 0.8*inch, 1.2*inch]
                                 micro_table = Table(micro_data, colWidths=micro_col_widths)
                                 micro_style = [
-                                    ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-                                    ('FONTSIZE', (0, 0), (-1, -1), 8),
-                                    ('ALIGN', (1, 0), (1, -1), 'CENTER'),
-                                    ('ALIGN', (2, 0), (2, -1), 'CENTER'),
                                     ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                                    ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
-                                    ('TOPPADDING', (0, 0), (-1, -1), 1),
+                                    ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+                                    ('TOPPADDING', (0, 0), (-1, -1), 2),
                                     ('LEFTPADDING', (0, 0), (0, -1), 8),
-                                    ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#cccccc')),
-                                    ('INNERGRID', (0, 0), (-1, -1), 0.25, colors.HexColor('#cccccc')),
+                                    ('BOX', (0, 0), (-1, -1), 0.5, COLOR_MICRO_BORDE),
+                                    ('INNERGRID', (0, 0), (-1, -1), 0.25, COLOR_MICRO_BORDE),
                                 ]
-
-                                for idx, estilo in enumerate(micro_estilos_fila):
-                                    if estilo['es_germen']:
-                                        micro_style.append(('TEXTCOLOR', (1, idx), (1, idx), COLOR_GERMEN))
-                                        micro_style.append(('FONTNAME', (0, idx), (1, idx), 'Helvetica-Bold'))
-                                        micro_style.append(('FONTSIZE', (1, idx), (1, idx), 10))
-                                    elif estilo['es_resultado_cultivo']:
-                                        micro_style.append(('FONTNAME', (0, idx), (1, idx), 'Helvetica-Bold'))
 
                                 micro_table.setStyle(TableStyle(micro_style))
                                 seccion_elements.append(micro_table)
 
                         # Agregar los elementos de esta seccion al bloque de prueba
                         # Secciones pequenas (no antibiograma) se agrupan con KeepTogether
-                        # Antibiogramas grandes se agregan directamente para permitir salto de pagina
-                        if es_antibiograma and len(params_seccion) > 12:
+                        # Antibiogramas grandes se agregan directamente para permitir salto de pagina.
+                        # Con el formato de 3 columnas el alto es ~1/3 del numero
+                        # de antibioticos, por eso se mide en filas reales.
+                        _filas_render = len(params_seccion)
+                        if es_antibiograma:
+                            _filas_render = -(-len(params_seccion) // 3)
+                        if es_antibiograma and _filas_render > 12:
                             # Antibiograma grande: header con KeepTogether, tabla suelta
                             if len(seccion_elements) > 1:
                                 prueba_elements.append(KeepTogether([seccion_elements[0], seccion_elements[1]]))
