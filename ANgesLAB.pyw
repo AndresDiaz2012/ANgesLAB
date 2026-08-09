@@ -676,6 +676,56 @@ class LoginWindow:
 # UTILIDADES PARA VENTANAS RESPONSIVAS
 # ============================================================
 
+class CampoTextoLibre(tk.Text):
+    """Área de texto multilínea que se comporta como un Entry.
+
+    El resto del código llama .get(), .insert(0, x) y .delete(0, 'end') sobre
+    los campos de captura; esta clase traduce esas llamadas para que un campo
+    de redacción libre pueda usarse sin tocar nada más.
+    """
+
+    def get(self, *args):
+        if args:
+            return tk.Text.get(self, *args)
+        return tk.Text.get(self, '1.0', 'end').strip()
+
+    def insert(self, index, texto, *args):
+        if index in (0, '0'):
+            index = '1.0'
+        tk.Text.insert(self, index, texto, *args)
+
+    def delete(self, first=None, last=None):
+        tk.Text.delete(self, '1.0', 'end')
+
+
+# Secciones de microbiología que se redactan a mano: la apreciación del
+# analista no cabe en una lista de opciones ni en una sola línea.
+SECCIONES_TEXTO_LIBRE = (
+    'COLORACION DE GRAM', 'GRAM', 'TINCION DE GRAM',
+    'EXAMEN DIRECTO', 'DIRECTO',
+    'CULTIVO DE HONGOS', 'MICOLOGIA', 'HONGOS',
+    'OBSERVACIONES',
+)
+
+
+def es_campo_texto_libre(seccion, nombre_parametro, area_id=None):
+    """True si el parámetro debe capturarse como texto libre multilínea.
+
+    Solo aplica a microbiología (área 10): en el resto de las áreas los
+    campos de observaciones siguen siendo de una línea.
+    """
+    if area_id is not None and area_id != 10:
+        return False
+    sec = ' '.join(str(seccion or '').upper().split())
+    nom = ' '.join(str(nombre_parametro or '').upper().split())
+    # Coincidencia EXACTA de sección: 'GRAM' como subcadena convertiría también
+    # la sección 'ANTIBIOGRAMA', y sus antibióticos deben seguir siendo S/I/R
+    if sec in SECCIONES_TEXTO_LIBRE:
+        return True
+    return any(s in nom for s in ('OBSERVACION', 'INTERPRETACION',
+                                  'EXAMEN DIRECTO', 'APRECIACION'))
+
+
 def componer_telefono_internacional(codigo_pais, numero):
     """Une el código de país con el número evitando duplicarlo.
 
@@ -7901,7 +7951,7 @@ Forma de Pago: {self.combo_forma_pago.get()}
             # Obtener pruebas de la solicitud
             pruebas = db.query(f"""
                 SELECT d.DetalleID, d.PruebaID, d.Estado, d.Resultado, d.Observaciones,
-                       p.CodigoPrueba, p.NombrePrueba
+                       p.CodigoPrueba, p.NombrePrueba, p.AreaID
                 FROM DetalleSolicitudes d
                 LEFT JOIN Pruebas p ON d.PruebaID = p.PruebaID
                 WHERE d.SolicitudID = {sol_id}
@@ -8497,7 +8547,21 @@ Forma de Pago: {self.combo_forma_pago.get()}
                                 else:
                                     opciones_param = ['NEGATIVO', 'POSITIVO', 'NO SE OBSERVA', 'ESCASO', 'MODERADO', 'ABUNDANTE']
 
-                            if opciones_param is None:
+                            # Gram, examen directo, cultivo de hongos y
+                            # observaciones se redactan a mano: la apreciación
+                            # del analista no cabe en una lista ni en una línea
+                            if es_campo_texto_libre(param.get('Seccion'),
+                                                    param.get('NombreParametro'),
+                                                    prueba.get('AreaID')):
+                                entry_param = CampoTextoLibre(
+                                    param_row, font=('Segoe UI', 9), width=52, height=3,
+                                    wrap='word', relief='flat', bg='#fafafa',
+                                    highlightthickness=1, highlightbackground='#ddd',
+                                    undo=True)
+                                entry_param.pack(side='left', padx=5, pady=2)
+                                if resultado_guardado and resultado_guardado.get('Valor'):
+                                    entry_param.insert(0, resultado_guardado['Valor'])
+                            elif opciones_param is None:
                                 # Campo libre de texto (Interpretacion, Observaciones, etc.)
                                 entry_param = tk.Entry(param_row, font=('Segoe UI', 9), width=30, relief='flat',
                                                        bg='#fafafa', highlightthickness=1, highlightbackground='#ddd')
@@ -11367,6 +11431,7 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                                 fontName='Helvetica-Bold', fontSize=9, leading=10.5)
 
                             micro_data = []
+                            _filas_redaccion = []   # filas que ocupan todo el ancho
 
                             for p in params_seccion:
                                 nombre_upper = p['nombre'].upper()
@@ -11384,11 +11449,29 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                                 _st_nom = _celda_izq_bold if _destacar else _celda_izq
                                 _st_val = _celda_centro_bold if _destacar else _celda_centro
 
+                                # Los textos redactados por el analista traen
+                                # saltos de linea: reportlab necesita <br/>
+                                _valor_html = (str(p['valor'])
+                                               .replace('&', '&amp;')
+                                               .replace('<', '&lt;').replace('>', '&gt;')
+                                               .replace('\r\n', '\n').replace('\r', '\n')
+                                               .replace('\n', '<br/>'))
+                                # Apreciacion redactada por el analista: ocupa
+                                # todo el ancho en vez de la columna estrecha
+                                _redactado = es_campo_texto_libre(
+                                    seccion_nombre, p['nombre'], 10)
+                                if _redactado:
+                                    _filas_redaccion.append(len(micro_data))
                                 micro_data.append([
                                     Paragraph(p['nombre'], _st_nom),
-                                    Paragraph(str(p['valor']), _st_val),
-                                    Paragraph(str(p.get('unidad_simbolo') or ''), _celda_centro),
-                                    Paragraph(str(p['valor_ref'] or ''), _celda_izq),
+                                    Paragraph(_valor_html,
+                                              _celda_izq if _redactado or '<br/>' in _valor_html
+                                              else _st_val),
+                                    Paragraph('' if _redactado
+                                              else str(p.get('unidad_simbolo') or ''),
+                                              _celda_centro),
+                                    Paragraph('' if _redactado
+                                              else str(p['valor_ref'] or ''), _celda_izq),
                                 ])
 
                             if micro_data:
@@ -11402,6 +11485,10 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                                     ('BOX', (0, 0), (-1, -1), 0.5, COLOR_MICRO_BORDE),
                                     ('INNERGRID', (0, 0), (-1, -1), 0.25, COLOR_MICRO_BORDE),
                                 ]
+
+                                # El texto redactado ocupa de la 2a columna al final
+                                for _fila in _filas_redaccion:
+                                    micro_style.append(('SPAN', (1, _fila), (-1, _fila)))
 
                                 micro_table.setStyle(TableStyle(micro_style))
                                 seccion_elements.append(micro_table)
