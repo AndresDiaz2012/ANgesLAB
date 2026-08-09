@@ -30,6 +30,23 @@ from email.mime.base import MIMEBase
 from email import encoders
 from pathlib import Path
 
+# --- Version del sistema ---
+# Se lee del archivo VERSION para que instalador, actualizador e interfaz
+# muestren siempre lo mismo sin tener que tocar el codigo en cada release.
+def _leer_version():
+    try:
+        with open(Path(__file__).parent / 'VERSION', encoding='utf-8') as f:
+            v = f.read().strip()
+            if v:
+                return v
+    except Exception:
+        pass
+    return '2.1.0'
+
+
+APP_VERSION = _leer_version()
+APP_VERSION_CORTA = 'v' + '.'.join(APP_VERSION.split('.')[:2])
+
 # --- Logger centralizado ---
 try:
     from modulos.logging_config import obtener_logger
@@ -525,7 +542,7 @@ class LoginWindow:
                 font=('Segoe UI', 8), bg=bg_color, fg='#475569').pack(pady=(4, 0))
 
         # Footer
-        tk.Label(self.root, text="© 2024-2026 ANgesLAB Solutions  ·  v2.0",
+        tk.Label(self.root, text=f"© 2024-2026 ANgesLAB Solutions  ·  {APP_VERSION_CORTA}",
                 font=('Segoe UI', 8), bg=bg_color, fg='#475569').pack(side='bottom', pady=14)
 
         self.entry_pass.bind('<Return>', lambda e: self.login())
@@ -724,6 +741,149 @@ def es_campo_texto_libre(seccion, nombre_parametro, area_id=None):
         return True
     return any(s in nom for s in ('OBSERVACION', 'INTERPRETACION',
                                   'EXAMEN DIRECTO', 'APRECIACION'))
+
+
+# ============================================================
+# ANTIBIOGRAMA CON DOS GERMENES
+# Un cultivo puede aislar dos germenes y cada uno tiene su propia
+# sensibilidad: informar un solo S/I/R obliga al medico a adivinar a que
+# germen corresponde. El valor se guarda en el mismo campo, codificado
+# como 'G1:S | G2:R', para no cambiar el esquema de la base de datos.
+# ============================================================
+
+SEP_ANTIBIOGRAMA = ' | '
+
+# Nombres de parametro que identifican al primer y segundo germen aislado
+NOMBRES_GERMEN_1 = ('GERMEN AISLADO', 'MICROORGANISMO AISLADO',
+                    'ORGANISMO AISLADO', 'BACTERIA AISLADA',
+                    'AGENTE ETIOLOGICO')
+NOMBRES_GERMEN_2 = ('SEGUNDO GERMEN', 'GERMEN 2', 'SEGUNDO MICROORGANISMO')
+
+
+def es_seccion_antibiograma(seccion):
+    """True si la seccion agrupa antibioticos con lectura S/I/R."""
+    sec = str(seccion or '').upper()
+    return any(x in sec for x in ('ANTIBIOGRAMA', 'SENSIBILIDAD',
+                                  'ANTIBIOTICO', 'SUSCEPTIBILIDAD'))
+
+
+def indice_germen_parametro(nombre_parametro):
+    """1 o 2 si el parametro identifica un germen aislado; None si no lo es."""
+    nom = ' '.join(str(nombre_parametro or '').upper().split())
+    if any(x in nom for x in NOMBRES_GERMEN_2):
+        return 2
+    if any(x in nom for x in NOMBRES_GERMEN_1):
+        return 1
+    return None
+
+
+def parsear_antibiograma(valor):
+    """Descompone el valor guardado en {indice_germen: lectura}.
+
+    La clave 0 indica un valor sin germen asociado: es el formato de
+    siempre (un solo germen) y se sigue leyendo tal cual.
+    """
+    texto = str(valor or '').strip()
+    if not texto:
+        return {}
+    if 'G1:' not in texto.upper() and 'G2:' not in texto.upper():
+        return {0: texto}
+
+    lecturas = {}
+    for parte in texto.split('|'):
+        parte = parte.strip()
+        if not parte:
+            continue
+        cabeza, _, resto = parte.partition(':')
+        cabeza = cabeza.strip().upper()
+        if cabeza in ('G1', 'G2'):
+            lectura = resto.strip()
+            if lectura:
+                lecturas[int(cabeza[1])] = lectura
+        elif parte:
+            lecturas.setdefault(0, parte)
+    return lecturas
+
+
+def codificar_antibiograma(valor_g1, valor_g2):
+    """Une las lecturas de ambos germenes en el valor que se guarda."""
+    v1 = str(valor_g1 or '').strip()
+    v2 = str(valor_g2 or '').strip()
+    if v1 and v2:
+        return f"G1:{v1}{SEP_ANTIBIOGRAMA}G2:{v2}"
+    if v2:
+        return f"G2:{v2}"
+    # Un solo germen se guarda plano: los informes antiguos lo siguen leyendo
+    return v1
+
+
+def lectura_antibiograma(valor, indice_germen):
+    """Lectura S/I/R del antibiotico frente al germen indicado."""
+    lecturas = parsear_antibiograma(valor)
+    if not lecturas:
+        return ''
+    if 0 in lecturas:
+        # Formato de un solo germen: la lectura vale para el que haya
+        return lecturas[0] if indice_germen in (0, 1) else ''
+    return lecturas.get(indice_germen, '')
+
+
+def tiene_lecturas_por_germen(valores):
+    """True si alguna lectura viene desglosada por germen."""
+    for v in valores:
+        lecturas = parsear_antibiograma(v)
+        if lecturas and 0 not in lecturas:
+            return True
+    return False
+
+
+class CampoAntibiogramaDoble(tk.Frame):
+    """Dos casillas S/I/R para un antibiotico: una por cada germen aislado.
+
+    Expone get/insert/delete/bind como un Entry para poder usarse en el
+    formulario de captura sin tocar el guardado ni las validaciones.
+    """
+
+    def __init__(self, master, opciones, bg='white', **kw):
+        super().__init__(master, bg=bg, **kw)
+        self.combo1 = ttk.Combobox(self, font=('Segoe UI', 9), width=9,
+                                   values=opciones)
+        self.combo1.pack(side='left')
+        self.combo2 = ttk.Combobox(self, font=('Segoe UI', 9), width=9,
+                                   values=opciones)
+        self.combo2.pack(side='left', padx=(4, 0))
+
+    # -- API compatible con Entry/Combobox --------------------------------
+    def get(self):
+        return codificar_antibiograma(self.combo1.get(), self.combo2.get())
+
+    def set(self, valor):
+        lecturas = parsear_antibiograma(valor)
+        if 0 in lecturas:
+            # Valor antiguo sin desglose: se asume del primer germen
+            self.combo1.set(lecturas[0])
+            self.combo2.set('')
+        else:
+            self.combo1.set(lecturas.get(1, ''))
+            self.combo2.set(lecturas.get(2, ''))
+
+    def insert(self, index, texto, *args):
+        self.set(texto)
+
+    def delete(self, first=None, last=None):
+        self.combo1.set('')
+        self.combo2.set('')
+
+    def bind(self, sequence=None, func=None, add=None):
+        """Propaga los binds del formulario a las dos casillas."""
+        self.combo1.bind(sequence, func, add)
+        self.combo2.bind(sequence, func, add)
+
+    def habilitar_segundo(self, activo):
+        """El segundo germen solo se captura cuando existe."""
+        self.combo2.config(state='normal' if activo else 'disabled')
+        if not activo:
+            self.combo2.set('')
 
 
 def componer_telefono_internacional(codigo_pais, numero):
@@ -1264,7 +1424,7 @@ class MainApplication:
         line_canvas.create_line(0, 1, 60, 1, fill=COLORS['primary'], width=2)
         line_canvas.create_line(60, 1, 120, 1, fill=COLORS['accent'], width=2)
 
-        tk.Label(logo_frame, text="v2.0", font=('Segoe UI', 8),
+        tk.Label(logo_frame, text=APP_VERSION_CORTA, font=('Segoe UI', 8),
                 bg=COLORS['sidebar'], fg=COLORS['primary']).pack()
 
         tk.Frame(self.sidebar, bg=COLORS['sidebar_hover'], height=1).pack(fill='x', padx=15, pady=10)
@@ -1547,7 +1707,7 @@ class MainApplication:
                             if isinstance(child, tk.Label):
                                 # Si no es ANgesLAB, la versión ni emoji, es el nombre del lab
                                 texto = child.cget('text')
-                                if texto not in ("🧪", "ANgesLAB", "v2.0") and not hasattr(child, '_is_icon'):
+                                if texto not in ("🧪", "ANgesLAB", APP_VERSION_CORTA) and not hasattr(child, '_is_icon'):
                                     font_info = child.cget('font')
                                     if '8' in str(font_info) and 'bold' not in str(font_info):
                                         nombre_truncado = nombre_lab
@@ -7964,6 +8124,11 @@ Forma de Pago: {self.combo_forma_pago.get()}
                         font=('Segoe UI', 11), bg='white', fg=COLORS['text_light']).pack(pady=50)
                 return
 
+            # Areas presentes en la solicitud: el informe se puede imprimir
+            # completo o solo del area que se esta entregando en ese momento.
+            self._areas_solicitud = self._areas_de_pruebas(pruebas)
+            self._areas_impresion_vars = {}
+
             # Frame con scroll para las pruebas
             canvas = tk.Canvas(self.pruebas_res_frame, bg='white', highlightthickness=0)
             scrollbar = ttk.Scrollbar(self.pruebas_res_frame, orient='vertical', command=canvas.yview)
@@ -8140,6 +8305,49 @@ Forma de Pago: {self.combo_forma_pago.get()}
                     self.parametro_entries[detalle_id] = []
                     seccion_actual = None
 
+                    # ── Antibiograma por germen ───────────────────────────
+                    # Si el cultivo admite un segundo germen aislado, cada
+                    # antibiotico se lee frente a uno y otro por separado:
+                    # una sola casilla S/I/R dejaria al medico adivinando a
+                    # que germen corresponde la sensibilidad.
+                    _antibiograma_doble = (
+                        prueba.get('AreaID') == 10
+                        and any(indice_germen_parametro(p.get('NombreParametro')) == 2
+                                for p in parametros)
+                        and any(es_seccion_antibiograma(p.get('Seccion'))
+                                for p in parametros))
+                    _germen_widgets = {}   # indice de germen -> campo de captura
+                    _campos_atb_doble = []  # CampoAntibiogramaDoble creados
+                    _lbl_germenes = {}     # indice -> etiqueta del encabezado
+
+                    def _refrescar_germenes(event=None, _dg=_germen_widgets,
+                                            _lbls=_lbl_germenes,
+                                            _campos=_campos_atb_doble):
+                        """Sincroniza el encabezado del antibiograma con los
+                        germenes escritos y bloquea la 2a casilla si no hay
+                        segundo aislamiento."""
+                        nombres = {}
+                        for idx, widget in _dg.items():
+                            try:
+                                nombres[idx] = widget.get().strip()
+                            except Exception:
+                                nombres[idx] = ''
+                        for idx, lbl in _lbls.items():
+                            nombre = nombres.get(idx)
+                            texto = (f"🦠 Germen {idx}: {nombre}" if nombre
+                                     else f"Germen {idx}: (sin identificar)")
+                            try:
+                                lbl.config(text=texto,
+                                           fg='#1565c0' if nombre else '#90a4ae')
+                            except Exception:
+                                pass
+                        hay_segundo = bool(nombres.get(2))
+                        for campo in _campos:
+                            try:
+                                campo.habilitar_segundo(hay_segundo)
+                            except Exception:
+                                pass
+
                     for param in parametros:
                         # Mostrar encabezado de seccion si cambia
                         seccion = param.get('Seccion') or ''
@@ -8149,6 +8357,33 @@ Forma de Pago: {self.combo_forma_pago.get()}
                             seccion_header.pack(fill='x', pady=(5, 0))
                             tk.Label(seccion_header, text=f"  {seccion}", font=('Segoe UI', 9, 'bold'),
                                     bg='#455a64', fg='white', anchor='w').pack(fill='x', pady=3)
+
+                            # Encabezado del antibiograma por germen: leyenda
+                            # con los nombres completos (no se truncan) y una
+                            # columna por germen sobre sus casillas
+                            if _antibiograma_doble and es_seccion_antibiograma(seccion):
+                                leyenda_germen = tk.Frame(prueba_frame, bg='#eceff1')
+                                leyenda_germen.pack(fill='x')
+                                for _idx_g in (1, 2):
+                                    _lbl_g = tk.Label(
+                                        leyenda_germen, text=f"Germen {_idx_g}",
+                                        font=('Segoe UI', 8, 'bold'), bg='#eceff1',
+                                        fg='#1565c0', anchor='w')
+                                    _lbl_g.pack(side='left', padx=(8, 12), pady=(4, 0))
+                                    _lbl_germenes[_idx_g] = _lbl_g
+
+                                germen_header = tk.Frame(prueba_frame, bg='#eceff1')
+                                germen_header.pack(fill='x')
+                                tk.Label(germen_header, text="Antibiótico",
+                                         font=('Segoe UI', 8, 'bold'), bg='#eceff1',
+                                         width=22, anchor='w').pack(side='left', padx=5, pady=(0, 3))
+                                for _idx_g in (1, 2):
+                                    tk.Label(germen_header, text=f"Germen {_idx_g}",
+                                             font=('Segoe UI', 8, 'bold'), bg='#eceff1',
+                                             fg='#1565c0', width=11, anchor='w').pack(
+                                                 side='left', padx=(5, 0), pady=(0, 3))
+                                _refrescar_germenes()
+
                         param_id = param['ParametroID']
                         formula = param.get('FormulaCalculo') or ''
                         es_calculado = bool(formula and formula.strip())
@@ -8548,10 +8783,22 @@ Forma de Pago: {self.combo_forma_pago.get()}
                                 else:
                                     opciones_param = ['NEGATIVO', 'POSITIVO', 'NO SE OBSERVA', 'ESCASO', 'MODERADO', 'ABUNDANTE']
 
+                            # Antibiotico con dos germenes: una casilla S/I/R
+                            # por cada uno, guardadas en el mismo campo
+                            if _antibiograma_doble and es_seccion_antibiograma(param.get('Seccion')):
+                                entry_param = CampoAntibiogramaDoble(
+                                    param_row,
+                                    opciones=opciones_param or ['S', 'I', 'R', 'SDD'],
+                                    bg=bg_row)
+                                entry_param.pack(side='left', padx=5, pady=2)
+                                if resultado_guardado and resultado_guardado.get('Valor'):
+                                    entry_param.set(resultado_guardado['Valor'])
+                                _campos_atb_doble.append(entry_param)
+
                             # Gram, examen directo, cultivo de hongos y
                             # observaciones se redactan a mano: la apreciación
                             # del analista no cabe en una lista ni en una línea
-                            if es_campo_texto_libre(param.get('Seccion'),
+                            elif es_campo_texto_libre(param.get('Seccion'),
                                                     param.get('NombreParametro'),
                                                     prueba.get('AreaID')):
                                 entry_param = CampoTextoLibre(
@@ -8644,6 +8891,19 @@ Forma de Pago: {self.combo_forma_pago.get()}
                                               bg=bg_row, width=3, anchor='center')
                         lbl_alerta.pack(side='left', padx=(0, 5), pady=2)
 
+                        # El campo del germen manda sobre el encabezado del
+                        # antibiograma: al escribirlo se actualiza en vivo
+                        if _antibiograma_doble:
+                            _idx_germen = indice_germen_parametro(param['NombreParametro'])
+                            if _idx_germen and _idx_germen not in _germen_widgets:
+                                _germen_widgets[_idx_germen] = entry_param
+                                for _sec in ('<KeyRelease>', '<FocusOut>',
+                                             '<<ComboboxSelected>>'):
+                                    try:
+                                        entry_param.bind(_sec, _refrescar_germenes, add='+')
+                                    except Exception:
+                                        pass
+
                         self.parametro_entries[detalle_id].append({
                             'param_id': param_id,
                             'entry': entry_param,
@@ -8657,6 +8917,11 @@ Forma de Pago: {self.combo_forma_pago.get()}
                             'param_row': param_row,
                             'bg_row': bg_row,
                         })
+
+                    # Estado inicial del antibiograma por germen (nombres en el
+                    # encabezado y 2a casilla bloqueada si no hay 2o germen)
+                    if _antibiograma_doble:
+                        _refrescar_germenes()
 
                     # Bind auto-calculo y deteccion de fuera de rango en tiempo real
                     tiene_calculados = any(p.get('es_calculado') for p in self.parametro_entries[detalle_id])
@@ -8753,6 +9018,10 @@ Forma de Pago: {self.combo_forma_pago.get()}
             tk.Label(envio_container, text="📤 Enviar / Exportar Resultados",
                     font=('Segoe UI', 10, 'bold'), bg='#f5f5f5').pack(anchor='w', padx=10, pady=(8, 5))
 
+            # Selector de areas: imprimir el informe completo o solo las areas
+            # marcadas. Solo tiene sentido si la solicitud abarca varias areas.
+            self._construir_selector_areas(envio_container)
+
             # Fila 1: PDF e impresión
             btn_row1 = tk.Frame(envio_container, bg='#f5f5f5')
             btn_row1.pack(fill='x', padx=10, pady=3)
@@ -8763,7 +9032,7 @@ Forma de Pago: {self.combo_forma_pago.get()}
 
             tk.Button(btn_row1, text="📄 Guardar PDF", font=('Segoe UI', 9),
                      bg='#7b1fa2', fg='white', relief='flat', padx=15, pady=6,
-                     cursor='hand2', command=lambda: self.generar_pdf_resultados(guardar_como=True)).pack(side='left', padx=3)
+                     cursor='hand2', command=self._guardar_pdf_resultados_areas).pack(side='left', padx=3)
 
             # Fila 2: Envío al paciente
             btn_row2 = tk.Frame(envio_container, bg='#f5f5f5')
@@ -8801,6 +9070,111 @@ Forma de Pago: {self.combo_forma_pago.get()}
         except Exception as e:
             tk.Label(self.pruebas_res_frame, text=f"Error: {e}",
                     font=('Segoe UI', 10), bg='white', fg=COLORS['danger']).pack(pady=50)
+
+    # ══════════════════════════════════════════════════════════════════
+    # IMPRESION POR AREA
+    # Un informe puede abarcar varias areas y no siempre se entregan
+    # juntas: el area que ya valido lo suyo debe poder imprimir solo su
+    # parte sin esperar al resto de la solicitud.
+    # ══════════════════════════════════════════════════════════════════
+
+    def _areas_de_pruebas(self, pruebas):
+        """Areas presentes en las pruebas: [{'id', 'nombre', 'n'}] ordenadas."""
+        conteo = {}
+        for pr in pruebas:
+            aid = pr.get('AreaID') or 0
+            conteo[aid] = conteo.get(aid, 0) + 1
+
+        nombres = {}
+        ids = [a for a in conteo if a]
+        if ids:
+            try:
+                filas = db.query(
+                    "SELECT AreaID, NombreArea FROM Areas "
+                    f"WHERE AreaID IN ({','.join(str(i) for i in ids)})")
+                for f in (filas or []):
+                    nombres[f['AreaID']] = (f.get('NombreArea') or '').strip()
+            except Exception as e:
+                _log.error("Error cargando areas de la solicitud: %s", e)
+
+        areas = []
+        for aid, n in conteo.items():
+            nombre = nombres.get(aid) or ('Sin área' if not aid else f'Área {aid}')
+            areas.append({'id': aid, 'nombre': nombre, 'n': n})
+        areas.sort(key=lambda a: a['nombre'].lower())
+        return areas
+
+    def _construir_selector_areas(self, contenedor):
+        """Casillas por area para elegir que se imprime del informe."""
+        areas = getattr(self, '_areas_solicitud', []) or []
+        self._areas_impresion_vars = {}
+
+        # Con una sola area no hay nada que elegir: se imprime todo.
+        if len(areas) < 2:
+            return
+
+        panel = tk.Frame(contenedor, bg='#f5f5f5')
+        panel.pack(fill='x', padx=10, pady=(0, 4))
+
+        fila_tit = tk.Frame(panel, bg='#f5f5f5')
+        fila_tit.pack(fill='x')
+        tk.Label(fila_tit, text="🗂 Áreas a imprimir:", font=('Segoe UI', 9, 'bold'),
+                 bg='#f5f5f5').pack(side='left')
+        tk.Button(fila_tit, text="Todas", font=('Segoe UI', 8),
+                  bg='#546e7a', fg='white', relief='flat', padx=8, cursor='hand2',
+                  command=lambda: self._marcar_areas_impresion(True)).pack(side='left', padx=(8, 2))
+        tk.Button(fila_tit, text="Ninguna", font=('Segoe UI', 8),
+                  bg='#b0bec5', fg='white', relief='flat', padx=8, cursor='hand2',
+                  command=lambda: self._marcar_areas_impresion(False)).pack(side='left', padx=2)
+        tk.Label(fila_tit, text="(el envío por WhatsApp/Email incluye siempre el informe completo)",
+                 font=('Segoe UI', 8), bg='#f5f5f5', fg='#78909c').pack(side='left', padx=10)
+
+        grid = tk.Frame(panel, bg='#f5f5f5')
+        grid.pack(fill='x', pady=(3, 0))
+
+        for idx, area in enumerate(areas):
+            var = tk.BooleanVar(value=True)
+            self._areas_impresion_vars[area['id']] = var
+            tk.Checkbutton(grid, text=f"{area['nombre']} ({area['n']})",
+                           variable=var, font=('Segoe UI', 9), bg='#f5f5f5',
+                           activebackground='#f5f5f5', anchor='w',
+                           cursor='hand2').grid(row=idx // 4, column=idx % 4,
+                                                sticky='w', padx=(0, 14))
+
+    def _marcar_areas_impresion(self, valor):
+        for var in (getattr(self, '_areas_impresion_vars', {}) or {}).values():
+            var.set(bool(valor))
+
+    def _areas_impresion_filtro(self):
+        """IDs de area marcados.
+
+        None = sin filtro (imprimir todo). Lista vacia = el usuario desmarco
+        todas, en cuyo caso no hay nada que imprimir.
+        """
+        variables = getattr(self, '_areas_impresion_vars', {}) or {}
+        if not variables:
+            return None
+        seleccion = [aid for aid, var in variables.items() if var.get()]
+        if len(seleccion) == len(variables):
+            return None
+        return seleccion
+
+    def _validar_seleccion_areas(self):
+        """Devuelve (ok, filtro) validando que haya al menos un area marcada."""
+        filtro = self._areas_impresion_filtro()
+        if filtro is not None and not filtro:
+            messagebox.showwarning(
+                "Áreas", "Marque al menos un área para imprimir, o pulse "
+                         "«Todas» para el informe completo.")
+            return False, None
+        return True, filtro
+
+    def _guardar_pdf_resultados_areas(self):
+        """Guarda el PDF respetando las areas marcadas."""
+        ok, filtro = self._validar_seleccion_areas()
+        if not ok:
+            return
+        self.generar_pdf_resultados(guardar_como=True, areas_filtro=filtro)
 
     def guardar_resultado_prueba(self, detalle_id, entry):
         """Guarda el resultado de una prueba individual (sin parametros)"""
@@ -9080,6 +9454,11 @@ Forma de Pago: {self.combo_forma_pago.get()}
     def registrar_uso_valor(self, param_id, valor):
         """Registra el uso de un valor para aumentar su frecuencia en el dropdown"""
         if not valor:
+            return
+        # El antibiograma de dos germenes se guarda codificado ('G1:S | G2:R'):
+        # registrarlo llenaria el desplegable con combinaciones ilegibles
+        _lecturas = parsear_antibiograma(valor)
+        if _lecturas and 0 not in _lecturas:
             return
         try:
             valor_esc = valor.replace("'", "''")
@@ -10289,6 +10668,10 @@ Forma de Pago: {self.combo_forma_pago.get()}
 
     def imprimir_resultados(self):
         """Genera un reporte de resultados para imprimir"""
+        ok, areas_filtro = self._validar_seleccion_areas()
+        if not ok:
+            return
+
         try:
             sol = db.query_one(f"""
                 SELECT s.*, p.Nombres & ' ' & p.Apellidos AS Paciente,
@@ -10299,12 +10682,18 @@ Forma de Pago: {self.combo_forma_pago.get()}
             """)
 
             pruebas = db.query(f"""
-                SELECT d.*, p.CodigoPrueba, p.NombrePrueba
-                FROM DetalleSolicitudes d
-                LEFT JOIN Pruebas p ON d.PruebaID = p.PruebaID
+                SELECT d.*, p.CodigoPrueba, p.NombrePrueba, p.AreaID, a.NombreArea
+                FROM ((DetalleSolicitudes d
+                LEFT JOIN Pruebas p ON d.PruebaID = p.PruebaID)
+                LEFT JOIN Areas a ON p.AreaID = a.AreaID)
                 WHERE d.SolicitudID = {self.sol_id_resultado}
-                ORDER BY p.NombrePrueba
+                ORDER BY a.NombreArea, p.NombrePrueba
             """)
+
+            if areas_filtro:
+                _sel_areas = set(areas_filtro)
+                pruebas = [pr for pr in (pruebas or [])
+                           if (pr.get('AreaID') or 0) in _sel_areas]
 
             if not sol or not pruebas:
                 messagebox.showwarning("Aviso", "No hay datos para imprimir")
@@ -10329,7 +10718,18 @@ DATOS DEL PACIENTE:
 RESULTADOS:
 {'-'*60}
 """
+            if areas_filtro:
+                _incluidas = sorted({(p.get('NombreArea') or 'Sin área').strip()
+                                     for p in pruebas})
+                reporte += f"\n(Informe parcial — áreas: {', '.join(_incluidas)})\n"
+
+            _area_actual = None
             for p in pruebas:
+                _area = (p.get('NombreArea') or 'Sin área').strip()
+                if _area != _area_actual:
+                    _area_actual = _area
+                    reporte += f"\n[ {_area.upper()} ]\n"
+
                 estado = '✓' if p.get('Estado') == 'Validado' else '○'
                 reporte += f"""
 {estado} {p['NombrePrueba'] or 'N/A'}
@@ -10373,8 +10773,12 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
-    def generar_pdf_resultados(self, guardar_como=False):
-        """Genera un PDF profesional con los resultados de la solicitud - Formato CMLab"""
+    def generar_pdf_resultados(self, guardar_como=False, areas_filtro=None):
+        """Genera un PDF profesional con los resultados de la solicitud - Formato CMLab
+
+        areas_filtro: lista de AreaID a incluir. None imprime el informe
+        completo (comportamiento por defecto de envios y llamadas externas).
+        """
         if not REPORTLAB_AVAILABLE:
             messagebox.showerror("Error", "La librería reportlab no está instalada.\nEjecute: pip install reportlab")
             return None
@@ -10456,6 +10860,18 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                 ORDER BY a.NombreArea, p.NombrePrueba
             """)
 
+            # Filtro por area: imprime solo lo que se esta entregando. Se
+            # aplica antes de resolver firmas para que el pie solo muestre
+            # a los bioanalistas de las areas incluidas.
+            if areas_filtro:
+                _sel_areas = set(areas_filtro)
+                pruebas = [pr for pr in (pruebas or [])
+                           if (pr.get('AreaID') or 0) in _sel_areas]
+                if not pruebas:
+                    messagebox.showwarning(
+                        "Aviso", "La solicitud no tiene pruebas en las áreas seleccionadas.")
+                    return None
+
             # Obtener bioanalistas activos por área para las firmas
             bioanalistas_por_area = {}
             try:
@@ -10486,6 +10902,18 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
             except Exception:
                 pass  # Si falla, usa fallback (NombreDirector)
 
+            # Sufijo de area para no confundir informes parciales con el completo
+            _sufijo_area = ''
+            if areas_filtro:
+                _nombres_area = sorted({(pr.get('NombreArea') or '').strip()
+                                        for pr in pruebas if (pr.get('NombreArea') or '').strip()})
+                if len(_nombres_area) == 1:
+                    _limpio = ''.join(c for c in _nombres_area[0] if c.isalnum())
+                    if _limpio:
+                        _sufijo_area = f"_{_limpio[:15]}"
+                elif len(_nombres_area) > 1:
+                    _sufijo_area = "_Parcial"
+
             # Determinar ruta del archivo
             if guardar_como:
                 num_sol = str(sol.get('NumeroSolicitud', 'Resultado')).replace('/', '-').replace('\\', '-')
@@ -10493,7 +10921,7 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                     title="Guardar PDF de Resultados",
                     defaultextension=".pdf",
                     filetypes=[("Archivos PDF", "*.pdf"), ("Todos los archivos", "*.*")],
-                    initialfile=f"Resultados_{num_sol}.pdf"
+                    initialfile=f"Resultados_{num_sol}{_sufijo_area}.pdf"
                 )
                 if not filename:
                     return None
@@ -10501,7 +10929,7 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                 # Crear archivo temporal
                 temp_dir = tempfile.gettempdir()
                 num_sol_safe = str(sol.get('NumeroSolicitud', 'Resultado')).replace('/', '-').replace('\\', '-').replace(':', '-')
-                filename = os.path.join(temp_dir, f"Resultados_{num_sol_safe}_{datetime.now().strftime('%Y%m%d%H%M%S')}.pdf")
+                filename = os.path.join(temp_dir, f"Resultados_{num_sol_safe}{_sufijo_area}_{datetime.now().strftime('%Y%m%d%H%M%S')}.pdf")
 
             # Determinar tamaño de página según configuración
             tamano_papel = config_lab.get('TamanoPapel', 'Carta') if config_lab else 'Carta'
@@ -11206,6 +11634,16 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                             'unidad_simbolo': param.get('UnidadSimbolo') or '',
                         })
 
+                    # Germenes aislados en esta prueba. Con dos aislamientos
+                    # el antibiograma se informa por separado para cada uno:
+                    # la sensibilidad de un germen no vale para el otro.
+                    _germenes_prueba = {}
+                    for _sec_params in secciones_micro.values():
+                        for _p in _sec_params:
+                            _idx_g = indice_germen_parametro(_p['nombre'])
+                            if _idx_g and _idx_g not in _germenes_prueba:
+                                _germenes_prueba[_idx_g] = _p['valor']
+
                     # Orden preferente de secciones
                     orden_secciones = [
                         'Tipo de Muestra', 'Datos de Muestra', 'Muestra',
@@ -11283,76 +11721,139 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                                     return nombre
                                 return f"{nombre} {_ev['marca']}"
 
-                            sensibles, intermedios, resistentes, otros = [], [], [], []
-                            for p in params_seccion:
-                                valor_upper = p['valor'].upper().strip()
-                                if valor_upper in ['S', 'SENSIBLE']:
-                                    sensibles.append(_etiqueta_atb(p['nombre']))
-                                elif valor_upper in ['I', 'INTERMEDIO', 'SDD']:
-                                    intermedios.append(_etiqueta_atb(p['nombre']))
-                                elif valor_upper in ['R', 'RESISTENTE']:
-                                    resistentes.append(_etiqueta_atb(p['nombre']))
-                                else:
-                                    # Valores que no son S/I/R (p.ej. CIM) se
-                                    # listan aparte para no perderlos
-                                    otros.append((p['nombre'], p['valor']))
+                            def _construir_tabla_sir(pares):
+                                """Tablas S/I/R (y de valores tipo CIM) de un germen."""
+                                sensibles, intermedios, resistentes, otros = [], [], [], []
+                                for _nom, _val in pares:
+                                    valor_upper = str(_val).upper().strip()
+                                    if valor_upper in ['S', 'SENSIBLE']:
+                                        sensibles.append(_etiqueta_atb(_nom))
+                                    elif valor_upper in ['I', 'INTERMEDIO', 'SDD']:
+                                        intermedios.append(_etiqueta_atb(_nom))
+                                    elif valor_upper in ['R', 'RESISTENTE']:
+                                        resistentes.append(_etiqueta_atb(_nom))
+                                    elif valor_upper:
+                                        # Valores que no son S/I/R (p.ej. CIM) se
+                                        # listan aparte para no perderlos
+                                        otros.append((_nom, _val))
 
-                            filas = max(len(sensibles), len(intermedios), len(resistentes))
-                            if filas:
-                                atb_data = [['SENSIBLE', 'INTERMEDIO', 'RESISTENTE']]
-                                for i in range(filas):
-                                    atb_data.append([
-                                        sensibles[i] if i < len(sensibles) else '',
-                                        intermedios[i] if i < len(intermedios) else '',
-                                        resistentes[i] if i < len(resistentes) else '',
-                                    ])
+                                elementos = []
+                                filas = max(len(sensibles), len(intermedios), len(resistentes))
+                                if filas:
+                                    atb_data = [['SENSIBLE', 'INTERMEDIO', 'RESISTENTE']]
+                                    for i in range(filas):
+                                        atb_data.append([
+                                            sensibles[i] if i < len(sensibles) else '',
+                                            intermedios[i] if i < len(intermedios) else '',
+                                            resistentes[i] if i < len(resistentes) else '',
+                                        ])
 
-                                atb_table = Table(atb_data, colWidths=atb_col_widths,
-                                                  repeatRows=1)
-                                atb_table.setStyle(TableStyle([
-                                    # Encabezado con el color general del reporte
-                                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                                    ('FONTSIZE', (0, 0), (-1, 0), 9),
-                                    ('BACKGROUND', (0, 0), (-1, 0), COLOR_MICRO_HEADER),
-                                    ('TEXTCOLOR', (0, 0), (-1, 0), PDF_HEADER_TEXT),
-                                    ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
-                                    ('TOPPADDING', (0, 0), (-1, 0), 5),
-                                    # Datos: una sola colorimetria, sin franjas
-                                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-                                    ('FONTSIZE', (0, 1), (-1, -1), 8),
-                                    ('BOTTOMPADDING', (0, 1), (-1, -1), 2),
-                                    ('TOPPADDING', (0, 1), (-1, -1), 2),
-                                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                                    ('BOX', (0, 0), (-1, -1), 0.5, COLOR_MICRO_BORDE),
-                                    ('INNERGRID', (0, 0), (-1, -1), 0.25, COLOR_MICRO_BORDE),
-                                ]))
-                                seccion_elements.append(atb_table)
+                                    atb_table = Table(atb_data, colWidths=atb_col_widths,
+                                                      repeatRows=1)
+                                    atb_table.setStyle(TableStyle([
+                                        # Encabezado con el color general del reporte
+                                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                                        ('FONTSIZE', (0, 0), (-1, 0), 9),
+                                        ('BACKGROUND', (0, 0), (-1, 0), COLOR_MICRO_HEADER),
+                                        ('TEXTCOLOR', (0, 0), (-1, 0), PDF_HEADER_TEXT),
+                                        ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
+                                        ('TOPPADDING', (0, 0), (-1, 0), 5),
+                                        # Datos: una sola colorimetria, sin franjas
+                                        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                                        ('FONTSIZE', (0, 1), (-1, -1), 8),
+                                        ('BOTTOMPADDING', (0, 1), (-1, -1), 2),
+                                        ('TOPPADDING', (0, 1), (-1, -1), 2),
+                                        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                                        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                                        ('BOX', (0, 0), (-1, -1), 0.5, COLOR_MICRO_BORDE),
+                                        ('INNERGRID', (0, 0), (-1, -1), 0.25, COLOR_MICRO_BORDE),
+                                    ]))
+                                    elementos.append(atb_table)
 
-                            if otros:
-                                otros_data = [['Antibiótico', 'Resultado']]
-                                otros_data += [[n, v] for n, v in otros]
-                                otros_table = Table(
-                                    otros_data,
-                                    colWidths=[_ancho_total * 0.65, _ancho_total * 0.35],
-                                    repeatRows=1)
-                                otros_table.setStyle(TableStyle([
-                                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                                    ('FONTSIZE', (0, 0), (-1, 0), 8),
-                                    ('BACKGROUND', (0, 0), (-1, 0), COLOR_MICRO_SECCION),
-                                    ('TEXTCOLOR', (0, 0), (-1, 0), COLOR_MICRO_SECCION_TEXT),
-                                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-                                    ('FONTSIZE', (0, 1), (-1, -1), 8),
-                                    ('ALIGN', (1, 0), (1, -1), 'CENTER'),
-                                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                                    ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
-                                    ('TOPPADDING', (0, 0), (-1, -1), 2),
-                                    ('LEFTPADDING', (0, 0), (0, -1), 8),
-                                    ('BOX', (0, 0), (-1, -1), 0.5, COLOR_MICRO_BORDE),
-                                    ('INNERGRID', (0, 0), (-1, -1), 0.25, COLOR_MICRO_BORDE),
-                                ]))
-                                seccion_elements.append(Spacer(1, 0.04*inch))
-                                seccion_elements.append(otros_table)
+                                if otros:
+                                    otros_data = [['Antibiótico', 'Resultado']]
+                                    otros_data += [[n, v] for n, v in otros]
+                                    otros_table = Table(
+                                        otros_data,
+                                        colWidths=[_ancho_total * 0.65, _ancho_total * 0.35],
+                                        repeatRows=1)
+                                    otros_table.setStyle(TableStyle([
+                                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                                        ('FONTSIZE', (0, 0), (-1, 0), 8),
+                                        ('BACKGROUND', (0, 0), (-1, 0), COLOR_MICRO_SECCION),
+                                        ('TEXTCOLOR', (0, 0), (-1, 0), COLOR_MICRO_SECCION_TEXT),
+                                        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                                        ('FONTSIZE', (0, 1), (-1, -1), 8),
+                                        ('ALIGN', (1, 0), (1, -1), 'CENTER'),
+                                        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                                        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+                                        ('TOPPADDING', (0, 0), (-1, -1), 2),
+                                        ('LEFTPADDING', (0, 0), (0, -1), 8),
+                                        ('BOX', (0, 0), (-1, -1), 0.5, COLOR_MICRO_BORDE),
+                                        ('INNERGRID', (0, 0), (-1, -1), 0.25, COLOR_MICRO_BORDE),
+                                    ]))
+                                    elementos.append(Spacer(1, 0.04*inch))
+                                    elementos.append(otros_table)
+
+                                return elementos
+
+                            # Estilos de los bloques por germen
+                            _estilo_germen = ParagraphStyle(
+                                'AtbGermen', parent=styles['Normal'],
+                                fontName='Helvetica-Bold', fontSize=8.5,
+                                leading=10.5, spaceBefore=6, spaceAfter=2,
+                                alignment=TA_LEFT,
+                                textColor=COLOR_MICRO_SECCION_TEXT)
+                            _estilo_aviso_atb = ParagraphStyle(
+                                'AtbAviso', parent=styles['Normal'],
+                                fontName='Helvetica-Oblique', fontSize=7,
+                                leading=8.5, alignment=TA_LEFT,
+                                textColor=colors.HexColor('#b26a00'))
+
+                            # Dos germenes con lecturas desglosadas → una tabla
+                            # por germen, cada una rotulada con su nombre
+                            _dos_germenes = (
+                                len([g for g in _germenes_prueba.values() if str(g).strip()]) >= 2
+                                and tiene_lecturas_por_germen(
+                                    [p['valor'] for p in params_seccion]))
+                            _sugeridas_por_germen = {}
+
+                            if _dos_germenes:
+                                for _idx_g in sorted(_germenes_prueba):
+                                    _nombre_g = (str(_germenes_prueba[_idx_g]).strip()
+                                                 or f'Germen {_idx_g}')
+                                    _pares = [(p['nombre'],
+                                               lectura_antibiograma(p['valor'], _idx_g))
+                                              for p in params_seccion]
+                                    _pares = [(n, v) for n, v in _pares if str(v).strip()]
+
+                                    seccion_elements.append(Paragraph(
+                                        f"GERMEN {_idx_g}: {_nombre_g}", _estilo_germen))
+
+                                    if not _pares:
+                                        seccion_elements.append(Paragraph(
+                                            'Sin antibiograma reportado para este germen.',
+                                            _estilo_aviso_atb))
+                                        continue
+
+                                    seccion_elements.extend(_construir_tabla_sir(_pares))
+                                    _sugeridas_por_germen[_nombre_g] = [
+                                        n for n, v in _pares
+                                        if str(v).upper().strip() in ('S', 'SENSIBLE')
+                                        and (_atb_eval.get(n) is None
+                                             or _atb_eval[n]['nivel'] == ATB_SEGURO)]
+                            else:
+                                seccion_elements.extend(_construir_tabla_sir(
+                                    [(p['nombre'], p['valor']) for p in params_seccion]))
+                                # Dos germenes pero una sola lectura: el informe
+                                # no puede atribuirla, y callarlo induce a error
+                                if len([g for g in _germenes_prueba.values()
+                                        if str(g).strip()]) >= 2:
+                                    seccion_elements.append(Paragraph(
+                                        'Aviso: se aislaron dos gérmenes y el antibiograma no '
+                                        'está desglosado por germen; las lecturas S/I/R no '
+                                        'pueden atribuirse a uno en particular.',
+                                        _estilo_aviso_atb))
 
                             # ---- APLICABILIDAD SEGUN EL PACIENTE ----
                             # Solo se imprime si hay algo que advertir
@@ -11381,18 +11882,29 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                                     + (f' — {_ctx}' if _ctx else ''),
                                     _nota_bold))
 
-                                # Opciones sensibles que no tienen restriccion
-                                _sugeridas = []
-                                for p in params_seccion:
-                                    if p['valor'].upper().strip() not in ['S', 'SENSIBLE']:
-                                        continue
-                                    _ev = _atb_eval.get(p['nombre'])
-                                    if not _ev or _ev['nivel'] == ATB_SEGURO:
-                                        _sugeridas.append(p['nombre'])
-                                if _sugeridas:
-                                    seccion_elements.append(Paragraph(
-                                        '<b>Sensibles sin restricción para este paciente:</b> '
-                                        + ', '.join(_sugeridas), _nota_style))
+                                # Opciones sensibles que no tienen restriccion.
+                                # Con dos germenes se listan por separado: un
+                                # antibiotico util contra uno puede no serlo
+                                # contra el otro.
+                                if _dos_germenes:
+                                    for _nombre_g, _sugeridas in _sugeridas_por_germen.items():
+                                        if _sugeridas:
+                                            seccion_elements.append(Paragraph(
+                                                f'<b>Sensibles sin restricción para este paciente '
+                                                f'({_nombre_g}):</b> ' + ', '.join(_sugeridas),
+                                                _nota_style))
+                                else:
+                                    _sugeridas = []
+                                    for p in params_seccion:
+                                        if p['valor'].upper().strip() not in ['S', 'SENSIBLE']:
+                                            continue
+                                        _ev = _atb_eval.get(p['nombre'])
+                                        if not _ev or _ev['nivel'] == ATB_SEGURO:
+                                            _sugeridas.append(p['nombre'])
+                                    if _sugeridas:
+                                        seccion_elements.append(Paragraph(
+                                            '<b>Sensibles sin restricción para este paciente:</b> '
+                                            + ', '.join(_sugeridas), _nota_style))
 
                                 # Detalle de cada antibiotico advertido
                                 for _ev in sorted(_con_restriccion,
@@ -11502,6 +12014,9 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                         _filas_render = len(params_seccion)
                         if es_antibiograma:
                             _filas_render = -(-len(params_seccion) // 3)
+                            # Con dos germenes se emiten dos tablas
+                            if _dos_germenes:
+                                _filas_render *= 2
                         if es_antibiograma and _filas_render > 12:
                             # Antibiograma grande: header con KeepTogether, tabla suelta
                             if len(seccion_elements) > 1:
@@ -11914,11 +12429,16 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
             messagebox.showwarning("Aviso", "Seleccione una solicitud primero.")
             return
 
+        ok, areas_filtro = self._validar_seleccion_areas()
+        if not ok:
+            return
+
         try:
-            pdf_path = self.generar_pdf_resultados(guardar_como=False)
+            pdf_path = self.generar_pdf_resultados(guardar_como=False,
+                                                   areas_filtro=areas_filtro)
             if pdf_path:
                 self.imprimir_pdf_en_impresora(pdf_path, tipo='resultados')
-            else:
+            elif areas_filtro is None:
                 messagebox.showerror("Error", "No se pudo generar el PDF de resultados.")
         except Exception as e:
             messagebox.showerror("Error", f"Error al imprimir resultados:\n{str(e)}")

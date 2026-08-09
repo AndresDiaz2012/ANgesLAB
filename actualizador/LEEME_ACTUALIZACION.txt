@@ -1,5 +1,5 @@
 ================================================================================
-   ACTUALIZACION ANgesLAB  -  Indice TyG + Imagen Profesional
+   ACTUALIZACION ANgesLAB v2.1
 ================================================================================
 
 Esta carpeta actualiza una instalacion EXISTENTE de ANgesLAB con las mejoras
@@ -8,10 +8,16 @@ recientes, SIN eliminar el trabajo ya realizado por el cliente.
 --------------------------------------------------------------------------------
   QUE INCLUYE ESTA ACTUALIZACION
 --------------------------------------------------------------------------------
-  - Indice TyG (Trigliceridos-Glucosa) en el Perfil de Resistencia a Insulina,
-    con calculo automatico e interpretacion por IA clinica.
+  - IMPRESION POR AREA: al imprimir o guardar el informe se puede elegir que
+    areas incluir (solo Hematologia, solo Quimica...) o marcar todas para el
+    informe completo. El envio por WhatsApp/Email siempre va completo.
+  - ANTIBIOGRAMA POR GERMEN: cuando el cultivo aisla DOS germenes, cada
+    antibiotico se captura y se informa por separado para cada uno, con una
+    tabla S/I/R rotulada con el nombre de cada germen.
+  - Catalogo de areas al dia: Hormonas, Infecciosas, Inmunologicas y Renal.
+  - Indice TyG, VSG por horas con Indice de Katz y Lipidos Totales.
   - Nueva imagen profesional de la interfaz (tema visual mejorado).
-  - Correcciones en el modulo de calculos automaticos.
+  - Correcciones en el modulo de calculos automaticos y en los informes.
 
 --------------------------------------------------------------------------------
   COMO USARLA (cliente)
@@ -34,9 +40,18 @@ recientes, SIN eliminar el trabajo ya realizado por el cliente.
      - ANgesLAB.pyw
      - carpeta modulos\  (archivos .py)
 
-  SE AGREGA (sin borrar nada):
-     - Parametros 'Trigliceridos' e 'Indice TyG' al Perfil de Resistencia
-       a Insulina (migracion idempotente de base de datos).
+  SE AGREGA / REORDENA EN EL CATALOGO (sin borrar resultados):
+     - Area 8 pasa de "Tiroides" a "Hormonas" y se reubican las pruebas
+       que no son hormonales.
+     - Serologia se reparte en Infecciosas (12) e Inmunologicas (13).
+     - Parametros 'Trigliceridos' e 'Indice TyG' en el Perfil de
+       Resistencia a Insulina.
+     - VSG con primera y segunda hora + Indice de Katz; Lipidos Totales
+       en el Perfil Lipidico.
+     - Area Renal con las relaciones calculadas de orina.
+     - Formato de telefonos corregido para los envios por WhatsApp.
+
+     Todas estas migraciones son idempotentes: repetirlas no duplica nada.
 
   OPCIONAL - SOLO SOPORTE TECNICO (acceso 'developer'):
      Al final, el actualizador pregunta si desea establecer la contrasena

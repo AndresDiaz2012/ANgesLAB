@@ -1,12 +1,12 @@
 ; ============================================================================
-; ANgesLAB v2.0 - Script de Instalacion (Inno Setup 6)
+; ANgesLAB v2.1 - Script de Instalacion (Inno Setup 6)
 ; Sistema de Gestion de Laboratorio Clinico
 ; Copyright 2024-2026 ANgesLAB Solutions
 ; ============================================================================
 
 #define MyAppName "ANgesLAB"
 #define MyAppFullName "ANgesLAB - Sistema de Gestion de Laboratorio Clinico"
-#define MyAppVersion "2.0.0"
+#define MyAppVersion "2.1.0"
 #define MyAppPublisher "ANgesLAB Solutions"
 #define MyAppURL "https://angeslab.com"
 #define MyAppSupportURL "https://angeslab.com/soporte"
@@ -34,7 +34,7 @@ AllowNoIcons=yes
 LicenseFile=licencia.txt
 InfoBeforeFile=info_antes.txt
 OutputDir=output
-OutputBaseFilename=ANgesLAB_Setup_v2.0
+OutputBaseFilename=ANgesLAB_Setup_v2.1
 SetupIconFile=..\assets\angeslab_icon.ico
 UninstallDisplayIcon={app}\assets\angeslab_icon.ico
 UninstallDisplayName={#MyAppFullName}
@@ -109,7 +109,7 @@ Name: "custom"; Description: "Instalacion Personalizada"; Flags: iscustom
 Name: "main"; Description: "Aplicacion Principal ANgesLAB"; Types: full custom; Flags: fixed
 Name: "database"; Description: "Base de Datos (solo primera instalacion)"; Types: full custom
 Name: "resources"; Description: "Recursos Graficos (imagenes y logos)"; Types: full custom
-Name: "modules"; Description: "Modulos del Sistema (32 modulos)"; Types: full custom; Flags: fixed
+Name: "modules"; Description: "Modulos del Sistema (39 modulos)"; Types: full custom; Flags: fixed
 Name: "ia"; Description: "IA Clinica - Interpretacion inteligente de resultados (matplotlib, graficas, Ollama/Claude)"; Types: full custom
 
 ; ============================================================================
@@ -166,7 +166,7 @@ Source: "..\config_whatsapp.json"; DestDir: "{app}"; Components: main; Flags: on
 Source: "..\logos\*"; DestDir: "{app}\logos"; Components: resources; Flags: ignoreversion skipifsourcedoesntexist; \
   AfterInstall: SetProgressMessage('Instalando recursos graficos...')
 
-; --- Modulos del Sistema (35 modulos) ---
+; --- Modulos del Sistema (39 modulos) ---
 Source: "..\modulos\__init__.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion; \
   AfterInstall: SetProgressMessage('Instalando modulos del sistema...')
 Source: "..\modulos\antibioticos_restricciones.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
@@ -191,6 +191,7 @@ Source: "..\modulos\reportes_especificaciones.py"; DestDir: "{app}\modulos"; Com
 Source: "..\modulos\reportes_resultados.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\seguridad_db.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\splash_screen.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
+Source: "..\modulos	ema_ui.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\tasas_cambio.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\utilidades_db.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\valores_referencia.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion

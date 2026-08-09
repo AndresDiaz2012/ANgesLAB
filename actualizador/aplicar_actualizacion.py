@@ -4,20 +4,22 @@
 ACTUALIZADOR ANgesLAB - aplicar_actualizacion.py
 ================================================================================
 Actualiza una instalacion EXISTENTE de ANgesLAB en la PC del cliente, aplicando
-las mejoras recientes SIN eliminar el trabajo ya realizado:
+las mejoras recientes SIN eliminar el trabajo ya realizado. En la v2.1:
 
-  - Indice TyG (resistencia a insulina) + interpretacion IA
+  - Impresion del informe por area (completo o solo el area que se entrega)
+  - Antibiograma desglosado por germen cuando el cultivo aisla dos
+  - Areas al dia: Hormonas, Infecciosas, Inmunologicas y Renal
+  - Indice TyG, VSG por horas + Indice de Katz, Lipidos Totales
   - Tema/imagen profesional de la interfaz
-  - Correcciones varias del modulo de calculos
 
 Que hace, en orden:
   1. Detecta la carpeta de instalacion del cliente (registro de Windows o
      C:\\ANgesLAB, o la que se pase como argumento).
   2. RESPALDA la base de datos del cliente antes de cualquier cambio.
   3. Copia SOLO los archivos de codigo actualizados (ANgesLAB.pyw y modulos).
-  4. Aplica la migracion de base de datos (agrega Trigliceridos + Indice TyG al
-     PERFIL DE RESISTENCIA A INSULINA). La migracion es idempotente y SOLO
-     agrega; nunca borra datos.
+  4. Aplica las migraciones de catalogo pendientes (ver MIGRACIONES). Todas
+     son idempotentes y SOLO agregan o reubican catalogo; nunca borran
+     resultados del cliente.
 
 NUNCA se tocan:
   - ANgesLAB.accdb (la base de datos con pacientes, resultados, facturas...)
@@ -67,6 +69,24 @@ NO_TOCAR = {
     'backup_config.json',
 }
 CARPETAS_INTOCABLES = {'logos', 'firmas', 'backups', 'logs'}
+
+# Migraciones de catalogo, en el orden en que se publicaron. Todas son
+# idempotentes: se corren todas porque el cliente puede venir de cualquier
+# version anterior. (archivo, argumentos extra, texto que se muestra)
+MIGRACIONES = [
+    ('reclasificar_areas.py', ['--aplicar'],
+     'Area 8: Tiroides -> Hormonas y reubicacion de pruebas'),
+    ('reubicar_serologia.py', ['--aplicar'],
+     'Serologia -> Infecciosas (12) e Inmunologicas (13)'),
+    ('migracion_tyg_perfil_ri.py', [],
+     'Indice TyG en el Perfil de Resistencia a Insulina'),
+    ('migracion_vsg_lipidos.py', ['--aplicar'],
+     'VSG por horas + Indice de Katz y Lipidos Totales'),
+    ('migracion_area_renal.py', ['--aplicar'],
+     'Area Renal para las relaciones calculadas de orina'),
+    ('corregir_telefonos.py', ['--aplicar'],
+     'Formato de telefonos para envios por WhatsApp'),
+]
 
 
 def log(msg):
@@ -161,59 +181,43 @@ def copiar_codigo(install: Path):
     return copiados
 
 
-def aplicar_migracion(install: Path):
-    """Ejecuta la migracion de BD (idempotente) contra la BD del cliente."""
-    bd = install / 'ANgesLAB.accdb'
-    if not bd.exists():
-        log("[AVISO] Sin ANgesLAB.accdb; se omite la migracion de datos.")
+def _ejecutar_script_bd(script: Path, bd: Path, flags, descripcion):
+    """Corre un script de migracion contra la BD del cliente."""
+    if not script.exists():
+        log(f"  [AVISO] No se encontro el script: {script.name}")
         return False
-    migracion = ORIGEN / 'migracion_tyg_perfil_ri.py'
-    if not migracion.exists():
-        log(f"[AVISO] No se encontro el script de migracion: {migracion}")
-        return False
-    log("  Aplicando migracion de base de datos (Indice TyG)...")
+    log(f"  {descripcion}...")
     r = subprocess.run(
-        [sys.executable, str(migracion), str(bd)],
+        [sys.executable, str(script), str(bd)] + list(flags),
         capture_output=True, text=True
     )
     for linea in (r.stdout or '').splitlines():
         log(f"     {linea}")
     if r.returncode != 0:
-        log(f"  [AVISO] La migracion termino con codigo {r.returncode}.")
+        log(f"  [AVISO] '{script.name}' termino con codigo {r.returncode}.")
         if r.stderr:
             log(f"     {r.stderr.strip()[:300]}")
         return False
     return True
 
 
-def corregir_telefonos(install: Path):
-    """Normaliza los telefonos guardados para que WhatsApp los acepte.
+def aplicar_migraciones(install: Path):
+    """Aplica TODAS las migraciones de catalogo pendientes, en orden.
 
-    El formulario antiguo concatenaba el codigo de pais con lo que escribia
-    el usuario ('+58' + '0412...'), dejando numeros que WhatsApp rechaza con
-    "el numero no esta registrado". El script es idempotente y hace su propia
-    copia de seguridad.
+    Un cliente puede venir de cualquier version anterior, de modo que se
+    corren todas: son idempotentes y solo agregan o reubican catalogo,
+    nunca borran resultados. Devuelve cuantas terminaron bien.
     """
     bd = install / 'ANgesLAB.accdb'
     if not bd.exists():
-        return False
-    script = ORIGEN / 'corregir_telefonos.py'
-    if not script.exists():
-        log(f"[AVISO] No se encontro el script de telefonos: {script}")
-        return False
-    log("  Corrigiendo formato de telefonos para WhatsApp...")
-    r = subprocess.run(
-        [sys.executable, str(script), '--aplicar', str(bd)],
-        capture_output=True, text=True
-    )
-    for linea in (r.stdout or '').splitlines():
-        log(f"     {linea}")
-    if r.returncode != 0:
-        log(f"  [AVISO] La correccion de telefonos termino con codigo {r.returncode}.")
-        if r.stderr:
-            log(f"     {r.stderr.strip()[:300]}")
-        return False
-    return True
+        log("[AVISO] Sin ANgesLAB.accdb; se omiten las migraciones de datos.")
+        return 0
+
+    aplicadas = 0
+    for nombre, flags, descripcion in MIGRACIONES:
+        if _ejecutar_script_bd(ORIGEN / nombre, bd, flags, descripcion):
+            aplicadas += 1
+    return aplicadas
 
 
 def _leer_password(prompt_txt):
@@ -338,7 +342,7 @@ def resetear_developer(install: Path, argv):
             pass
 
 
-def registrar_bitacora(install: Path, copiados, migrado, dev):
+def registrar_bitacora(install: Path, copiados, migradas, dev):
     try:
         logs = install / 'logs'
         logs.mkdir(exist_ok=True)
@@ -346,16 +350,17 @@ def registrar_bitacora(install: Path, copiados, migrado, dev):
         with open(logs / 'actualizaciones.log', 'a', encoding='utf-8') as f:
             ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             f.write(f"[{ts}] Actualizacion aplicada: {copiados} archivos de "
-                    f"codigo; migracion BD={'si' if migrado else 'no'}; "
+                    f"codigo; migraciones de catalogo aplicadas={migradas}; "
                     f"reset developer={dev_txt} "
-                    f"(Indice TyG + tema profesional).\n")
+                    f"(v2.1: impresion por area + antibiograma por germen).\n")
     except Exception:
         pass
 
 
 def main(argv):
     log("=" * 66)
-    log("   ACTUALIZADOR ANgesLAB  -  Indice TyG + Imagen Profesional")
+    log("   ACTUALIZADOR ANgesLAB v2.1")
+    log("   Impresion por area  +  Antibiograma por germen")
     log("=" * 66)
     log(f"Origen de archivos nuevos: {ORIGEN}")
 
@@ -388,7 +393,7 @@ def main(argv):
         respaldar_bd(install)
         log("\n[2/2] Acceso del usuario 'developer'...")
         dev = resetear_developer(install, argv)
-        registrar_bitacora(install, 0, False, dev)
+        registrar_bitacora(install, 0, 0, dev)
         estado = {True: 'developer actualizado', False: 'developer con ERROR',
                   None: 'developer sin cambios'}.get(dev, 'sin cambios')
         log("\n" + "=" * 66)
@@ -399,8 +404,9 @@ def main(argv):
         return 0
 
     log("")
-    log("Se actualizara SOLO el codigo (ANgesLAB.pyw + modulos) y se agregara")
-    log("el Indice TyG. NO se modifican datos, configuracion, logos ni firmas.")
+    log("Se actualizara SOLO el codigo (ANgesLAB.pyw + modulos) y se pondra")
+    log("al dia el catalogo de areas y pruebas. NO se modifican resultados,")
+    log("configuracion, logos ni firmas.")
     log("IMPORTANTE: ANgesLAB debe estar CERRADO.")
 
     auto_si = any(a in ('--si', '--yes', '-y') for a in argv[1:])
@@ -414,20 +420,19 @@ def main(argv):
     log("\n[2/4] Copiando archivos de codigo actualizados...")
     copiados = copiar_codigo(install)
 
-    log("\n[3/4] Aplicando migracion de base de datos...")
-    migrado = aplicar_migracion(install)
-    corregir_telefonos(install)
+    log("\n[3/4] Aplicando migraciones de catalogo...")
+    migradas = aplicar_migraciones(install)
 
     log("\n[4/4] Acceso del usuario 'developer' (opcional)...")
     dev = resetear_developer(install, argv)
 
-    registrar_bitacora(install, copiados, migrado, dev)
+    registrar_bitacora(install, copiados, migradas, dev)
 
     dev_txt = {True: 'developer actualizado', False: 'developer con error',
                None: 'developer sin cambios'}.get(dev, 'developer sin cambios')
     log("\n" + "=" * 66)
     log(f"   ACTUALIZACION COMPLETADA  -  {copiados} archivos de codigo"
-        f" | BD: {'migrada' if migrado else 'sin cambios'} | {dev_txt}")
+        f" | {migradas}/{len(MIGRACIONES)} migraciones | {dev_txt}")
     log("=" * 66)
     log("Su trabajo (pacientes, resultados, facturas, config) quedo INTACTO.")
     log("Ya puede abrir ANgesLAB normalmente.")

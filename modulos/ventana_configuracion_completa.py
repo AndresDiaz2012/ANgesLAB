@@ -2103,7 +2103,7 @@ class VentanaConfiguracionCompleta:
                     "configurada correctamente para ANgesLAB.",
                     "",
                     "Sistema de Gestión de Laboratorio Clínico",
-                    "ANgesLAB v2.0.0",
+                    "ANgesLAB v2.1.0",
                 ]
 
                 for linea in lineas:

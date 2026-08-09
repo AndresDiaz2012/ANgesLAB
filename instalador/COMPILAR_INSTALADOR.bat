@@ -30,7 +30,13 @@ IF EXIST "C:\Program Files\Inno Setup 6\ISCC.exe" (
     goto :found
 )
 
-:: Ruta 3: Buscar en PATH
+:: Ruta 3: Instalacion por usuario (Inno Setup sin permisos de admin)
+IF EXIST "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" (
+    SET "ISCC=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
+    goto :found
+)
+
+:: Ruta 4: Buscar en PATH
 where ISCC.exe >nul 2>&1
 IF %ERRORLEVEL% EQU 0 (
     SET "ISCC=ISCC.exe"
@@ -77,7 +83,7 @@ IF %ERRORLEVEL% EQU 0 (
     echo  [EXITO] Instalador generado correctamente!
     echo  ============================================================
     echo.
-    echo  Archivo: output\ANgesLAB_Setup_v2.0.exe
+    echo  Archivo: output\ANgesLAB_Setup_v2.1.exe
     echo.
     echo  Este archivo es el instalador listo para distribuir
     echo  a los clientes. Contiene todo lo necesario para

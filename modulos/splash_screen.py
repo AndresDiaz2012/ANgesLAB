@@ -21,6 +21,20 @@ except ImportError:
     PIL_AVAILABLE = False
 
 
+def _version_corta():
+    """Version del archivo VERSION (raiz del proyecto), como 'v2.1'."""
+    try:
+        ruta = os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), 'VERSION')
+        with open(ruta, encoding='utf-8') as f:
+            v = f.read().strip()
+        if v:
+            return 'v' + '.'.join(v.split('.')[:2])
+    except Exception:
+        pass
+    return 'v2.1'
+
+
 class SplashScreen:
     """
     Pantalla de presentacion con imagen de laboratorio y efecto zoom.
@@ -278,7 +292,7 @@ class SplashScreen:
         # Copyright
         self.canvas.create_text(
             self.width // 2, self.height - 12,
-            text="2024-2026 ANgesLAB Solutions | v2.0",
+            text=f"2024-2026 ANgesLAB Solutions | {_version_corta()}",
             font=('Segoe UI', 8),
             fill=self.COLORS['gray_dark']
         )
