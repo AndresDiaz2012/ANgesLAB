@@ -191,7 +191,7 @@ Source: "..\modulos\reportes_especificaciones.py"; DestDir: "{app}\modulos"; Com
 Source: "..\modulos\reportes_resultados.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\seguridad_db.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\splash_screen.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
-Source: "..\modulos	ema_ui.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
+Source: "..\modulos\tema_ui.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\tasas_cambio.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\utilidades_db.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\valores_referencia.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
