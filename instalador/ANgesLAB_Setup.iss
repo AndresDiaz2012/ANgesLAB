@@ -153,7 +153,12 @@ Source: "..\assets\laboratorio-clinico-2.png"; DestDir: "{app}\assets"; Componen
 Source: "..\assets\fondo.png"; DestDir: "{app}\assets"; Components: resources; Flags: ignoreversion
 
 ; --- Base de Datos ---
-Source: "..\ANgesLAB.accdb"; DestDir: "{app}"; Components: database; Flags: onlyifdoesntexist uninsneveruninstall; \
+; Se empaqueta la PLANTILLA, no la base de trabajo: esta ultima lleva los
+; pacientes y resultados de otra instalacion, y sobre todo su tabla de
+; Usuarios, con lo que 'developer' quedaba con una clave distinta a la de
+; soporte y no se podia entrar. Regenerarla con: python crear_plantilla_bd.py
+Source: "..\ANgesLAB_plantilla.accdb"; DestDir: "{app}"; DestName: "ANgesLAB.accdb"; \
+  Components: database; Flags: onlyifdoesntexist uninsneveruninstall; \
   AfterInstall: SetProgressMessage('Configurando base de datos...')
 
 ; --- Configuracion (preservar si existe) ---

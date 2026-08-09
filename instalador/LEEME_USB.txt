@@ -1,0 +1,92 @@
+================================================================================
+   ANgesLAB v2.1  -  USB de instalacion y actualizacion
+   Sistema de Gestion de Laboratorio Clinico
+================================================================================
+
+Esta USB sirve para dos cosas. Elija UNA segun el equipo:
+
+
+--------------------------------------------------------------------------------
+  A) EL EQUIPO YA TIENE ANgesLAB INSTALADO  ->  ACTUALIZAR
+--------------------------------------------------------------------------------
+  Es el caso normal. Conserva TODO su trabajo: pacientes, resultados,
+  facturas, logos, firmas y configuracion.
+
+  1. CIERRE ANgesLAB por completo.
+  2. Abra la carpeta  actualizador
+  3. Doble clic en:   ACTUALIZAR_ANgesLAB.bat
+  4. Siga las indicaciones (le pedira confirmar).
+  5. Al terminar, abra ANgesLAB normalmente.
+
+  Antes de tocar nada, el actualizador hace una copia de seguridad de su
+  base de datos en la carpeta  backups\  de la instalacion.
+
+  Detalles en:  actualizador\LEEME_ACTUALIZACION.txt
+
+
+--------------------------------------------------------------------------------
+  B) EQUIPO NUEVO, SIN ANgesLAB  ->  INSTALAR
+--------------------------------------------------------------------------------
+  1. Doble clic en:  ANgesLAB_Setup_v2.1.exe
+  2. Acepte el aviso de Windows (requiere permisos de administrador).
+  3. Siga el asistente. Se instala en  C:\ANgesLAB
+  4. Al terminar quedan los accesos directos en el Escritorio y el
+     Menu Inicio.
+
+  NO hace falta ejecutar el actualizador despues: la instalacion nueva ya
+  viene con todo al dia (codigo v2.1 y catalogo completo de areas,
+  pruebas, parametros y valores de referencia).
+
+  ENTRAR LA PRIMERA VEZ:
+     - admin      /  admin123     <- cambiela apenas entre
+     - developer  /  clave de soporte del proveedor (uso tecnico)
+
+  La base de datos que se instala viene VACIA de pacientes, resultados y
+  facturacion: el laboratorio empieza de cero, pero con las 581 pruebas y
+  sus parametros ya cargados. Solo falta cargar los datos del laboratorio
+  (nombre, RIF, logo, bioanalistas y precios) desde Configuracion.
+
+  Requisitos del equipo (el instalador los verifica):
+     - Windows 10 o superior, 64 bits
+     - Python 3 instalado
+     - Microsoft Access Database Engine 2016 (64 bits)
+
+
+--------------------------------------------------------------------------------
+  QUE TRAE LA VERSION 2.1
+--------------------------------------------------------------------------------
+  - IMPRESION POR AREA
+    Al imprimir o guardar el informe se puede elegir que areas incluir
+    (solo Hematologia, solo Quimica, ...) o marcar todas para el informe
+    completo. Util cuando un area termina antes que las otras y hay que
+    entregar su parte. El envio por WhatsApp/Email siempre manda el
+    informe completo.
+
+  - ANTIBIOGRAMA POR GERMEN
+    Cuando el cultivo aisla DOS germenes, cada antibiotico se captura con
+    una casilla S/I/R por germen, y el informe imprime una tabla por
+    germen rotulada con su nombre. Ya no hay que adivinar a cual de los
+    dos corresponde la sensibilidad.
+
+  - Catalogo de areas al dia: Hormonas, Infecciosas, Inmunologicas, Renal.
+  - Indice TyG, VSG por horas con Indice de Katz, Lipidos Totales.
+  - Imagen profesional de la interfaz y correcciones en los informes.
+
+
+--------------------------------------------------------------------------------
+  CONTENIDO DE ESTA USB
+--------------------------------------------------------------------------------
+  ANgesLAB_Setup_v2.1.exe   Instalador completo (equipos nuevos)
+  actualizador\             Actualizador para instalaciones existentes
+  ANgesLAB.pyw              Programa principal
+  modulos\                  Modulos del sistema (39)
+  assets\                   Iconos e imagenes
+  migracion_*.py            Ajustes de catalogo que aplica el actualizador
+  VERSION, LICENSE, requirements.txt
+
+  NOTA: esta USB no trae ninguna base de datos suelta, para que nadie
+  sobrescriba por accidente la del laboratorio. El instalador crea la
+  base de datos solo en equipos donde aun no existe.
+
+  Soporte: soporte@angeslab.com
+================================================================================
