@@ -71,7 +71,10 @@ def conectar(ruta_bd):
 
 def respaldar(ruta_bd):
     """Copia la BD a backups/ antes de escribir."""
-    destino_dir = BASE_DIR / 'backups'
+    # El respaldo va junto a la BD que se migra, no junto al script:
+    # ejecutado desde la USB dejaba copias de la base del cliente en
+    # la memoria, llenandola y sacando datos de pacientes del local.
+    destino_dir = Path(ruta_bd).resolve().parent / 'backups'
     destino_dir.mkdir(exist_ok=True)
     marca = datetime.now().strftime('%Y%m%d_%H%M%S')
     destino = destino_dir / f'ANgesLAB_antes_telefonos_{marca}.accdb'

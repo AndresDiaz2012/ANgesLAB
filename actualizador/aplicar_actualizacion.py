@@ -187,9 +187,14 @@ def _ejecutar_script_bd(script: Path, bd: Path, flags, descripcion):
         log(f"  [AVISO] No se encontro el script: {script.name}")
         return False
     log(f"  {descripcion}...")
+    # UTF-8 en los dos extremos: con la consola en cp1252, un acento en la
+    # salida del script rompia la lectura y la migracion, que en realidad
+    # se habia aplicado bien, se daba por fallida
+    entorno = dict(os.environ, PYTHONIOENCODING='utf-8')
     r = subprocess.run(
         [sys.executable, str(script), str(bd)] + list(flags),
-        capture_output=True, text=True
+        capture_output=True, text=True, encoding='utf-8', errors='replace',
+        env=entorno
     )
     for linea in (r.stdout or '').splitlines():
         log(f"     {linea}")
