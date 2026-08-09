@@ -181,6 +181,22 @@ try:
 except ImportError:
     control_intentos = None
 
+# Importar módulo de restricciones de antibióticos por edad y condición
+try:
+    from modulos.antibioticos_restricciones import (
+        evaluar_lista as evaluar_antibioticos,
+        detectar_embarazo, resumen_paciente as resumen_paciente_atb,
+        hay_restricciones, ETIQUETA as ATB_ETIQUETA, MARCA as ATB_MARCA,
+        LEYENDA as ATB_LEYENDA, DESCARGO as ATB_DESCARGO, SEGURO as ATB_SEGURO
+    )
+    ATB_RESTRICCIONES_DISPONIBLE = True
+except ImportError:
+    ATB_RESTRICCIONES_DISPONIBLE = False
+
+# Se define al arrancar: indica si Solicitudes tiene la columna Gestante.
+# Permite seguir funcionando contra bases antiguas sin esa columna.
+SOLICITUDES_TIENE_GESTANTE = False
+
 # Importar módulo de envío por WhatsApp con adjunto automático
 try:
     from modulos.whatsapp_envio import (
@@ -1766,6 +1782,9 @@ class MainApplication:
         # Los AreaID 1,2,5,6,7,8,9,10 estan hardcodeados en plantillas y formularios
         self._asegurar_areas_clinicas()
 
+        # Columna Gestante en Solicitudes (advertencias de antibiograma)
+        self._asegurar_columna_gestante()
+
         # Siempre actualizar catalogo de Microbiologia (agrega pruebas/parametros faltantes)
         try:
             self._crear_catalogo_microbiologia()
@@ -1780,6 +1799,28 @@ class MainApplication:
                 os.makedirs(firmas_dir)
         except Exception:
             pass
+
+    def _asegurar_columna_gestante(self):
+        """Agrega Solicitudes.Gestante si falta y deja constancia de si existe.
+
+        El dato de gestación condiciona qué antibióticos son aplicables en el
+        antibiograma. Es propio de la solicitud, no del paciente: una misma
+        paciente puede estar gestante en una y no en otra.
+        """
+        global SOLICITUDES_TIENE_GESTANTE
+        try:
+            db.query_one("SELECT TOP 1 Gestante FROM Solicitudes")
+            SOLICITUDES_TIENE_GESTANTE = True
+            return
+        except Exception:
+            pass
+        try:
+            db.execute("ALTER TABLE Solicitudes ADD COLUMN Gestante BIT")
+            SOLICITUDES_TIENE_GESTANTE = True
+            _log.info("Columna Solicitudes.Gestante creada")
+        except Exception as e:
+            SOLICITUDES_TIENE_GESTANTE = False
+            _log.warning("No se pudo crear Solicitudes.Gestante: %s", e)
 
     def _asegurar_areas_clinicas(self):
         """
@@ -4701,10 +4742,22 @@ class MainApplication:
         self.pac_telefono = tk.Entry(row_extra, font=('Segoe UI', 9), width=16, relief='solid', bg=S['input'], bd=1)
         self.pac_telefono.pack(side='left', ipady=3, padx=(6, 0))
 
+        # Gestante: solo aplica a pacientes femeninas. Condiciona las
+        # advertencias de antibióticos del antibiograma.
+        self.sol_gestante = tk.BooleanVar(value=False)
+        self.chk_gestante = tk.Checkbutton(
+            row_extra, text="Gestante", variable=self.sol_gestante,
+            font=('Segoe UI', 9), bg=S['frame'], fg=S['label'],
+            activebackground=S['frame'], state='disabled',
+            command=self._refrescar_card_paciente)
+        self.chk_gestante.pack(side='left', padx=(14, 0))
+
         self.pac_fecha_nac.bind('<KeyRelease>', self._actualizar_edad_desde_fecha)
         self.pac_fecha_nac.bind('<FocusOut>', self._actualizar_edad_desde_fecha)
         # Refrescar chips del card cuando cambien inputs
-        self.pac_sexo.bind('<<ComboboxSelected>>', lambda e: self._refrescar_card_paciente())
+        self.pac_sexo.bind('<<ComboboxSelected>>',
+                           lambda e: (self._sincronizar_gestante(),
+                                      self._refrescar_card_paciente()))
         self.pac_telefono.bind('<FocusOut>', lambda e: self._refrescar_card_paciente())
         self.pac_nombres.bind('<FocusOut>', lambda e: self._refrescar_card_paciente())
         self.pac_apellidos.bind('<FocusOut>', lambda e: self._refrescar_card_paciente())
@@ -5304,6 +5357,7 @@ class MainApplication:
         if pac.get('Sexo'):
             s = pac['Sexo']
             self.pac_sexo.set('M - Masculino' if s == 'M' else 'F - Femenino')
+        self._sincronizar_gestante()
 
         # Teléfono
         self.pac_telefono.delete(0, 'end')
@@ -5329,6 +5383,7 @@ class MainApplication:
         self.lbl_edad_calc.config(text="— años", bg='#cfd8dc', fg='#455a64')
         self.pac_sexo.set('')
         self.pac_telefono.delete(0, 'end')
+        self._sincronizar_gestante()
 
         self.lbl_numero.config(text="(Se generará al guardar)", fg='#7f8c8d')
         self._set_pac_status("Ingrese la cédula para buscar o registrar paciente",
@@ -5358,6 +5413,24 @@ class MainApplication:
                                 pass
                     except Exception:
                         pass
+        except Exception:
+            pass
+
+    def _sincronizar_gestante(self):
+        """Habilita 'Gestante' solo si la paciente es femenina.
+
+        Al cambiar a masculino la casilla se desmarca, para que no quede
+        un valor heredado de un paciente anterior.
+        """
+        if not hasattr(self, 'chk_gestante'):
+            return
+        try:
+            es_femenino = (self.pac_sexo.get() or '').strip().upper().startswith('F')
+            if es_femenino:
+                self.chk_gestante.config(state='normal')
+            else:
+                self.sol_gestante.set(False)
+                self.chk_gestante.config(state='disabled')
         except Exception:
             pass
 
@@ -6034,6 +6107,9 @@ class MainApplication:
             'PorcentajeDescuento': desc_pct,
             'PorcentajeIVA': iva_pct,
         }
+        # Solo se envía si la base tiene la columna (compatibilidad hacia atrás)
+        if SOLICITUDES_TIENE_GESTANTE and hasattr(self, 'sol_gestante'):
+            datos_solicitud['Gestante'] = bool(self.sol_gestante.get())
 
         # Crear la solicitud
         resultado = self.gestor_solicitudes.crear_solicitud(
@@ -6211,6 +6287,8 @@ class MainApplication:
             'UsuarioRegistro': self.user.get('UsuarioID', 1),
             'FechaRegistro': datetime.now()
         }
+        if SOLICITUDES_TIENE_GESTANTE and hasattr(self, 'sol_gestante'):
+            data['Gestante'] = bool(self.sol_gestante.get())
 
         # Insertar solicitud
         db.insert('Solicitudes', data)
@@ -10260,6 +10338,23 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
             _pdf_sexo = sol.get('Sexo')  # 'M' o 'F'
             _pdf_fn = sol.get('FechaNacimiento')  # datetime o None
 
+            # Gestación: la casilla de la solicitud o, si no se marcó, lo que
+            # diga el diagnóstico. Suman en vez de excluirse: dejar de advertir
+            # sobre un antibiótico en una gestante es peor que advertir de más,
+            # sobre todo porque nunca se oculta un resultado. El informe indica
+            # de dónde salió el dato.
+            _pdf_embarazo = False
+            _pdf_embarazo_origen = ''
+            if ATB_RESTRICCIONES_DISPONIBLE and (_pdf_sexo or '').upper().startswith('F'):
+                _marcada = bool(sol.get('Gestante')) if SOLICITUDES_TIENE_GESTANTE else False
+                _en_texto = detectar_embarazo(sol.get('DiagnosticoPresuntivo'),
+                                              sol.get('Observaciones'))
+                _pdf_embarazo = _marcada or _en_texto
+                if _marcada:
+                    _pdf_embarazo_origen = 'indicada en la solicitud'
+                elif _en_texto:
+                    _pdf_embarazo_origen = 'referida en el diagnóstico'
+
             # Calcular edad
             edad_texto = '0 Años'
             if sol.get('FechaNacimiento'):
@@ -10953,15 +11048,34 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                             _ancho_total = sum(_atb_w)
                             atb_col_widths = [_ancho_total / 3.0] * 3
 
+                            # Aplicabilidad por edad y condicion del paciente.
+                            # No se oculta ningun resultado: se marca con
+                            # asteriscos y se explica al pie.
+                            _atb_eval = {}
+                            if ATB_RESTRICCIONES_DISPONIBLE:
+                                try:
+                                    for _e in evaluar_antibioticos(
+                                            [p['nombre'] for p in params_seccion],
+                                            _pdf_fn, _pdf_sexo, _pdf_embarazo):
+                                        _atb_eval[_e['nombre']] = _e
+                                except Exception:
+                                    _atb_eval = {}
+
+                            def _etiqueta_atb(nombre):
+                                _ev = _atb_eval.get(nombre)
+                                if not _ev or not _ev['marca']:
+                                    return nombre
+                                return f"{nombre} {_ev['marca']}"
+
                             sensibles, intermedios, resistentes, otros = [], [], [], []
                             for p in params_seccion:
                                 valor_upper = p['valor'].upper().strip()
                                 if valor_upper in ['S', 'SENSIBLE']:
-                                    sensibles.append(p['nombre'])
+                                    sensibles.append(_etiqueta_atb(p['nombre']))
                                 elif valor_upper in ['I', 'INTERMEDIO', 'SDD']:
-                                    intermedios.append(p['nombre'])
+                                    intermedios.append(_etiqueta_atb(p['nombre']))
                                 elif valor_upper in ['R', 'RESISTENTE']:
-                                    resistentes.append(p['nombre'])
+                                    resistentes.append(_etiqueta_atb(p['nombre']))
                                 else:
                                     # Valores que no son S/I/R (p.ej. CIM) se
                                     # listan aparte para no perderlos
@@ -11023,6 +11137,62 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                                 ]))
                                 seccion_elements.append(Spacer(1, 0.04*inch))
                                 seccion_elements.append(otros_table)
+
+                            # ---- APLICABILIDAD SEGUN EL PACIENTE ----
+                            # Solo se imprime si hay algo que advertir
+                            _con_restriccion = [e for e in _atb_eval.values()
+                                                if e['nivel'] != ATB_SEGURO]
+                            if _atb_eval and _con_restriccion:
+                                _nota_style = ParagraphStyle(
+                                    'AtbNota', parent=styles['Normal'],
+                                    fontName='Helvetica', fontSize=7, leading=8.5,
+                                    alignment=TA_LEFT,
+                                    textColor=colors.HexColor('#37474f'))
+                                _nota_bold = ParagraphStyle(
+                                    'AtbNotaBold', parent=_nota_style,
+                                    fontName='Helvetica-Bold', fontSize=7.5,
+                                    leading=9.5, spaceBefore=4)
+
+                                seccion_elements.append(Spacer(1, 0.05*inch))
+
+                                _ctx = resumen_paciente_atb(_pdf_fn, _pdf_embarazo)
+                                if _pdf_embarazo and _pdf_embarazo_origen:
+                                    _ctx = _ctx.replace(
+                                        'gestación',
+                                        f'gestación ({_pdf_embarazo_origen})')
+                                seccion_elements.append(Paragraph(
+                                    'APLICABILIDAD SEGÚN EL PACIENTE'
+                                    + (f' — {_ctx}' if _ctx else ''),
+                                    _nota_bold))
+
+                                # Opciones sensibles que no tienen restriccion
+                                _sugeridas = []
+                                for p in params_seccion:
+                                    if p['valor'].upper().strip() not in ['S', 'SENSIBLE']:
+                                        continue
+                                    _ev = _atb_eval.get(p['nombre'])
+                                    if not _ev or _ev['nivel'] == ATB_SEGURO:
+                                        _sugeridas.append(p['nombre'])
+                                if _sugeridas:
+                                    seccion_elements.append(Paragraph(
+                                        '<b>Sensibles sin restricción para este paciente:</b> '
+                                        + ', '.join(_sugeridas), _nota_style))
+
+                                # Detalle de cada antibiotico advertido
+                                for _ev in sorted(_con_restriccion,
+                                                  key=lambda e: e['nombre']):
+                                    seccion_elements.append(Paragraph(
+                                        f"<b>{_ev['marca']} {_ev['nombre']}</b> — "
+                                        f"{ATB_ETIQUETA[_ev['nivel']]}. "
+                                        + '; '.join(_ev['motivos']),
+                                        _nota_style))
+
+                                # Leyenda de marcas y descargo
+                                _leyenda = '   '.join(
+                                    f"{ATB_MARCA[n]} {t}" for n, t in ATB_LEYENDA)
+                                seccion_elements.append(Paragraph(_leyenda, _nota_style))
+                                seccion_elements.append(Paragraph(
+                                    f"<i>{ATB_DESCARGO}</i>", _nota_style))
 
                         else:
                             # ---- SECCIONES NORMALES DE MICROBIOLOGIA ----

@@ -27,6 +27,7 @@ Modulos auxiliares (disponibles para uso futuro):
 - reportes_especificaciones: Reportes segun especificaciones tecnicas
 - envio_resultados: Envio de resultados por email/PDF
 - whatsapp_envio: Envio por WhatsApp con el PDF adjuntado automaticamente
+- antibioticos_restricciones: Aplicabilidad de antibioticos por edad y gestacion
 
 Copyright 2024-2026 ANgesLAB Solutions
 ================================================================================

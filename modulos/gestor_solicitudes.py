@@ -419,6 +419,11 @@ class GestorSolicitudes:
                 'FechaRegistro': datetime.now()
             }
 
+            # Gestante: solo se incluye si quien llama lo envia, para no
+            # romper bases que aun no tienen esa columna
+            if 'Gestante' in datos_solicitud:
+                data['Gestante'] = bool(datos_solicitud.get('Gestante'))
+
             # Insertar solicitud
             self.db.insert('Solicitudes', data)
 

@@ -169,6 +169,7 @@ Source: "..\logos\*"; DestDir: "{app}\logos"; Components: resources; Flags: igno
 ; --- Modulos del Sistema (35 modulos) ---
 Source: "..\modulos\__init__.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion; \
   AfterInstall: SetProgressMessage('Instalando modulos del sistema...')
+Source: "..\modulos\antibioticos_restricciones.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\auditoria.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\calculos_automaticos.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\config_administrativa.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
