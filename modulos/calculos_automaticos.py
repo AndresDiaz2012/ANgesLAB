@@ -101,6 +101,22 @@ class CalculadorLaboratorio:
             'vsg', 'v.s.g.', 'velocidad de sedimentacion', 'velocidad de sedimentación',
             'vsg  ( wintrobe)', 'vsg (wintrobe)', 'eritrosedimentacion'
         ],
+        'vsg_1h': [
+            'vsg 1 hora', 'vsg 1a hora', 'vsg primera hora', 'v.s.g. 1 hora',
+            'v.s.g. 1a hora', 'v.s.g. 1ra hora', 'v.s.g. primera hora',
+            'vsg 1h', 'v.s.g. 1h', 'velocidad de sedimentacion 1 hora',
+            'sedimentacion 1 hora', 'vsg primera'
+        ],
+        'vsg_2h': [
+            'vsg 2 horas', 'vsg 2a hora', 'vsg segunda hora', 'v.s.g. 2 horas',
+            'v.s.g. 2a hora', 'v.s.g. 2da hora', 'v.s.g. segunda hora',
+            'vsg 2h', 'v.s.g. 2h', 'velocidad de sedimentacion 2 horas',
+            'sedimentacion 2 horas', 'vsg segunda'
+        ],
+        'indice_katz': [
+            'indice de katz', 'índice de katz', 'indice katz', 'índice katz',
+            'katz', 'indice vsg', 'índice vsg', 'indice de sedimentacion'
+        ],
 
         # =====================================================================
         # DIFERENCIAL LEUCOCITARIO (% y absolutos)
@@ -981,6 +997,28 @@ class CalculadorLaboratorio:
         # Aproximación
         lipidos = ct * 1.5 + tg
         return self._redondear(lipidos, 2)
+
+    def calcular_indice_katz(self, vsg_1h: float, vsg_2h: float) -> Optional[float]:
+        """
+        Calcula el índice de Katz de la velocidad de sedimentación globular.
+
+        Fórmula: (VSG 1ª hora + (VSG 2ª hora / 2)) / 2
+
+        Promedia la lectura de la primera hora con la mitad de la segunda,
+        de modo que corrige la aceleración propia de la segunda hora y da un
+        valor más estable que cualquiera de las dos lecturas por separado.
+
+        Valor de referencia orientativo: hasta 10 mm.
+        """
+        h1 = self._to_float(vsg_1h)
+        h2 = self._to_float(vsg_2h)
+
+        if h1 is None or h2 is None:
+            return None
+        if h1 < 0 or h2 < 0:
+            return None
+
+        return self._redondear((h1 + (h2 / 2.0)) / 2.0, 1)
 
     def calcular_colesterol_no_hdl(self, colesterol_total: float, hdl: float) -> Optional[float]:
         """
@@ -2225,6 +2263,19 @@ class CalculadorLaboratorio:
             calculos.append(('Colesterol no-HDL', 'colesterol_no_hdl', lambda ct=ct_val, hdl=hdl_val: self.calcular_colesterol_no_hdl(ct, hdl)))
             calculos.append(('Índice CT/HDL', 'indice_ct_hdl', lambda ct=ct_val, hdl=hdl_val: self.calcular_indice_ct_hdl(ct, hdl)))
 
+        # Lipidos totales: la formula solo necesita colesterol y trigliceridos,
+        # no hace falta esperar al HDL
+        if ct_val is not None and tg_val is not None:
+            calculos.append(('Lípidos Totales', 'lipidos_totales',
+                             lambda ct=ct_val, tg=tg_val: self.calcular_lipidos_totales(ct, tg)))
+
+        # Indice de Katz: requiere las dos lecturas de la VSG
+        vsg1 = valores_norm.get('vsg_1h')
+        vsg2 = valores_norm.get('vsg_2h')
+        if vsg1 is not None and vsg2 is not None:
+            calculos.append(('Índice de Katz', 'indice_katz',
+                             lambda a=vsg1, b=vsg2: self.calcular_indice_katz(a, b)))
+
         # Cálculos que requieren CT, HDL y TG
         if all(k in valores_norm for k in ['colesterol_total', 'hdl', 'trigliceridos']):
             # Calcular VLDL y LDL primero para usarlos en otros cálculos
@@ -2232,7 +2283,6 @@ class CalculadorLaboratorio:
             ldl_calc = self.calcular_ldl(ct_val, hdl_val, tg_val)
 
             calculos.append(('LDL', 'ldl', lambda ct=ct_val, hdl=hdl_val, tg=tg_val: self.calcular_ldl(ct, hdl, tg)))
-            calculos.append(('Lípidos Totales', 'lipidos_totales', lambda ct=ct_val, tg=tg_val: self.calcular_lipidos_totales(ct, tg)))
 
             # Agregar Índice LDL/HDL (usa LDL calculado)
             if ldl_calc is not None:

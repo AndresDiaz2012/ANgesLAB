@@ -7498,9 +7498,24 @@ Forma de Pago: {self.combo_forma_pago.get()}
                                 command=self._limpiar_busqueda_res, width=2)
         btn_limpiar.pack(side='left', padx=(2, 0), ipady=4)
 
-        # Lista de solicitudes pendientes
-        tk.Label(left_frame, text="📋 Solicitudes Pendientes:", font=('Segoe UI', 10, 'bold'),
-                bg='white').pack(anchor='w', padx=15, pady=(10, 5))
+        # Filtro de estado: sin él, una solicitud ya entregada desaparece de
+        # la lista y no hay forma de volver a ella para corregir un error
+        filtro_estado_frame = tk.Frame(left_frame, bg='white')
+        filtro_estado_frame.pack(fill='x', padx=15, pady=(10, 0))
+        tk.Label(filtro_estado_frame, text="Mostrar:", font=('Segoe UI', 9),
+                 bg='white', fg=COLORS['text_light']).pack(side='left')
+        self.combo_estado_res = ttk.Combobox(
+            filtro_estado_frame, state='readonly', font=('Segoe UI', 9), width=22,
+            values=['Pendientes de resultado', 'Ya reportadas (corregir)', 'Todas'])
+        self.combo_estado_res.current(0)
+        self.combo_estado_res.pack(side='left', padx=6)
+        self.combo_estado_res.bind(
+            '<<ComboboxSelected>>', lambda e: self.cargar_solicitudes_pendientes())
+
+        # Lista de solicitudes
+        self.lbl_lista_res = tk.Label(left_frame, text="📋 Solicitudes Pendientes:",
+                                      font=('Segoe UI', 10, 'bold'), bg='white')
+        self.lbl_lista_res.pack(anchor='w', padx=15, pady=(10, 5))
 
         list_frame = tk.Frame(left_frame, bg='white')
         list_frame.pack(fill='both', expand=True, padx=15, pady=(0, 15))
@@ -7545,18 +7560,39 @@ Forma de Pago: {self.combo_forma_pago.get()}
                 font=('Segoe UI', 12), bg='white', fg=COLORS['text_light'], justify='center').pack(pady=100)
 
     def cargar_solicitudes_pendientes(self):
-        """Carga las solicitudes pendientes de resultados"""
+        """Carga las solicitudes según el filtro de estado seleccionado.
+
+        'Ya reportadas' permite volver a una solicitud completada o entregada
+        para corregir un resultado que salió con error en el informe impreso.
+        """
         for item in self.tree_sol_res.get_children():
             self.tree_sol_res.delete(item)
 
+        seleccion = 0
+        if hasattr(self, 'combo_estado_res'):
+            seleccion = max(0, self.combo_estado_res.current())
+
+        if seleccion == 1:
+            where = "WHERE s.EstadoSolicitud IN ('Completada', 'Validada', 'Entregada')"
+            titulo = "📋 Solicitudes ya reportadas:"
+        elif seleccion == 2:
+            where = "WHERE s.EstadoSolicitud <> 'Anulada'"
+            titulo = "📋 Todas las solicitudes:"
+        else:
+            where = "WHERE s.EstadoSolicitud IN ('Pendiente', 'En Proceso')"
+            titulo = "📋 Solicitudes Pendientes:"
+
+        if hasattr(self, 'lbl_lista_res'):
+            self.lbl_lista_res.config(text=titulo)
+
         try:
-            solicitudes = db.query("""
+            solicitudes = db.query(f"""
                 SELECT TOP 100 s.SolicitudID, s.NumeroSolicitud,
                        p.Nombres & ' ' & p.Apellidos AS Paciente,
                        s.EstadoSolicitud
                 FROM Solicitudes s
                 LEFT JOIN Pacientes p ON s.PacienteID = p.PacienteID
-                WHERE s.EstadoSolicitud IN ('Pendiente', 'En Proceso')
+                {where}
                 ORDER BY s.SolicitudID DESC
             """)
 
@@ -7924,6 +7960,20 @@ Forma de Pago: {self.combo_forma_pago.get()}
                 color_estado = '#4caf50' if estado_prueba == 'Validado' else '#ff9800' if estado_prueba == 'Capturado' else '#9e9e9e'
                 tk.Label(header_prueba, text=estado_prueba, font=('Segoe UI', 9, 'bold'),
                         bg=color_estado, fg='white', padx=10).pack(side='right', pady=5, padx=5)
+
+                # Aviso de correccion: la prueba ya fue validada, de modo que
+                # su resultado pudo haberse impreso o enviado al paciente
+                if estado_prueba == 'Validado':
+                    aviso_corr = tk.Frame(prueba_frame, bg='#fff8e1',
+                                          highlightbackground='#ffb300',
+                                          highlightthickness=1)
+                    aviso_corr.pack(fill='x', padx=6, pady=(6, 0))
+                    tk.Label(aviso_corr,
+                             text="⚠  Resultado ya validado: pudo haberse impreso o enviado. "
+                                  "Todo cambio queda registrado como CORRECCIÓN y exige "
+                                  "reimprimir el informe.",
+                             font=('Segoe UI', 8), bg='#fff8e1', fg='#8d6e00',
+                             wraplength=760, justify='left').pack(anchor='w', padx=8, pady=4)
 
                 # =============================================================
                 # FORMULARIO ESPECIAL: PRUEBA DE TOLERANCIA A LA GLUCOSA (GTT)
@@ -9087,10 +9137,89 @@ Forma de Pago: {self.combo_forma_pago.get()}
                 except Exception:
                     pass
 
+    # Tipos celulares que componen la fórmula leucocitaria. Se listan los
+    # nombres usados en distintos catálogos (neutrófilos/segmentados,
+    # cayados/bandas) para que la validación no dependa de uno solo.
+    CELULAS_DIFERENCIAL = (
+        'NEUTROFILOS', 'SEGMENTADOS', 'CAYADOS', 'BANDAS', 'JUVENILES',
+        'MIELOCITOS', 'METAMIELOCITOS', 'PROMIELOCITOS', 'BLASTOS',
+        'LINFOCITOS', 'LINFOBLASTOS', 'MONOCITOS', 'EOSINOFILOS',
+        'BASOFILOS', 'PLASMOCITOS',
+    )
+    # Marcan un recuento absoluto, no un porcentaje: no entran en la suma
+    _MARCAS_ABSOLUTO = ('ABS', 'ABSOLUT', '#', '/MM', 'X10', 'RECUENTO')
+
+    @staticmethod
+    def _es_parametro_diferencial(nombre):
+        """True si el parámetro es un porcentaje de la fórmula leucocitaria."""
+        n = ' '.join(str(nombre or '').upper().split())
+        if not n:
+            return False
+        if any(m in n for m in MainApplication._MARCAS_ABSOLUTO):
+            return False
+        return any(c in n for c in MainApplication.CELULAS_DIFERENCIAL)
+
+    @staticmethod
+    def _valor_porcentaje(texto):
+        """Convierte el texto de un porcentaje a float, o None si no aplica."""
+        t = str(texto or '').strip().replace('%', '').replace(',', '.').strip()
+        if not t:
+            return None
+        try:
+            return float(t)
+        except ValueError:
+            return None
+
+    def _validar_diferencial_hematologico(self, detalle_id):
+        """La suma del diferencial no puede pasar de 100 %.
+
+        Devuelve (es_valido, mensaje). Basta un valor cargado para validar:
+        una sola célula por encima de 100 % ya es un error.
+        """
+        entradas = self.parametro_entries.get(detalle_id) or []
+        celulas = []
+        for p in entradas:
+            nombre = p.get('nombre', '')
+            if not self._es_parametro_diferencial(nombre):
+                continue
+            try:
+                bruto = p['entry'].get().strip()
+            except Exception:
+                continue
+            valor = self._valor_porcentaje(bruto)
+            if valor is not None:
+                celulas.append((nombre, valor))
+
+        if not celulas:
+            return True, ''
+
+        total = sum(v for _n, v in celulas)
+        if total <= 100.001:
+            return True, ''
+
+        detalle = '\n'.join(f"    {n}: {v:g} %" for n, v in celulas)
+        return False, (
+            f"La suma del diferencial es {total:g} % y no puede superar 100 %.\n\n"
+            f"{detalle}\n\n"
+            f"    TOTAL: {total:g} %  (sobran {total - 100:g})\n\n"
+            "Corrija los porcentajes antes de guardar."
+        )
+
     def guardar_resultados_parametros(self, detalle_id, silencioso=False):
-        """Guarda los resultados de todos los parametros de una prueba"""
+        """Guarda los resultados de todos los parametros de una prueba.
+
+        Devuelve la cantidad guardada, o -1 si la fórmula leucocitaria supera
+        el 100 % (en ese caso no se guarda nada).
+        """
         if detalle_id not in self.parametro_entries:
             return 0
+
+        # El diferencial no puede sumar más de 100 %: se avisa siempre, aunque
+        # el guardado sea silencioso, porque bloquea la operación
+        ok_dif, msg_dif = self._validar_diferencial_hematologico(detalle_id)
+        if not ok_dif:
+            messagebox.showerror("Diferencial inválido", msg_dif)
+            return -1
 
         count = 0
         errores = []
@@ -9123,6 +9252,16 @@ Forma de Pago: {self.combo_forma_pago.get()}
                         'TipoAlerta': tipo_alerta or '',
                     }
 
+                    # Estado previo: necesario para dejar constancia del valor
+                    # anterior cuando se corrige un resultado ya reportado
+                    estado_anterior = None
+                    try:
+                        if self.auditoria:
+                            estado_anterior = self.auditoria.antes_guardar_resultado(
+                                detalle_id, param_id)
+                    except Exception:
+                        estado_anterior = None
+
                     # Verificar si ya existe
                     existe = db.query_one(f"""
                         SELECT ResultadoParamID FROM ResultadosParametros
@@ -9149,8 +9288,16 @@ Forma de Pago: {self.combo_forma_pago.get()}
                     pass
                 try:
                     if self.auditoria:
+                        # Si el resultado ya estaba validado, esto es una
+                        # CORRECCION de un informe que pudo haberse entregado
+                        _previo = (estado_anterior or {}).get('valor')
+                        _est_previo = (estado_anterior or {}).get('estado', '')
+                        _accion = 'CORREGIR' if (
+                            _est_previo == 'Validado' and str(_previo or '') != valor
+                        ) else 'GUARDAR'
                         self.auditoria.despues_guardar_resultado(
-                            detalle_id, param_id, valor, 'Capturado', None, 'GUARDAR')
+                            detalle_id, param_id, valor, 'Capturado',
+                            estado_anterior, _accion)
                 except Exception:
                     pass
 
@@ -9615,6 +9762,10 @@ Forma de Pago: {self.combo_forma_pago.get()}
 
         # Primero guardar (sin messagebox ni reconstrucción)
         guardados = self.guardar_resultados_parametros(detalle_id, silencioso=True)
+
+        # Diferencial fuera de rango: no se guarda ni se valida
+        if guardados == -1:
+            return
 
         # Registrar validación masiva en auditoría
         if self.auditoria:
