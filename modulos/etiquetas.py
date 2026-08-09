@@ -54,6 +54,7 @@ COLORES_AREA = {
     11: {'nombre': 'Pruebas Especiales', 'abrev': 'ESP', 'color': '#5e35b1', 'color_texto': '#ffffff'},  # Violeta
     12: {'nombre': 'Infecciosas',    'abrev': 'INF', 'color': '#ef6c00', 'color_texto': '#ffffff'},  # Naranja
     13: {'nombre': 'Inmunológicas',  'abrev': 'INM', 'color': '#00897b', 'color_texto': '#ffffff'},  # Verde azulado
+    14: {'nombre': 'Renal',          'abrev': 'REN', 'color': '#3949ab', 'color_texto': '#ffffff'},  # Indigo
     29: {'nombre': 'General',        'abrev': 'GEN', 'color': '#546e7a', 'color_texto': '#ffffff'},  # Gris
 }
 

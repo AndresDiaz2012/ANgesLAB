@@ -91,6 +91,10 @@ class ConfigReportes:
         13: {  # Inmunologicas
             "nombre": "PRUEBAS INMUNOLOGICAS",
             "secciones": ["Autoinmunes", "Complemento", "Inmunoglobulinas", "Alergia", "Otras"]
+        },
+        14: {  # Renal
+            "nombre": "FUNCION RENAL",
+            "secciones": ["Relaciones en Orina", "Depuracion", "Electrolitos", "Otras"]
         }
     }
 

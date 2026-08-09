@@ -50,6 +50,7 @@ AREAS_LAB = {
     11: {'nombre': 'Pruebas Especiales', 'abrev': 'ESP'},
     12: {'nombre': 'Infecciosas',    'abrev': 'INF'},
     13: {'nombre': 'Inmunológicas',  'abrev': 'INM'},
+    14: {'nombre': 'Renal',          'abrev': 'REN'},
     29: {'nombre': 'General',        'abrev': 'GEN'},
 }
 

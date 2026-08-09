@@ -1894,9 +1894,10 @@ class MainApplication:
             (11, 'ESP', 'Pruebas Especiales', 9),
             (12, 'INF', 'Infecciosas',    10),
             (13, 'INM', 'Inmunológicas',  11),
+            (14, 'REN', 'Renal',          12),
         ]
         # El area 'General' no tiene ID fijo; se usa para bioanalistas sin area especifica
-        AREA_GENERAL = ('GEN', 'General', 12)
+        AREA_GENERAL = ('GEN', 'General', 13)
 
         try:
             for area_id, codigo, nombre, secuencia in AREAS_REQUERIDAS:
