@@ -50,6 +50,7 @@ TABLAS_A_VACIAR = [
     'ResultadosParametros', 'ResultadosMicrobiologia', 'Resultados',
     'HistorialResultados', 'Sensibilidades',
     'DetalleSolicitudes', 'PruebasSolicitadas', 'MuestrasSolicitud',
+    'AccesosQR',
     'Solicitudes',
     'ResultadosVet', 'DetalleSolicitudesVet', 'SolicitudesVet',
     'PacientesVet',

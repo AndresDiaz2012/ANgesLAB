@@ -883,7 +883,10 @@ class GestorSolicitudes:
                         'es_exonerada': datos.get('es_exonerada', False),
                         'tipo': datos.get('tipo', 'Contado'),
                         'condicion_pago': datos.get('condicion_pago', 'Contado'),
-                        'observaciones': datos.get('observaciones', '')
+                        'observaciones': datos.get('observaciones', ''),
+                        # Necesario para que el IGTF se detecte solo (Divisa/Zelle)
+                        'forma_pago_nombre': datos.get('forma_pago_nombre'),
+                        'moneda_factura': datos.get('moneda_factura', 'USD'),
                     }
 
                     factura_id, numero_factura = facturacion_fiscal.crear_factura(

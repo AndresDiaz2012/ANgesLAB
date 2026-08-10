@@ -114,6 +114,32 @@ class VentanaAdministrativa:
             pass
 
     # ------------------------------------------------------------------
+    # Impresión por rol
+    # ------------------------------------------------------------------
+    def _enviar_a_impresora(self, ruta, rol):
+        """
+        Envía un documento a la impresora asignada a su rol.
+
+        Devuelve un texto corto para mostrar en la barra de estado.
+        """
+        try:
+            from modulos.impresoras import imprimir_documento, GestorImpresoras
+            resultado = imprimir_documento(self.db, ruta, rol)
+            if resultado == 'impreso':
+                impresora = GestorImpresoras(self.db).impresora_de(rol)
+                return f"enviadas a {impresora}"
+            if resultado == 'abierto':
+                return "abiertas en pantalla"
+            return "no se pudo abrir el archivo"
+        except Exception:
+            try:
+                import os
+                os.startfile(ruta)
+                return "abiertas en pantalla"
+            except Exception:
+                return "no se pudo abrir el archivo"
+
+    # ------------------------------------------------------------------
     # Helpers de permisos
     # ------------------------------------------------------------------
     def _puede_acceder(self):
@@ -1421,9 +1447,9 @@ class VentanaAdministrativa:
             try:
                 ruta = self.generador_etiquetas.generar_etiquetas_solicitud(int(sol_id))
                 if ruta:
-                    lbl_status.config(text=f"Etiquetas generadas correctamente.", fg=COLORS['success'])
-                    import os
-                    os.startfile(ruta)
+                    destino = self._enviar_a_impresora(ruta, 'etiquetas')
+                    lbl_status.config(text=f"Etiquetas generadas ({destino}).",
+                                      fg=COLORS['success'])
                 else:
                     lbl_status.config(text="No se pudieron generar las etiquetas.", fg=COLORS['danger'])
             except Exception as ex:
@@ -1505,10 +1531,10 @@ class VentanaAdministrativa:
                     try:
                         ruta = self.generador_etiquetas.generar_etiquetas_batch(ids)
                         if ruta:
-                            lbl_status.config(text=f"Etiquetas generadas ({len(ids)} solicitudes).",
-                                              fg=COLORS['success'])
-                            import os
-                            os.startfile(ruta)
+                            destino = self._enviar_a_impresora(ruta, 'etiquetas')
+                            lbl_status.config(
+                                text=f"Etiquetas de {len(ids)} solicitudes ({destino}).",
+                                fg=COLORS['success'])
                         else:
                             lbl_status.config(text="Error generando etiquetas.", fg=COLORS['danger'])
                     except Exception as ex:
@@ -1640,20 +1666,20 @@ class VentanaAdministrativa:
                 if sel == 'Todas las areas':
                     rutas = self.generador_hojas.generar_todas_areas()
                     if rutas:
-                        lbl_status.config(text=f"Generadas {len(rutas)} hojas de trabajo.",
-                                          fg=COLORS['success'])
-                        import os
                         for r in rutas:
-                            os.startfile(r)
+                            destino = self._enviar_a_impresora(r, 'resultados')
+                        lbl_status.config(
+                            text=f"Generadas {len(rutas)} hojas de trabajo ({destino}).",
+                            fg=COLORS['success'])
                     else:
                         lbl_status.config(text="No hay solicitudes pendientes.", fg=COLORS['warning'])
                 else:
                     area_id = int(sel.split(' - ')[0])
                     ruta = self.generador_hojas.generar_hoja_area(area_id)
                     if ruta:
-                        lbl_status.config(text=f"Hoja generada: {ruta}", fg=COLORS['success'])
-                        import os
-                        os.startfile(ruta)
+                        destino = self._enviar_a_impresora(ruta, 'resultados')
+                        lbl_status.config(text=f"Hoja generada ({destino}).",
+                                          fg=COLORS['success'])
                     else:
                         lbl_status.config(text="No hay solicitudes pendientes para esta area.",
                                           fg=COLORS['warning'])

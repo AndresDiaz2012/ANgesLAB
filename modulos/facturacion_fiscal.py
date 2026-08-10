@@ -1094,8 +1094,14 @@ def formatear_monto(monto, simbolo='Bs.'):
     """Formatea un monto con separadores de miles"""
     return f"{simbolo} {monto:,.2f}"
 
-def monto_en_letras(monto):
-    """Convierte un monto a letras (para facturas)"""
+def monto_en_letras(monto, moneda='VES'):
+    """
+    Convierte un monto a letras (para facturas).
+
+    Args:
+        monto: cantidad a expresar en palabras
+        moneda: 'VES'/'Bs' (bolívares), 'USD' (dólares) o 'COP' (pesos)
+    """
     # Implementacion basica
     unidades = ['', 'un', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve']
     decenas = ['', 'diez', 'veinte', 'treinta', 'cuarenta', 'cincuenta', 'sesenta', 'setenta', 'ochenta', 'noventa']
@@ -1136,7 +1142,12 @@ def monto_en_letras(monto):
     if centavos > 0:
         resultado += f' con {centavos:02d}/100'
 
-    return resultado.upper() + ' BOLIVARES'
+    nombres_moneda = {
+        'VES': 'BOLIVARES', 'BS': 'BOLIVARES', 'BS.': 'BOLIVARES',
+        'USD': 'DOLARES', 'COP': 'PESOS COLOMBIANOS', 'EUR': 'EUROS',
+    }
+    unidad = nombres_moneda.get(str(moneda or 'VES').upper(), 'BOLIVARES')
+    return f'{resultado.upper()} {unidad}'
 
 
 # ============================================================================

@@ -52,6 +52,15 @@ class ConfiguradorAdministrativo:
         'MargenInferior': 'DOUBLE',
         'MargenIzquierdo': 'DOUBLE',
         'MargenDerecho': 'DOUBLE',
+        # Impresoras por rol (ver modulos/impresoras.py)
+        'ImpresoraResultados': 'TEXT(255)',
+        'ImpresoraResultadosDirecto': 'BIT',
+        'ImpresoraFacturacion': 'TEXT(255)',
+        'ImpresoraFacturacionDirecto': 'BIT',
+        'ImpresoraRecibos': 'TEXT(255)',
+        'ImpresoraRecibosDirecto': 'BIT',
+        'ImpresoraEtiquetas': 'TEXT(255)',
+        'ImpresoraEtiquetasDirecto': 'BIT',
         # Resultados
         'MostrarValoresReferencia': 'BIT',
         'MostrarUnidades': 'BIT',
@@ -71,6 +80,11 @@ class ConfiguradorAdministrativo:
         'IGTFActivo': 'BIT',
         'TasaIGTF': 'DOUBLE',
         'TipoContribuyente': 'TEXT(20)',
+        # Proveedor autorizado / imprenta (Providencia SNAT/2011/0071 art. 30)
+        'ImprentaNombre': 'TEXT(200)',
+        'ImprentaRIF': 'TEXT(50)',
+        'ImprentaProvidencia': 'TEXT(100)',
+        'ImprentaFechaProvidencia': 'DATETIME',
         # Firma
         'NombreDirector': 'TEXT(200)',
         'TituloDirector': 'TEXT(200)',
@@ -228,6 +242,23 @@ class ConfiguradorAdministrativo:
             logging.getLogger("angeslab.config_administrativa").warning("Error al actualizar configuración de impresión: %s", e)
             return False
 
+    def actualizar_configuracion_impresoras(self, asignaciones):
+        """
+        Guarda la impresora asignada a cada rol.
+
+        Args:
+            asignaciones (dict): {rol: {'impresora': str, 'directo': bool}}
+                Roles válidos: resultados, facturacion, recibos, etiquetas.
+                Se permite repetir la misma impresora en varios roles.
+        """
+        try:
+            from modulos.impresoras import GestorImpresoras
+            return GestorImpresoras(self.db).guardar(asignaciones)
+        except Exception as e:
+            logging.getLogger("angeslab.config_administrativa").warning(
+                "Error al actualizar impresoras: %s", e)
+            return False
+
     def actualizar_configuracion_resultados(self, datos):
         """
         Actualiza la configuración de visualización de resultados.
@@ -330,6 +361,23 @@ class ConfiguradorAdministrativo:
             if 'TipoContribuyente' in datos:
                 tipo = str(datos['TipoContribuyente']).replace("'", "''")
                 campos.append(f"TipoContribuyente = '{tipo}'")
+
+            # Datos del proveedor autorizado que exige el pie de la factura
+            for campo in ('ImprentaNombre', 'ImprentaRIF', 'ImprentaProvidencia'):
+                if campo in datos:
+                    valor = datos[campo]
+                    if valor is None or str(valor).strip() == '':
+                        campos.append(f"{campo} = NULL")
+                    else:
+                        campos.append(
+                            f"{campo} = '{str(valor).replace(chr(39), chr(39)*2)}'")
+            if 'ImprentaFechaProvidencia' in datos:
+                fecha = datos['ImprentaFechaProvidencia']
+                if hasattr(fecha, 'strftime'):
+                    campos.append("ImprentaFechaProvidencia = "
+                                  + fecha.strftime('#%m/%d/%Y#'))
+                else:
+                    campos.append("ImprentaFechaProvidencia = NULL")
 
             if not campos:
                 return False

@@ -238,6 +238,20 @@ class GestorCotizaciones:
         ) or []
         return cot, items
 
+    def estado_actual(self, cotizacion_id):
+        """
+        Estado real guardado en la base de datos.
+
+        La lista de la interfaz muestra 'Vencida' para las pendientes cuya
+        fecha ya pasó, pero ese estado no existe en la tabla: las decisiones
+        se toman siempre contra este valor.
+        """
+        cot = self.db.query_one(
+            f"SELECT Estado FROM Cotizaciones WHERE CotizacionID={int(cotizacion_id)}")
+        if not cot:
+            return None
+        return (cot.get('Estado') or '').strip()
+
     def anular_cotizacion(self, cotizacion_id):
         """Anula una cotización validando su estado actual.
 
@@ -245,23 +259,63 @@ class GestorCotizaciones:
             dict {exito, mensaje}
         """
         try:
-            cot = self.db.fetch_one(
-                "SELECT Estado FROM Cotizaciones WHERE CotizacionID=?",
-                (cotizacion_id,)
-            )
-            if not cot:
+            estado = self.estado_actual(cotizacion_id)
+            if estado is None:
                 return {'exito': False, 'mensaje': 'Cotización no encontrada'}
-            estado = (cot.get('Estado') or '').strip()
             if estado == 'Anulada':
                 return {'exito': False, 'mensaje': 'La cotización ya está anulada'}
             if estado == 'Convertida':
-                return {'exito': False, 'mensaje': 'No se puede anular una cotización convertida en solicitud'}
+                return {'exito': False,
+                        'mensaje': 'No se puede anular una cotización convertida '
+                                   'en solicitud.\nAnule la solicitud generada si '
+                                   'necesita revertirla.'}
             self.db.update('Cotizaciones', {'Estado': 'Anulada'},
-                           f"CotizacionID={cotizacion_id}")
+                           f"CotizacionID={int(cotizacion_id)}")
             return {'exito': True, 'mensaje': 'Cotización anulada exitosamente'}
         except Exception as e:
             _log.error("Error anulando cotización %s: %s", cotizacion_id, e, exc_info=True)
             return {'exito': False, 'mensaje': f'Error al anular: {e}'}
+
+    def eliminar_cotizacion(self, cotizacion_id, forzar=False):
+        """
+        Elimina una cotización y su detalle de forma permanente.
+
+        Una cotización convertida dejó una solicitud creada: esa solicitud NO
+        se toca. Para borrarla hay que pasar forzar=True, de modo que la
+        interfaz pueda advertirlo antes.
+
+        Returns:
+            dict {exito, mensaje, requiere_confirmacion}
+        """
+        try:
+            cid = int(cotizacion_id)
+            estado = self.estado_actual(cid)
+            if estado is None:
+                return {'exito': False, 'mensaje': 'Cotización no encontrada'}
+
+            if estado == 'Convertida' and not forzar:
+                return {
+                    'exito': False,
+                    'requiere_confirmacion': True,
+                    'mensaje': 'Esta cotización ya generó una solicitud.\n'
+                               'Si la elimina, la solicitud seguirá existiendo.',
+                }
+
+            self.db.execute(
+                f"DELETE FROM DetalleCotizaciones WHERE CotizacionID={cid}")
+            self.db.execute(
+                f"DELETE FROM Cotizaciones WHERE CotizacionID={cid}")
+
+            if self.estado_actual(cid) is not None:
+                return {'exito': False,
+                        'mensaje': 'La base de datos rechazó el borrado.'}
+
+            _log.info("Cotización %s eliminada (estado previo: %s)", cid, estado)
+            return {'exito': True, 'mensaje': 'Cotización eliminada'}
+        except Exception as e:
+            _log.error("Error eliminando cotización %s: %s",
+                       cotizacion_id, e, exc_info=True)
+            return {'exito': False, 'mensaje': f'No se pudo eliminar: {e}'}
 
     def convertir_a_solicitud(self, cotizacion_id):
         """

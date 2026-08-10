@@ -14,6 +14,7 @@
 config_ia.json
 db_config.json
 backup_config.json
+config_portal.json
 
 # ----- Directorios de datos en tiempo de ejecución ------------
 backups/

@@ -14,7 +14,7 @@ echo.
 echo ----------------------------------------------------------------
 
 echo.
-echo  [1/5] Instalando reportlab (generacion de reportes PDF)...
+echo  [1/6] Instalando reportlab (generacion de reportes PDF)...
 pip install reportlab --quiet --disable-pip-version-check
 if %errorlevel% neq 0 (
     echo         [ERROR] No se pudo instalar reportlab.
@@ -24,7 +24,7 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo  [2/5] Instalando Pillow (procesamiento de imagenes)...
+echo  [2/6] Instalando Pillow (procesamiento de imagenes)...
 pip install Pillow --quiet --disable-pip-version-check
 if %errorlevel% neq 0 (
     echo         [ERROR] No se pudo instalar Pillow.
@@ -34,7 +34,7 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo  [3/5] Instalando pypiwin32 (integracion Windows/COM)...
+echo  [3/6] Instalando pypiwin32 (integracion Windows/COM)...
 pip install pypiwin32 --quiet --disable-pip-version-check
 if %errorlevel% neq 0 (
     echo         [ERROR] No se pudo instalar pypiwin32.
@@ -44,7 +44,7 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo  [4/5] Instalando qrcode (codigos QR en reportes)...
+echo  [4/6] Instalando qrcode (codigos QR en reportes)...
 pip install "qrcode[pil]" --quiet --disable-pip-version-check
 if %errorlevel% neq 0 (
     echo         [AVISO] No se pudo instalar qrcode.
@@ -54,13 +54,24 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo  [5/5] Instalando pyBCV (tasas de cambio BCV)...
+echo  [5/6] Instalando pyBCV (tasas de cambio BCV)...
 pip install pyBCV --quiet --disable-pip-version-check
 if %errorlevel% neq 0 (
     echo         [AVISO] No se pudo instalar pyBCV.
     echo         Las tasas BCV automaticas no estaran disponibles.
 ) else (
     echo         [OK] pyBCV instalado correctamente.
+)
+
+echo.
+echo  [6/6] Instalando PyMuPDF (impresion directa por impresora)...
+pip install PyMuPDF --quiet --disable-pip-version-check
+if %errorlevel% neq 0 (
+    echo         [AVISO] No se pudo instalar PyMuPDF.
+    echo         Los documentos se abriran en pantalla en vez de imprimirse
+    echo         directamente en la impresora asignada a cada funcion.
+) else (
+    echo         [OK] PyMuPDF instalado correctamente.
 )
 
 echo.

@@ -24,6 +24,10 @@ requests>=2.31
 # --- Código QR en reportes (opcional) ---
 qrcode[pil]>=7.4
 
+# --- Impresión directa a la impresora asignada a cada rol ---
+# Sin esta librería el sistema abre el PDF en pantalla en vez de imprimirlo
+PyMuPDF>=1.24
+
 # --- Tasas de cambio BCV (opcional) ---
 pyBCV>=0.2
 

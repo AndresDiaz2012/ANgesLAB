@@ -75,6 +75,35 @@ try:
 except ImportError:
     FORMATO_PDF_DISPONIBLE = False
 
+# Importar facturación fiscal SENIAT y su PDF
+try:
+    from modulos.facturacion_fiscal import FacturacionFiscal
+    from modulos.factura_pdf import GeneradorFacturaPDF
+    FACTURA_FISCAL_DISPONIBLE = True
+except ImportError:
+    FACTURA_FISCAL_DISPONIBLE = False
+
+# Importar gestión de impresoras por rol
+try:
+    from modulos.impresoras import (
+        GestorImpresoras, imprimir_documento, listar_impresoras,
+        normalizar_rol, ROLES as ROLES_IMPRESORA,
+    )
+    IMPRESORAS_DISPONIBLE = True
+except ImportError:
+    IMPRESORAS_DISPONIBLE = False
+
+# Importar portal de resultados por código QR
+try:
+    from modulos.portal_resultados import (
+        crear_gestor_portal, iniciar_portal, detener_portal,
+        qr_imagen as qr_imagen_portal,
+    )
+    from modulos.ventana_config_portal import abrir_ventana_config_portal
+    PORTAL_QR_DISPONIBLE = True
+except ImportError:
+    PORTAL_QR_DISPONIBLE = False
+
 # Importar PIL para manejar imágenes
 try:
     from PIL import Image as PILImage, ImageTk
@@ -1050,6 +1079,20 @@ class MainApplication:
             except Exception:
                 pass
 
+        # Inicializar portal de resultados por QR (mini-servidor local)
+        self.portal_qr = None
+        self.servidor_portal = None
+        if PORTAL_QR_DISPONIBLE:
+            try:
+                self.portal_qr = crear_gestor_portal(db)
+                self.portal_qr.asegurar_tabla()
+                nombre_lab = (self.config_lab or {}).get(
+                    'NombreLaboratorio', 'LABORATORIO')
+                self.servidor_portal = iniciar_portal(db, nombre_lab)
+            except Exception as e:
+                _log.warning("Portal QR no disponible: %s", e)
+                self.portal_qr = None
+
         # Inicializar gestor de solicitudes
         self.gestor_solicitudes = None
         try:
@@ -1489,11 +1532,14 @@ class MainApplication:
         tk.Frame(self.sidebar, bg=COLORS['sidebar_hover'], height=1).pack(fill='x', padx=15, pady=5)
 
         # Configuración
-        self._create_menu_section("Config", [
+        items_config = [
             ("⚙️", "Configuración", self.show_config),
             ("🌐", "Red LAN / DB", self.show_config_red_lan),
             ("🗄️", "Backup Auto", self.show_config_backup),
-        ], expanded=False)
+        ]
+        if PORTAL_QR_DISPONIBLE:
+            items_config.append(("📱", "Portal QR Resultados", self.show_config_portal))
+        self._create_menu_section("Config", items_config, expanded=False)
 
         # Separador VET
         tk.Frame(self.sidebar, bg=COLORS['sidebar_hover'], height=1).pack(fill='x', padx=15, pady=5)
@@ -3723,6 +3769,7 @@ class MainApplication:
         try:
             ruta = self.gestor_cotizaciones.generar_pdf(cid, self.config_lab)
             if ruta:
+                # Vista previa: siempre en pantalla, sin enviar a la impresora
                 os.startfile(ruta)
             else:
                 messagebox.showerror("Error", "No se pudo generar el PDF (ReportLab no disponible).")
@@ -3746,11 +3793,23 @@ class MainApplication:
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
+    def _cot_estado_real(self, cid):
+        """
+        Estado guardado en la BD, no el que muestra la lista.
+
+        La columna Estado del treeview muestra 'Vencida' para las pendientes
+        caducadas, y ese valor no existe en la tabla.
+        """
+        try:
+            return self.gestor_cotizaciones.estado_actual(cid)
+        except Exception:
+            return self._cot_estado_seleccionado()
+
     def _convertir_cotizacion(self):
         cid = self._cot_seleccionada()
         if not cid:
             return
-        estado = self._cot_estado_seleccionado()
+        estado = self._cot_estado_real(cid)
         if estado in ('Convertida',):
             messagebox.showinfo("Info", "Esta cotización ya fue convertida en solicitud.")
             return
@@ -3774,7 +3833,7 @@ class MainApplication:
         cid = self._cot_seleccionada()
         if not cid:
             return
-        estado = self._cot_estado_seleccionado()
+        estado = self._cot_estado_real(cid)
         if estado in ('Convertida',):
             messagebox.showinfo("Info", "No se puede anular una cotización ya convertida en solicitud.")
             return
@@ -3789,27 +3848,37 @@ class MainApplication:
                 self._cargar_cotizaciones(getattr(self, '_cot_estado_var', tk.StringVar()).get())
 
     def _eliminar_cotizacion(self):
-        """Elimina permanentemente una cotización anulada."""
+        """
+        Elimina permanentemente una cotización, cualquiera sea su estado.
+
+        Si ya generó una solicitud se avisa antes, porque esa solicitud
+        no se borra.
+        """
         cid = self._cot_seleccionada()
         if not cid:
             return
-        estado = self._cot_estado_seleccionado()
-        if estado not in ('Anulada',):
-            messagebox.showinfo("Info",
-                                "Solo se pueden eliminar cotizaciones anuladas.\n"
-                                "Primero anule la cotización y luego elimínela.")
+
+        if not messagebox.askyesno(
+                "Eliminar permanentemente",
+                "¿Eliminar esta cotización de forma permanente?\n\n"
+                "Se borrarán la cotización y su detalle.\n"
+                "Esta acción NO se puede deshacer."):
             return
-        if messagebox.askyesno("Eliminar permanentemente",
-                               "¿Eliminar esta cotización de forma permanente?\n\n"
-                               "Se borrarán todos los datos asociados.\n"
-                               "Esta acción NO se puede deshacer."):
-            try:
-                db = self.gestor_cotizaciones.db
-                db.execute(f"DELETE FROM DetalleCotizaciones WHERE CotizacionID={cid}")
-                db.execute(f"DELETE FROM Cotizaciones WHERE CotizacionID={cid}")
-                self._cargar_cotizaciones(getattr(self, '_cot_estado_var', tk.StringVar()).get())
-            except Exception as e:
-                messagebox.showerror("Error", f"No se pudo eliminar: {e}")
+
+        r = self.gestor_cotizaciones.eliminar_cotizacion(cid)
+
+        # Una cotización ya convertida necesita una confirmación adicional
+        if not r.get('exito') and r.get('requiere_confirmacion'):
+            if not messagebox.askyesno(
+                    "Cotización convertida",
+                    f"{r.get('mensaje')}\n\n¿Eliminar la cotización de todos modos?"):
+                return
+            r = self.gestor_cotizaciones.eliminar_cotizacion(cid, forzar=True)
+
+        if r.get('exito'):
+            self._cargar_cotizaciones(getattr(self, '_cot_estado_var', tk.StringVar()).get())
+        else:
+            messagebox.showerror("Error", r.get('mensaje', 'No se pudo eliminar'))
 
     def form_cotizacion(self):
         """Formulario para crear una nueva cotización."""
@@ -6251,9 +6320,15 @@ class MainApplication:
                 doc_mensaje = f"\nAdvertencia: {doc_result['mensaje']}"
 
         elif dialogo.resultado == 'factura':
-            doc_result = self.gestor_solicitudes.generar_factura(self.solicitud_existente_id)
+            doc_result = self.gestor_solicitudes.generar_factura(
+                self.solicitud_existente_id,
+                {'forma_pago_nombre': self.combo_forma_pago.get()
+                 if hasattr(self, 'combo_forma_pago') else None},
+                facturacion_fiscal=self._facturacion_fiscal())
             if doc_result['exito']:
                 doc_mensaje = f"\nFactura generada: {doc_result['numero_factura']}"
+                self._emitir_pdf_factura(doc_result.get('factura_id'),
+                                         doc_result.get('numero_factura', ''))
             else:
                 doc_mensaje = f"\nAdvertencia: {doc_result['mensaje']}"
 
@@ -6354,9 +6429,14 @@ class MainApplication:
                 doc_mensaje = f"\nAdvertencia recibo: {doc_result['mensaje']}"
 
         elif dialogo.resultado == 'factura':
-            doc_result = self.gestor_solicitudes.generar_factura(sol_id)
+            doc_result = self.gestor_solicitudes.generar_factura(
+                sol_id,
+                {'forma_pago_nombre': dialogo.forma_pago or 'Efectivo'},
+                facturacion_fiscal=self._facturacion_fiscal())
             if doc_result['exito']:
                 doc_mensaje = f"\nFactura generada: {doc_result['numero_factura']}"
+                self._emitir_pdf_factura(doc_result.get('factura_id'),
+                                         doc_result.get('numero_factura', ''))
             else:
                 doc_mensaje = f"\nAdvertencia factura: {doc_result['mensaje']}"
 
@@ -6430,8 +6510,7 @@ class MainApplication:
                 if hasattr(self, 'ventana_admin') and self.ventana_admin and self.ventana_admin.generador_etiquetas:
                     ruta = self.ventana_admin.generador_etiquetas.generar_etiquetas_solicitud(sol_id)
                     if ruta:
-                        import os
-                        os.startfile(ruta)
+                        self.imprimir_por_rol(ruta, 'etiquetas')
                 else:
                     messagebox.showinfo("Info", "Modulo de etiquetas no disponible.")
             except Exception as ex:
@@ -6667,19 +6746,70 @@ class MainApplication:
             _log.error("Error generando recibo: %s", e)
             return None
 
+    def _facturacion_fiscal(self):
+        """
+        Motor de facturación fiscal (numeración, N° de control, IVA, IGTF).
+
+        Sin él las facturas se crean por la vía simple, que no llena los
+        campos que exige el SENIAT.
+        """
+        if not FACTURA_FISCAL_DISPONIBLE:
+            return None
+        if getattr(self, '_fact_fiscal', None) is None:
+            try:
+                self._fact_fiscal = FacturacionFiscal(db)
+            except Exception as e:
+                _log.warning("Facturación fiscal no disponible: %s", e)
+                self._fact_fiscal = None
+        return self._fact_fiscal
+
+    def _emitir_pdf_factura(self, factura_id, numero_factura=''):
+        """
+        Genera el PDF fiscal y lo manda a la impresora de facturación.
+
+        No interrumpe el flujo si algo falla: la factura ya quedó registrada.
+        """
+        if not factura_id or not FACTURA_FISCAL_DISPONIBLE:
+            return None
+        try:
+            ruta = GeneradorFacturaPDF(db).generar(factura_id)
+        except Exception as e:
+            _log.error("No se pudo generar el PDF de la factura %s: %s",
+                       numero_factura or factura_id, e, exc_info=True)
+            messagebox.showwarning(
+                "Factura registrada",
+                f"La factura {numero_factura} se registró correctamente, "
+                f"pero no se pudo generar su PDF:\n{e}")
+            return None
+        self.imprimir_por_rol(ruta, 'facturacion')
+        return ruta
+
+    def _gestor_portal(self):
+        """Gestor del portal QR (lo crea al vuelo si aún no existe)."""
+        if self.portal_qr is None and PORTAL_QR_DISPONIBLE:
+            self.portal_qr = crear_gestor_portal(db)
+        return self.portal_qr
+
     def _generar_pdf_recibo(self, numero_recibo, solicitud_id, total, pruebas_lista=None):
         """
         Genera un PDF con formato de ticket/recibo térmico.
-        Incluye QR de verificación al final.
+
+        El ticket lleva solo el encabezado del laboratorio, los datos del
+        paciente y el QR de consulta de resultados: no se imprime el detalle
+        de las pruebas ni los montos.
+
+        Los parámetros 'total' y 'pruebas_lista' se conservan por
+        compatibilidad con las llamadas existentes, pero ya no se usan.
         """
         if not REPORTLAB_AVAILABLE:
             return
 
         try:
             from reportlab.lib.pagesizes import portrait
-            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+            from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer,
+                                            Table, TableStyle, HRFlowable, Image)
             from reportlab.lib.styles import ParagraphStyle
-            from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+            from reportlab.lib.enums import TA_CENTER
             from reportlab.lib import colors
             from reportlab.lib.units import cm, inch
             import tempfile, os
@@ -6700,9 +6830,6 @@ class MainApplication:
             s_titulo = estilo('titulo', fontSize=13, fontName='Helvetica-Bold', alignment=TA_CENTER, spaceAfter=4, spaceBefore=4)
             s_label  = estilo('label',  fontSize=7,  fontName='Helvetica-Bold')
             s_valor  = estilo('valor',  fontSize=7)
-            s_item_l = estilo('iteml',  fontSize=7)
-            s_item_r = estilo('itemr',  fontSize=7,  alignment=TA_RIGHT)
-            s_total  = estilo('total',  fontSize=8,  fontName='Helvetica-Bold', alignment=TA_RIGHT)
             s_qr_txt = estilo('qrtxt', fontSize=7,  fontName='Helvetica-Bold', alignment=TA_CENTER, spaceBefore=6)
 
             # ── Datos del laboratorio ─────────────────────────────────────────
@@ -6711,13 +6838,13 @@ class MainApplication:
             direccion   = cfg.get('Direccion', '')
             telefono    = cfg.get('Telefono1', '')
             whatsapp    = cfg.get('WhatsApp', '')
-            simbolo     = cfg.get('SimboloMoneda', '$')
 
             # ── Datos de la solicitud / paciente ──────────────────────────────
             sol = db.query_one(
                 f"""SELECT s.NumeroSolicitud, s.FechaSolicitud,
-                           p.NombreCompleto, p.Cedula, p.Telefono,
-                           s.DiagnosticoPresuntivo
+                           s.EstadoSolicitud, s.DiagnosticoPresuntivo,
+                           p.Nombres, p.Apellidos, p.NumeroDocumento,
+                           p.Telefono1
                     FROM Solicitudes s
                     LEFT JOIN Pacientes p ON s.PacienteID = p.PacienteID
                     WHERE s.SolicitudID = {solicitud_id}"""
@@ -6729,21 +6856,9 @@ class MainApplication:
                 fecha_str = fecha_sol.strftime('%d/%m/%Y')
             else:
                 fecha_str = str(fecha_sol)[:10]
-            paciente    = sol.get('NombreCompleto', '')
-            cedula      = sol.get('Cedula', '')
-            telefono_p  = sol.get('Telefono', '')
-
-            # ── Pruebas del detalle ───────────────────────────────────────────
-            if pruebas_lista is None:
-                filas_det = db.query(
-                    f"""SELECT pr.NombrePrueba, ds.PrecioUnitario
-                          FROM DetalleSolicitudes ds
-                          LEFT JOIN Pruebas pr ON ds.PruebaID = pr.PruebaID
-                         WHERE ds.SolicitudID = {solicitud_id}"""
-                ) or []
-            else:
-                filas_det = [{'NombrePrueba': p.get('nombre', ''), 'PrecioUnitario': p.get('precio', 0)}
-                             for p in pruebas_lista]
+            paciente    = f"{sol.get('Nombres') or ''} {sol.get('Apellidos') or ''}".strip()
+            cedula      = sol.get('NumeroDocumento') or ''
+            telefono_p  = sol.get('Telefono1') or ''
 
             # ── Armar story ───────────────────────────────────────────────────
             margen = 8
@@ -6794,65 +6909,63 @@ class MainApplication:
             ]))
             story.append(tbl_datos)
 
-            story.append(HRFlowable(width='100%', thickness=0.5, color=colors.black, spaceAfter=3, spaceBefore=3))
+            story.append(HRFlowable(width='100%', thickness=0.5, color=colors.black, spaceAfter=4, spaceBefore=3))
 
-            # Tabla de ítems
-            col_desc  = ancho_util * 0.72
-            col_precio= ancho_util * 0.28
+            # El detalle de pruebas y los montos se omiten a propósito: el
+            # recibo que se entrega al paciente sirve de guía para consultar
+            # sus resultados, no de comprobante de los estudios solicitados.
 
-            items_data = [[Paragraph('Descripción', s_label), Paragraph('Total', s_label)]]
-            subtotal   = 0.0
-            for fila in filas_det:
-                nombre_item = fila.get('NombrePrueba') or fila.get('Descripcion', '')
-                precio_item = float(fila.get('PrecioUnitario') or 0)
-                subtotal   += precio_item
-                items_data.append([
-                    Paragraph(nombre_item, s_item_l),
-                    Paragraph(f"{simbolo} {precio_item:,.2f}", s_item_r)
-                ])
-
-            tbl_items = Table(items_data, colWidths=[col_desc, col_precio])
-            tbl_items.setStyle(TableStyle([
-                ('LINEBELOW',   (0, 0), (-1, 0), 0.5, colors.black),
-                ('VALIGN',      (0, 0), (-1, -1), 'TOP'),
-                ('LEFTPADDING', (0, 0), (-1, -1), 0),
-                ('RIGHTPADDING',(0, 0), (-1, -1), 0),
-                ('TOPPADDING',  (0, 0), (-1, -1), 2),
-                ('BOTTOMPADDING',(0,0), (-1, -1), 2),
-            ]))
-            story.append(tbl_items)
-
-            story.append(HRFlowable(width='100%', thickness=0.5, color=colors.black, spaceAfter=3, spaceBefore=3))
-
-            # Totales
-            totales_data = [
-                [Paragraph('Exento:', s_item_l),  Paragraph(f"{simbolo} {subtotal:,.2f}", s_total)],
-                [Paragraph('Sub-Total:', s_item_l),Paragraph(f"{simbolo} {subtotal:,.2f}", s_total)],
-                [Paragraph('Total:', s_label),     Paragraph(f"{simbolo} {total:,.2f}", s_total)],
-            ]
-            tbl_totales = Table(totales_data, colWidths=[col_desc, col_precio])
-            tbl_totales.setStyle(TableStyle([
-                ('VALIGN',      (0, 0), (-1, -1), 'MIDDLE'),
-                ('LEFTPADDING', (0, 0), (-1, -1), 0),
-                ('RIGHTPADDING',(0, 0), (-1, -1), 0),
-                ('TOPPADDING',  (0, 0), (-1, -1), 1),
-                ('BOTTOMPADDING',(0,0), (-1, -1), 1),
-                ('LINEABOVE',   (0, 2), (-1, 2), 0.8, colors.black),
-            ]))
-            story.append(tbl_totales)
-
-            story.append(HRFlowable(width='100%', thickness=0.5, color=colors.black, spaceAfter=4, spaceBefore=4))
-
-            # ── QR de verificación ────────────────────────────────────────────
-            story.append(Paragraph("POR FAVOR ESCANEAR ESTE CODIGO QR", s_qr_txt))
+            # ── QR de consulta de resultados ──────────────────────────────────
+            # Al escanearlo el paciente ve si sus resultados están listos y,
+            # cuando lo están, puede abrir el PDF desde su teléfono.
+            story.append(Paragraph("CONSULTE SUS RESULTADOS", s_qr_txt))
+            story.append(Paragraph(
+                "Escanee este código con la cámara de su teléfono",
+                estilo('qrsub', fontSize=6, alignment=TA_CENTER, spaceAfter=2)))
             story.append(Spacer(1, 4))
 
             qr_agregado = False
-            if FORMATO_PDF_DISPONIBLE and QRGenerator.disponible():
+            contenido_qr = None
+            if PORTAL_QR_DISPONIBLE:
+                try:
+                    contenido_qr = self._gestor_portal().contenido_qr(
+                        solicitud_id,
+                        numero_solicitud=num_muestra,
+                        fecha=fecha_str,
+                        paciente=paciente,
+                        cedula=cedula,
+                        nombre_lab=nombre_lab,
+                        estado=sol.get('EstadoSolicitud', ''),
+                    )
+                except Exception as eq:
+                    _log.warning("QR recibo (portal): %s", eq)
+
+            if contenido_qr:
+                try:
+                    buf_qr = qr_imagen_portal(contenido_qr, size_px=260)
+                    if buf_qr is not None:
+                        qr_rl = Image(buf_qr, width=1.4 * inch, height=1.4 * inch)
+                        tbl_qr = Table([[qr_rl]], colWidths=[ancho_util])
+                        tbl_qr.setStyle(TableStyle([
+                            ('ALIGN',  (0, 0), (-1, -1), 'CENTER'),
+                            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                            ('LEFTPADDING',  (0, 0), (-1, -1), 0),
+                            ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+                            ('TOPPADDING',   (0, 0), (-1, -1), 0),
+                            ('BOTTOMPADDING',(0, 0), (-1, -1), 0),
+                        ]))
+                        story.append(tbl_qr)
+                        qr_agregado = True
+                except Exception as eq:
+                    _log.warning("QR recibo (imagen): %s", eq)
+
+            if not qr_agregado and FORMATO_PDF_DISPONIBLE and QRGenerator.disponible():
                 try:
                     qr_rl = QRGenerator.generar_rl_image(
-                        numero_recibo, fecha_str, paciente,
-                        qr_size=1.4 * inch
+                        num_muestra or numero_recibo, fecha_str, paciente,
+                        1.4 * inch, 1.4 * inch,
+                        cedula=cedula, nombre_lab=nombre_lab,
+                        estado=sol.get('EstadoSolicitud', '')
                     )
                     if qr_rl:
                         # Centrar el QR con una tabla de una celda
@@ -6873,6 +6986,11 @@ class MainApplication:
             if not qr_agregado:
                 story.append(Paragraph(f"[{numero_recibo}]", s_qr_txt))
 
+            story.append(Paragraph(
+                "Le indicará si sus resultados ya están listos "
+                "y le permitirá ver el informe en PDF.",
+                estilo('qrpie', fontSize=5.5, alignment=TA_CENTER, spaceBefore=3)))
+
             story.append(Spacer(1, 6))
 
             # ── Generar PDF en temp ───────────────────────────────────────────
@@ -6888,8 +7006,9 @@ class MainApplication:
             )
             doc.build(story)
 
-            # Abrir PDF
-            os.startfile(ruta_pdf)
+            # Sale por la impresora asignada a recibos; si no hay ninguna
+            # configurada se abre en pantalla.
+            self.imprimir_por_rol(ruta_pdf, 'recibos')
 
         except Exception as e:
             _log.error("Error generando PDF recibo: %s", e, exc_info=True)
@@ -10422,61 +10541,79 @@ Forma de Pago: {self.combo_forma_pago.get()}
                     break
         self.cargar_pruebas_resultado()
 
+    def gestor_impresoras(self):
+        """Gestor de impresoras por rol (resultados/facturación/recibos/etiquetas)."""
+        if not IMPRESORAS_DISPONIBLE:
+            return None
+        if getattr(self, '_gestor_impresoras', None) is None:
+            self._gestor_impresoras = GestorImpresoras(db)
+        return self._gestor_impresoras
+
+    def imprimir_por_rol(self, pdf_path, rol, abrir_si_falla=True):
+        """
+        Envía un documento a la impresora asignada a su rol.
+
+        Si el rol no tiene impresora configurada abre el PDF en pantalla,
+        de modo que el flujo nunca se queda sin salida.
+
+        Returns 'impreso', 'abierto' o 'error'.
+        """
+        if not pdf_path or not os.path.exists(pdf_path):
+            return 'error'
+        if not IMPRESORAS_DISPONIBLE:
+            try:
+                os.startfile(pdf_path)
+                return 'abierto'
+            except Exception:
+                return 'error'
+        return imprimir_documento(db, pdf_path, rol,
+                                  abrir_si_falla=abrir_si_falla)
+
     def obtener_impresora_configurada(self, tipo='resultados'):
         """
-        Obtiene la impresora configurada en la BD.
+        Impresora asignada a un rol en la configuración.
 
         Args:
-            tipo: 'resultados' o 'informes'
+            tipo: rol o alias ('resultados', 'facturacion', 'recibos',
+                  'etiquetas', 'cotizacion', 'informes'...)
         Returns:
             str: Nombre de la impresora o None
         """
-        try:
-            config = db.query_one("SELECT * FROM ConfiguracionLaboratorio")
-            if config:
-                campo = 'ImpresoraResultados' if tipo == 'resultados' else 'ImpresoraInformes'
-                impresora = config.get(campo)
-                if impresora:
-                    return impresora
-        except Exception:
-            pass
+        gestor = self.gestor_impresoras()
+        if gestor:
+            try:
+                return gestor.impresora_de(tipo) or None
+            except Exception:
+                pass
         return None
 
     def imprimir_pdf_en_impresora(self, pdf_path, tipo='resultados', titulo='Imprimir Documento'):
         """
-        Muestra un diálogo para seleccionar impresora y envía el PDF a imprimir.
+        Envía el PDF a la impresora del rol indicado.
+
+        Si el rol está marcado como «directo» en la configuración, imprime sin
+        preguntar. En caso contrario muestra el diálogo con esa impresora ya
+        preseleccionada.
         """
         if not pdf_path or not os.path.exists(pdf_path):
             messagebox.showerror("Error", "No se encontró el archivo PDF para imprimir.")
             return False
 
+        # Impresión directa: el rol ya tiene impresora y así está configurado
+        gestor = self.gestor_impresoras()
+        if gestor:
+            try:
+                if gestor.es_directo(tipo):
+                    if gestor.imprimir(pdf_path, tipo):
+                        return True
+            except Exception:
+                pass  # Si falla, seguir con el diálogo
+
         # Obtener lista de impresoras
-        impresoras = []
-        impresora_default = ""
-        try:
-            import win32print
-            flags = win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS
-            lista = win32print.EnumPrinters(flags, None, 2)
-            impresoras = [p['pPrinterName'] for p in lista]
-            try:
-                impresora_default = win32print.GetDefaultPrinter()
-            except Exception:
-                pass
-        except ImportError:
-            try:
-                import subprocess
-                result = subprocess.run(
-                    ['wmic', 'printer', 'get', 'name'],
-                    capture_output=True, text=True, timeout=10
-                )
-                if result.returncode == 0:
-                    lines = result.stdout.strip().split('\n')
-                    for line in lines[1:]:
-                        name = line.strip()
-                        if name:
-                            impresoras.append(name)
-            except Exception:
-                pass
+        if IMPRESORAS_DISPONIBLE:
+            impresoras, impresora_default = listar_impresoras()
+        else:
+            impresoras, impresora_default = [], ""
 
         if not impresoras:
             messagebox.showerror("Error",
@@ -10532,13 +10669,16 @@ Forma de Pago: {self.combo_forma_pago.get()}
         lbl_info = tk.Label(body, text="", font=('Segoe UI', 8), bg='white', fg='#888', anchor='w')
         lbl_info.pack(fill='x')
 
+        _rol = normalizar_rol(tipo) if IMPRESORAS_DISPONIBLE else None
+        _rol_etiqueta = ROLES_IMPRESORA[_rol]['etiqueta'].lower() if _rol else tipo
+
         def actualizar_info(event=None):
             sel = combo_impresora.get()
             textos = []
             if sel == impresora_default:
                 textos.append("Predeterminada del sistema")
             if sel == impresora_configurada:
-                textos.append(f"Configurada para {tipo}")
+                textos.append(f"Asignada a {_rol_etiqueta}")
             lbl_info.config(text=" | ".join(textos) if textos else "")
 
         combo_impresora.bind('<<ComboboxSelected>>', actualizar_info)
@@ -10609,21 +10749,19 @@ Forma de Pago: {self.combo_forma_pago.get()}
             win.destroy()
 
             try:
-                import win32print
-                import win32api
-
                 # Configurar calidad alta en la impresora
                 _configurar_calidad_impresora(impresora_sel, calidad, copias)
 
-                impresora_anterior = win32print.GetDefaultPrinter()
-                try:
-                    win32print.SetDefaultPrinter(impresora_sel)
-                    win32api.ShellExecute(0, 'print', pdf_path, None, '.', 0)
-                finally:
-                    try:
-                        win32print.SetDefaultPrinter(impresora_anterior)
-                    except Exception:
-                        pass
+                # Se envía con el verbo 'printto', que no altera la impresora
+                # predeterminada del sistema: así dos roles pueden imprimir a
+                # la vez sin robarse el trabajo.
+                if IMPRESORAS_DISPONIBLE:
+                    from modulos.impresoras import enviar_a_impresora
+                    if not enviar_a_impresora(pdf_path, impresora_sel, copias):
+                        raise RuntimeError(
+                            "El sistema no aceptó el trabajo de impresión.")
+                else:
+                    raise ImportError
 
                 messagebox.showinfo("Imprimir",
                     f"Documento enviado a imprimir.\n\n"
@@ -15449,7 +15587,8 @@ ANgesLAB - Laboratorio Clínico""")
             with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tf:
                 ruta_tmp = tf.name
             self._crear_pdf_interpretacion_ia(ruta_tmp)
-            os.startfile(ruta_tmp, 'print')
+            # La interpretación clínica es parte del informe: usa esa impresora
+            self.imprimir_por_rol(ruta_tmp, 'resultados')
         except Exception as e:
             messagebox.showerror("Error al imprimir",
                 f"No se pudo generar el documento para impresión:\n{e}")
@@ -18705,8 +18844,25 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
         except Exception as e:
             messagebox.showerror("Error", f"Error al abrir configuración administrativa:\n{e}")
 
+    def show_config_portal(self):
+        """Abre la configuración del portal de resultados por QR."""
+        if not PORTAL_QR_DISPONIBLE:
+            messagebox.showinfo("Portal QR",
+                                "El módulo del portal de resultados no está disponible.")
+            return
+        try:
+            nombre_lab = (self.config_lab or {}).get('NombreLaboratorio', 'LABORATORIO')
+            abrir_ventana_config_portal(self.root, db, nombre_lab)
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al abrir el portal QR:\n{e}")
+
     def logout(self):
         if messagebox.askyesno("Cerrar Sesión", "¿Desea cerrar la sesión?"):
+            if PORTAL_QR_DISPONIBLE:
+                try:
+                    detener_portal()
+                except Exception:
+                    pass
             self.root.destroy()
             main()
 
@@ -18930,7 +19086,14 @@ def main():
     user = login.run()
     if user:
         app = MainApplication(user)
-        app.run()
+        try:
+            app.run()
+        finally:
+            if PORTAL_QR_DISPONIBLE:
+                try:
+                    detener_portal()
+                except Exception:
+                    pass
 
 if __name__ == "__main__":
     main()

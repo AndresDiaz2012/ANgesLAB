@@ -60,14 +60,25 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 ORIGEN = SCRIPT_DIR.parent
 
 # Archivos de CODIGO que se actualizan (nunca datos ni configuracion)
-ARCHIVOS_RAIZ = ['ANgesLAB.pyw', 'VERSION']
+ARCHIVOS_RAIZ = ['ANgesLAB.pyw', 'VERSION', 'requirements.txt']
 # Todos los .py de la carpeta modulos se copian (incluye tema_ui.py nuevo)
 
 # Cosas que JAMAS se sobrescriben en el destino
 NO_TOCAR = {
     'angeslab.accdb', 'db_config.json', 'config_ia.json',
-    'backup_config.json',
+    'backup_config.json', 'config_whatsapp.json',
+    # config_portal.json guarda el secreto que firma los enlaces de los QR
+    # ya impresos: si se pisa, esos codigos dejan de abrir el PDF.
+    'config_portal.json',
 }
+
+# Dependencias que necesitan las funciones nuevas. Su ausencia no rompe
+# nada: el sistema degrada (abre el PDF en vez de imprimirlo, o imprime la
+# etiqueta sin QR), pero conviene instalarlas al actualizar.
+DEPENDENCIAS_NUEVAS = [
+    ('fitz', 'PyMuPDF', 'impresion directa en la impresora asignada'),
+    ('qrcode', 'qrcode[pil]', 'codigo QR de consulta de resultados'),
+]
 CARPETAS_INTOCABLES = {'logos', 'firmas', 'backups', 'logs'}
 
 # Migraciones de catalogo, en el orden en que se publicaron. Todas son
@@ -179,6 +190,44 @@ def copiar_codigo(install: Path):
         log(f"  [OK] modulos/ ({len(list(src_mod.glob('*.py')))} archivos .py)")
 
     return copiados
+
+
+def instalar_dependencias_nuevas():
+    """
+    Instala las librerias que necesitan las funciones nuevas.
+
+    Nunca detiene la actualizacion: si no hay internet o pip falla, el
+    sistema sigue funcionando con las capacidades degradadas.
+    """
+    import importlib
+    import subprocess
+
+    instaladas = 0
+    for modulo, paquete, para_que in DEPENDENCIAS_NUEVAS:
+        try:
+            importlib.import_module(modulo)
+            continue                      # ya esta disponible
+        except ImportError:
+            pass
+
+        log(f"  Instalando {paquete} ({para_que})...")
+        try:
+            r = subprocess.run(
+                [sys.executable, '-m', 'pip', 'install', paquete,
+                 '--quiet', '--disable-pip-version-check'],
+                capture_output=True, text=True, timeout=300)
+            if r.returncode == 0:
+                log(f"  [OK] {paquete} instalado")
+                instaladas += 1
+            else:
+                log(f"  [AVISO] No se pudo instalar {paquete}. "
+                    f"Se seguira sin {para_que}.")
+        except Exception as e:
+            log(f"  [AVISO] {paquete} no instalado ({type(e).__name__}). "
+                f"Se seguira sin {para_que}.")
+    if instaladas == 0:
+        log("  [OK] No hizo falta instalar librerias nuevas.")
+    return instaladas
 
 
 def _ejecutar_script_bd(script: Path, bd: Path, flags, descripcion):
@@ -419,16 +468,19 @@ def main(argv):
         log("\nActualizacion cancelada por el usuario.")
         return 2
 
-    log("\n[1/4] Respaldando base de datos del cliente...")
+    log("\n[1/5] Respaldando base de datos del cliente...")
     respaldar_bd(install)
 
-    log("\n[2/4] Copiando archivos de codigo actualizados...")
+    log("\n[2/5] Copiando archivos de codigo actualizados...")
     copiados = copiar_codigo(install)
 
-    log("\n[3/4] Aplicando migraciones de catalogo...")
+    log("\n[3/5] Verificando librerias necesarias...")
+    instalar_dependencias_nuevas()
+
+    log("\n[4/5] Aplicando migraciones de catalogo...")
     migradas = aplicar_migraciones(install)
 
-    log("\n[4/4] Acceso del usuario 'developer' (opcional)...")
+    log("\n[5/5] Acceso del usuario 'developer' (opcional)...")
     dev = resetear_developer(install, argv)
 
     registrar_bitacora(install, copiados, migradas, dev)
