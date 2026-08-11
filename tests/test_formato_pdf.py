@@ -35,7 +35,6 @@ class TestLayoutCalculator(unittest.TestCase):
         self.assertEqual(layout.page_width, 612)
         self.assertEqual(layout.page_height, 792)
         self.assertFalse(layout.es_media_carta)
-        self.assertEqual(layout.box_cols, 3)
         self.assertEqual(layout.max_firmas, 3)
         self.assertEqual(layout._font_scale, 1.0)
 
@@ -45,7 +44,7 @@ class TestLayoutCalculator(unittest.TestCase):
         self.assertAlmostEqual(layout.page_width, 595.28, places=1)
         self.assertAlmostEqual(layout.page_height, 841.89, places=1)
         self.assertFalse(layout.es_media_carta)
-        self.assertEqual(layout.box_cols, 3)
+        self.assertEqual(layout.max_firmas, 3)
 
     def test_layout_media_carta(self):
         """Layout Media Carta debe tener configuración compacta."""
@@ -53,7 +52,6 @@ class TestLayoutCalculator(unittest.TestCase):
         self.assertEqual(layout.page_width, 396)
         self.assertEqual(layout.page_height, 612)
         self.assertTrue(layout.es_media_carta)
-        self.assertEqual(layout.box_cols, 2)
         self.assertEqual(layout.max_firmas, 2)
         self.assertEqual(layout._font_scale, 0.82)
 
@@ -154,21 +152,28 @@ class TestQRGenerator(unittest.TestCase):
         h2 = QRGenerator.generar_hash('002', '01/01/2026', 'JUAN')
         self.assertNotEqual(h1, h2)
 
-    def test_generar_qr_image(self):
-        """Debe generar una imagen QR como BytesIO."""
-        buf = QRGenerator.generar_qr_image('SOL-001', '27/02/2026', 'TEST')
+    def test_generar_qr_buffer(self):
+        """El buffer crudo debe traer los bytes del PNG."""
+        buf = QRGenerator.generar_qr_buffer('SOL-001', '27/02/2026', 'TEST')
         self.assertIsNotNone(buf)
         self.assertGreater(len(buf.getvalue()), 0)
 
-    def test_generar_qr_image_es_png(self):
+    def test_generar_qr_buffer_es_png(self):
         """La imagen QR debe ser formato PNG."""
-        buf = QRGenerator.generar_qr_image('SOL-001', '27/02/2026', 'TEST')
+        buf = QRGenerator.generar_qr_buffer('SOL-001', '27/02/2026', 'TEST')
         # PNG magic bytes
         self.assertTrue(buf.getvalue().startswith(b'\x89PNG'))
 
     @unittest.skipUnless(REPORTLAB_OK, "ReportLab no disponible")
+    def test_generar_qr_image_para_canvas(self):
+        """Para canvas.drawImage debe devolver un ImageReader."""
+        from reportlab.lib.utils import ImageReader
+        img = QRGenerator.generar_qr_image('SOL-001', '27/02/2026', 'TEST')
+        self.assertIsInstance(img, ImageReader)
+
+    @unittest.skipUnless(REPORTLAB_OK, "ReportLab no disponible")
     def test_generar_rl_image(self):
-        """Debe generar un objeto ReportLab Image."""
+        """Debe generar un objeto ReportLab Image (flowable)."""
         img = QRGenerator.generar_rl_image('SOL-001', '27/02/2026', 'TEST', 60, 60)
         self.assertIsNotNone(img)
 

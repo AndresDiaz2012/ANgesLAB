@@ -10,9 +10,13 @@ a la que le corresponde.
 
 Roles definidos:
     resultados   - informes de resultados, hojas de trabajo
-    facturacion  - facturas, notas de credito/debito, cotizaciones
+    facturacion  - facturas, notas de credito/debito
     recibos      - recibos de caja (ticket 80 mm)
     etiquetas    - etiquetas de tubos (rollo 80 mm)
+
+Las cotizaciones son un caso aparte: se imprimen en hoja completa igual que un
+informe, asi que el usuario elige si salen por la impresora de facturacion (por
+defecto) o por la de resultados. Ver ROLES_COTIZACION mas abajo.
 
 Es perfectamente valido asignar la misma impresora fisica a varios roles: cada
 trabajo se envia igual, de forma independiente.
@@ -61,14 +65,15 @@ except Exception:
 ROLES = {
     'resultados': {
         'etiqueta': 'Resultados e informes',
-        'ayuda': 'Informes de resultados, hojas de trabajo e interpretaciones',
+        'ayuda': 'Informes, hojas de trabajo e interpretaciones (y cotizaciones '
+                 'si así se configura)',
         'columna': 'ImpresoraResultados',
         'columna_directo': 'ImpresoraResultadosDirecto',
         'directo_defecto': False,
     },
     'facturacion': {
         'etiqueta': 'Facturación',
-        'ayuda': 'Facturas, notas de crédito/débito y cotizaciones',
+        'ayuda': 'Facturas y notas de crédito/débito',
         'columna': 'ImpresoraFacturacion',
         'columna_directo': 'ImpresoraFacturacionDirecto',
         'directo_defecto': False,
@@ -100,12 +105,29 @@ ALIAS_ROLES = {
     'ia': 'resultados',
     'cotizacion': 'facturacion',
     'cotizaciones': 'facturacion',
+    'presupuesto': 'facturacion',
+    'presupuestos': 'facturacion',
     'factura': 'facturacion',
     'nota_credito': 'facturacion',
     'nota_debito': 'facturacion',
     'recibo': 'recibos',
     'etiqueta': 'etiquetas',
 }
+
+# ── Cotizaciones: rol configurable ─────────────────────────────────────────
+# La cotización es un documento comercial, pero se imprime en hoja completa
+# igual que un informe. Muchos laboratorios tienen la impresora de facturación
+# reservada para papel fiscal o matriz de puntos, así que se permite mandar
+# las cotizaciones por la impresora de resultados.
+ALIAS_COTIZACION = ('cotizacion', 'cotizaciones', 'presupuesto', 'presupuestos')
+ROLES_COTIZACION = ('facturacion', 'resultados')
+ROL_COTIZACIONES_DEFECTO = 'facturacion'
+COLUMNA_ROL_COTIZACIONES = 'RolCotizaciones'
+
+
+def es_alias_cotizacion(rol):
+    """True si el nombre corresponde a una cotización/presupuesto."""
+    return str(rol or '').strip().lower() in ALIAS_COTIZACION
 
 
 def normalizar_rol(rol):
@@ -352,6 +374,7 @@ class GestorImpresoras:
     def __init__(self, db):
         self.db = db
         self._cache = None
+        self._rol_cotizaciones = ROL_COTIZACIONES_DEFECTO
 
     def invalidar_cache(self):
         self._cache = None
@@ -382,19 +405,52 @@ class GestorImpresoras:
                 'directo': info['directo_defecto'] if directo is None
                            else bool(directo),
             }
+
+        # Destino elegido para las cotizaciones (facturación o resultados)
+        elegido = (config.get(COLUMNA_ROL_COTIZACIONES) or '').strip().lower()
+        self._rol_cotizaciones = (elegido if elegido in ROLES_COTIZACION
+                                  else ROL_COTIZACIONES_DEFECTO)
+
         self._cache = salida
         return salida
 
+    def rol_cotizaciones(self):
+        """Rol por el que salen las cotizaciones: 'facturacion' o 'resultados'."""
+        self.asignaciones()          # asegura que la configuración esté leída
+        return self._rol_cotizaciones
+
+    def _resolver_rol(self, rol):
+        """
+        Nombre canónico del rol, aplicando la preferencia de cotizaciones.
+
+        Una cotización va al rol configurado; si ese rol no tiene impresora
+        asignada se usa el otro, para que el documento salga igual en vez de
+        quedarse sin destino.
+        """
+        if es_alias_cotizacion(rol):
+            asig = self.asignaciones()
+            preferido = self._rol_cotizaciones
+            if asig.get(preferido, {}).get('impresora'):
+                return preferido
+            alterno = ('resultados' if preferido == 'facturacion'
+                       else 'facturacion')
+            if asig.get(alterno, {}).get('impresora'):
+                _log.info("Cotización enviada al rol '%s': '%s' no tiene "
+                          "impresora asignada", alterno, preferido)
+                return alterno
+            return preferido
+        return normalizar_rol(rol)
+
     def impresora_de(self, rol):
         """Nombre de la impresora asignada al rol, o '' si no hay."""
-        r = normalizar_rol(rol)
+        r = self._resolver_rol(rol)
         if not r:
             return ''
         return self.asignaciones().get(r, {}).get('impresora', '')
 
     def es_directo(self, rol):
         """True si el rol debe imprimir sin mostrar el diálogo."""
-        r = normalizar_rol(rol)
+        r = self._resolver_rol(rol)
         if not r:
             return False
         asig = self.asignaciones().get(r, {})
@@ -412,12 +468,13 @@ class GestorImpresoras:
             return False
         return enviar_a_impresora(ruta, impresora, copias)
 
-    def guardar(self, asignaciones):
+    def guardar(self, asignaciones, rol_cotizaciones=None):
         """
         Persiste las asignaciones.
 
         asignaciones: {rol: {'impresora': str, 'directo': bool}}
         Se permite repetir la misma impresora en varios roles.
+        rol_cotizaciones: 'facturacion' o 'resultados'; None deja el actual.
         """
         campos = []
         for rol, datos in (asignaciones or {}).items():
@@ -434,6 +491,11 @@ class GestorImpresoras:
             campos.append(
                 f"[{info['columna_directo']}] = "
                 f"{'True' if datos.get('directo') else 'False'}")
+
+        if rol_cotizaciones is not None:
+            destino = str(rol_cotizaciones).strip().lower()
+            if destino in ROLES_COTIZACION:
+                campos.append(f"[{COLUMNA_ROL_COTIZACIONES}] = '{destino}'")
 
         if not campos:
             return False

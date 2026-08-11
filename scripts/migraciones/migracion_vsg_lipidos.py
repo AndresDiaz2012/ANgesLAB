@@ -39,7 +39,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
+# El script vive en scripts/migraciones/, la aplicacion dos niveles arriba
+BASE_DIR = Path(__file__).resolve().parents[2]
 
 try:
     import win32com.client

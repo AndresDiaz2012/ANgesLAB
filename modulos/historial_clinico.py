@@ -300,7 +300,8 @@ class GestorHistorialClinico:
             if fecha_desde:
                 where += f" AND s.FechaSolicitud >= #{fecha_desde.strftime('%m/%d/%Y')}#"
             if fecha_hasta:
-                where += f" AND s.FechaSolicitud <= #{fecha_hasta.strftime('%m/%d/%Y')}#"
+                where += (f" AND s.FechaSolicitud <= "
+                          f"#{fecha_hasta.strftime('%m/%d/%Y')} 23:59:59#")
 
             if area_id:
                 where += (f" AND s.SolicitudID IN ("

@@ -1,4 +1,4 @@
-; ============================================================================
+﻿; ============================================================================
 ; ANgesLAB v2.1 - Script de Instalacion (Inno Setup 6)
 ; Sistema de Gestion de Laboratorio Clinico
 ; Copyright 2024-2026 ANgesLAB Solutions
@@ -6,7 +6,7 @@
 
 #define MyAppName "ANgesLAB"
 #define MyAppFullName "ANgesLAB - Sistema de Gestion de Laboratorio Clinico"
-#define MyAppVersion "2.2.0"
+#define MyAppVersion "2.3.0"
 #define MyAppPublisher "ANgesLAB Solutions"
 #define MyAppURL "https://angeslab.com"
 #define MyAppSupportURL "https://angeslab.com/soporte"
@@ -34,7 +34,7 @@ AllowNoIcons=yes
 LicenseFile=licencia.txt
 InfoBeforeFile=info_antes.txt
 OutputDir=output
-OutputBaseFilename=ANgesLAB_Setup_v2.2
+OutputBaseFilename=ANgesLAB_Setup_v2.3
 SetupIconFile=..\assets\angeslab_icon.ico
 UninstallDisplayIcon={app}\assets\angeslab_icon.ico
 UninstallDisplayName={#MyAppFullName}
@@ -183,8 +183,6 @@ Source: "..\modulos\cotizaciones.py"; DestDir: "{app}\modulos"; Components: modu
 Source: "..\modulos\envio_resultados.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\factura_pdf.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\facturacion_fiscal.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
-Source: "..\modulos\flujo_trabajo.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
-Source: "..\modulos\form_inf_config.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\formato_pdf.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\gestor_solicitudes.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\gtt_captura.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
@@ -193,10 +191,7 @@ Source: "..\modulos\historial_clinico.py"; DestDir: "{app}\modulos"; Components:
 Source: "..\modulos\impresoras.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\logging_config.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\modulo_administrativo.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
-Source: "..\modulos\plantillas_reportes.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\portal_resultados.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
-Source: "..\modulos\reportes_especificaciones.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
-Source: "..\modulos\reportes_resultados.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\seguridad_db.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\splash_screen.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\tema_ui.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion

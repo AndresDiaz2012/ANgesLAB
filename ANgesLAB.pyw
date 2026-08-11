@@ -1729,6 +1729,15 @@ class MainApplication:
 
     def recargar_configuracion(self):
         """Recarga la configuración administrativa y actualiza la interfaz"""
+        # Las impresoras se cachean: sin esto los cambios de asignación no
+        # tendrían efecto hasta reiniciar el programa
+        gestor_imp = getattr(self, '_gestor_impresoras', None)
+        if gestor_imp is not None:
+            try:
+                gestor_imp.invalidar_cache()
+            except Exception:
+                pass
+
         if self.config_administrativa:
             try:
                 # Recargar configuración
@@ -3969,38 +3978,46 @@ class MainApplication:
                               highlightthickness=1, highlightbackground='#bbb')
         pac_search.pack(side='left', padx=5, ipady=4)
 
-        def buscar_pac(event=None):
-            q = pac_search.get().strip()
-            if not q:
-                return
-            safe_q = q.replace("'", "''")
-            rows = db.query(
-                f"SELECT PacienteID, Nombres, Apellidos, NumeroDocumento, Telefono1 "
-                f"FROM Pacientes "
-                f"WHERE Nombres LIKE '%{safe_q}%' OR Apellidos LIKE '%{safe_q}%' "
-                f"   OR NumeroDocumento LIKE '%{safe_q}%' "
-                f"ORDER BY Apellidos"
-            ) or []
-            if not rows:
-                messagebox.showinfo("Sin resultados", "No se encontraron pacientes.", parent=win)
-                return
+        # Estado de vinculación con paciente registrado
+        lbl_pac_estado = tk.Label(sol_lf, text="", font=('Segoe UI', 8),
+                                  bg='white', fg='#666', anchor='w')
+        lbl_pac_estado.pack(fill='x', padx=12, pady=(0, 4))
 
-            def _seleccionar(r):
-                nombre = f"{r.get('Nombres','')} {r.get('Apellidos','')}".strip()
-                pac_id_var.set(r['PacienteID'])
-                sol_nombre_e.delete(0, 'end')
-                sol_nombre_e.insert(0, nombre)
-                sol_cedula_e.delete(0, 'end')
-                sol_cedula_e.insert(0, r.get('NumeroDocumento', ''))
-                sol_tel_e.delete(0, 'end')
-                sol_tel_e.insert(0, r.get('Telefono1', '') or '')
-                pac_search.delete(0, 'end')
-                # Indicador visual
-                sol_nombre_e.config(bg='#e8f5e9')
+        # Cédula ya vinculada (normalizada) para no repetir la búsqueda
+        pac_doc_cargado = {'doc': '', 'buscando': False}
 
-            if len(rows) == 1:
-                _seleccionar(rows[0])
-                return
+        def _solo_digitos(valor):
+            """Deja solo los dígitos: 'V-12.345.678' → '12345678'."""
+            return ''.join(c for c in str(valor or '') if c.isdigit())
+
+        def _estado_pac(texto, color='#666'):
+            lbl_pac_estado.config(text=texto, fg=color)
+
+        def _seleccionar_paciente(r):
+            nombre = f"{r.get('Nombres','')} {r.get('Apellidos','')}".strip()
+            doc = r.get('NumeroDocumento', '') or ''
+            pac_id_var.set(r['PacienteID'])
+            pac_doc_cargado['doc'] = _solo_digitos(doc)
+            sol_nombre_e.delete(0, 'end')
+            sol_nombre_e.insert(0, nombre)
+            sol_cedula_e.delete(0, 'end')
+            sol_cedula_e.insert(0, doc)
+            sol_tel_e.delete(0, 'end')
+            sol_tel_e.insert(0, r.get('Telefono1', '') or '')
+            pac_search.delete(0, 'end')
+            # Indicador visual
+            sol_nombre_e.config(bg='#e8f5e9')
+            sol_cedula_e.config(bg='#e8f5e9')
+            _estado_pac(f"✓ Paciente registrado: {nombre}", '#2e7d32')
+
+        def _limpiar_vinculo():
+            """Desvincula el paciente cuando la cédula deja de coincidir."""
+            pac_id_var.set(0)
+            pac_doc_cargado['doc'] = ''
+            sol_nombre_e.config(bg='#f8f9fa')
+            sol_cedula_e.config(bg='#f8f9fa')
+
+        def _elegir_de_lista(rows):
             sel_win = tk.Toplevel(win)
             sel_win.title("Seleccionar paciente")
             sel_win.grab_set()
@@ -4013,12 +4030,92 @@ class MainApplication:
             def elegir(event=None):
                 idx = lst.curselection()
                 if idx:
-                    _seleccionar(rows[idx[0]])
+                    _seleccionar_paciente(rows[idx[0]])
                 sel_win.destroy()
             lst.bind('<Double-1>', elegir)
             tk.Button(sel_win, text="Seleccionar", command=elegir,
                       font=('Segoe UI', 10), bg=COLORS['primary'], fg='white',
                       relief='flat', padx=12).pack(pady=(0, 8))
+            win.wait_window(sel_win)
+
+        def _buscar_pacientes(texto):
+            """Busca por nombre, apellido o documento. Devuelve lista de dicts."""
+            safe_q = str(texto).replace("'", "''")
+            rows = db.query(
+                f"SELECT TOP 50 PacienteID, Nombres, Apellidos, NumeroDocumento, Telefono1 "
+                f"FROM Pacientes "
+                f"WHERE Nombres LIKE '%{safe_q}%' OR Apellidos LIKE '%{safe_q}%' "
+                f"   OR NumeroDocumento LIKE '%{safe_q}%' "
+                f"ORDER BY Apellidos"
+            ) or []
+            # Búsqueda alterna por dígitos (la cédula puede estar guardada
+            # como 'V-12.345.678' y el usuario escribe '12345678')
+            digitos = _solo_digitos(texto)
+            if digitos and digitos != texto:
+                extra = db.query(
+                    f"SELECT TOP 50 PacienteID, Nombres, Apellidos, NumeroDocumento, Telefono1 "
+                    f"FROM Pacientes WHERE NumeroDocumento LIKE '%{digitos}%' "
+                    f"ORDER BY Apellidos"
+                ) or []
+                vistos = {r['PacienteID'] for r in rows}
+                rows.extend(r for r in extra if r['PacienteID'] not in vistos)
+            return rows
+
+        def buscar_por_cedula(event=None):
+            """Auto-llena los datos si la cédula corresponde a un paciente."""
+            if pac_doc_cargado['buscando']:
+                return
+            digitos = _solo_digitos(sol_cedula_e.get())
+            if not digitos:
+                if pac_id_var.get():
+                    _limpiar_vinculo()
+                    _estado_pac("")
+                return
+            # Ya está vinculado ese mismo paciente
+            if pac_id_var.get() and pac_doc_cargado['doc'] == digitos:
+                return
+            pac_doc_cargado['buscando'] = True
+            try:
+                _limpiar_vinculo()
+                try:
+                    rows = db.query(
+                        f"SELECT TOP 50 PacienteID, Nombres, Apellidos, "
+                        f"NumeroDocumento, Telefono1 "
+                        f"FROM Pacientes WHERE NumeroDocumento LIKE '%{digitos}%' "
+                        f"ORDER BY Apellidos"
+                    ) or []
+                except Exception as e:
+                    _log.error("Error buscando paciente por cédula en cotización: %s", e)
+                    return
+                # Coincidencia por dígitos, ignorando prefijos y puntos
+                exactos = [r for r in rows
+                           if _solo_digitos(r.get('NumeroDocumento')) == digitos]
+                if len(exactos) == 1:
+                    _seleccionar_paciente(exactos[0])
+                elif len(exactos) > 1:
+                    _elegir_de_lista(exactos)
+                else:
+                    _estado_pac("Cédula no registrada — la cotización se emitirá "
+                                "a nombre del solicitante", '#e65100')
+            finally:
+                pac_doc_cargado['buscando'] = False
+
+        def buscar_pac(event=None):
+            q = pac_search.get().strip()
+            if not q:
+                return
+            rows = _buscar_pacientes(q)
+            if not rows:
+                messagebox.showinfo("Sin resultados", "No se encontraron pacientes.", parent=win)
+                return
+            if len(rows) == 1:
+                _seleccionar_paciente(rows[0])
+                return
+            _elegir_de_lista(rows)
+
+        # La cédula busca al paciente al presionar Enter o al salir del campo
+        sol_cedula_e.bind('<Return>', buscar_por_cedula)
+        sol_cedula_e.bind('<FocusOut>', buscar_por_cedula)
 
         pac_search.bind('<Return>', buscar_pac)
         tk.Button(sol_row2, text="🔍", font=('Segoe UI', 9),
@@ -4162,6 +4259,8 @@ class MainApplication:
 
         # ── Guardar ───────────────────────────────────────────────────────────
         def guardar():
+            # Última verificación por si se guardó sin salir del campo Cédula
+            buscar_por_cedula()
             nombre_sol = sol_nombre_e.get().strip()
             if not nombre_sol and not pac_id_var.get():
                 messagebox.showerror("Error", "Ingrese el nombre del solicitante o seleccione un paciente.", parent=win)
@@ -4829,16 +4928,174 @@ class MainApplication:
     def buscar_solicitudes(self):
         self.cargar_solicitudes(self.search_sol.get().strip())
 
+    # ── Paletas de la ventana de Registro de Solicitud ────────────────────
+    # Ambas exponen exactamente las mismas claves, de modo que la ventana se
+    # construye igual con cualquiera de las dos. Se elige en
+    # Configuracion Administrativa › Apariencia.
+    _PALETA_CLARA = {
+        'modo': 'claro',
+        'bg': '#eef2f7', 'frame': '#ffffff', 'header': '#0f2b46',
+        'label': '#334155', 'border': '#dbe3ec', 'input': '#ffffff',
+        'btn': '#e2e8f0', 'btn_fg': '#1e293b', 'btn_act': '#1565c0',
+        'btn_act_fg': '#ffffff', 'btn_ok': '#127a45', 'btn_del': '#c62828',
+        'sec_fg': '#0f2b46', 'ced_bg': '#fffbe6', 'total_bg': '#eef4ff',
+        'header_sub': '#8fb3d1', 'muted': '#64748b', 'accent': '#0ea5e9',
+        'panel': '#f8fafc',
+        'ok': '#127a45', 'warn': '#b45309', 'dang': '#b91c1c',
+        'ok_bg': '#e8f5e9', 'warn_bg': '#fff7ed', 'dang_bg': '#fdecec',
+        'card_bg': '#eceff1', 'card_fg': '#455a64', 'card_nom': '#263238',
+        'card_meta': '#607d8b', 'card_av': '#546e7a',
+        'edad_bg': '#e3f2fd', 'edad_fg': '#0d47a1',
+        'edad_bg0': '#cfd8dc', 'edad_fg0': '#455a64',
+        'pill_on': '#1a237e', 'pill_off': '#9e9e9e', 'pill_fg': '#ffffff',
+        'sel_fg': '#ffffff',
+    }
+    _PALETA_OSCURA = {
+        'modo': 'oscuro',
+        'bg': '#0b1220', 'frame': '#131c2b', 'header': '#0d1526',
+        'label': '#cbd5e1', 'border': '#233149', 'input': '#0d1626',
+        'btn': '#1e293b', 'btn_fg': '#e2e8f0', 'btn_act': '#0284c7',
+        'btn_act_fg': '#ffffff', 'btn_ok': '#059669', 'btn_del': '#dc2626',
+        'sec_fg': '#7dd3fc', 'ced_bg': '#132132', 'total_bg': '#10233a',
+        'header_sub': '#7f9cbf', 'muted': '#8296b0', 'accent': '#22d3ee',
+        'panel': '#0f1a2b',
+        'ok': '#34d399', 'warn': '#fbbf24', 'dang': '#f87171',
+        'ok_bg': '#0d2b22', 'warn_bg': '#2e2410', 'dang_bg': '#2d1618',
+        'card_bg': '#0f1a2b', 'card_fg': '#cbd5e1', 'card_nom': '#e2e8f0',
+        'card_meta': '#8296b0', 'card_av': '#8296b0',
+        'edad_bg': '#10233a', 'edad_fg': '#7dd3fc',
+        'edad_bg0': '#1e293b', 'edad_fg0': '#8296b0',
+        'pill_on': '#0284c7', 'pill_off': '#334155', 'pill_fg': '#e2e8f0',
+        'sel_fg': '#04121c',
+    }
+
+    def _paleta_ventana(self):
+        """Paleta activa segun ConfiguracionLaboratorio.TemaVentanas."""
+        tema = 'claro'
+        try:
+            if self.config_administrativa:
+                tema = self.config_administrativa.obtener_tema_ventanas()
+        except Exception as e:
+            _log.warning("No se pudo leer el tema de ventanas: %s", e)
+        return self._PALETA_OSCURA if tema == 'oscuro' else self._PALETA_CLARA
+
     def form_solicitud(self, solicitud_id=None):
         """Ventana principal de Registro de Solicitudes - Estilo profesional"""
-        # ── Paleta neutra local (no modifica COLORS global) ──
-        S = {
-            'bg': '#f0f0f0', 'frame': '#fafafa', 'header': '#1a237e',
-            'label': '#333333', 'border': '#bdbdbd', 'input': '#ffffff',
-            'btn': '#e0e0e0', 'btn_fg': '#212121', 'btn_act': '#1565c0',
-            'btn_act_fg': '#ffffff', 'btn_ok': '#2e7d32', 'btn_del': '#c62828',
-            'sec_fg': '#1a237e', 'ced_bg': '#fff9c4', 'total_bg': '#e8eaf6',
-        }
+        # ── Paleta local segun el tema elegido en Configuracion ──
+        # No modifica COLORS global: solo vive dentro de esta ventana.
+        S = dict(self._paleta_ventana())
+
+        def _tarjeta(padre, titulo, icono='', expandir=False):
+            """Tarjeta con borde de 1 px y encabezado; devuelve el cuerpo.
+
+            Sustituye a LabelFrame conservando la misma jerarquia: quien la
+            llama sigue empaquetando sus frames dentro del valor devuelto.
+            """
+            cont = tk.Frame(padre, bg=S['border'], highlightthickness=0, bd=0)
+            cont.pack(fill='both' if expandir else 'x',
+                      expand=expandir, pady=(0, 10))
+            interior = tk.Frame(cont, bg=S['frame'])
+            interior.pack(fill='both', expand=True, padx=1, pady=1)
+            barra = tk.Frame(interior, bg=S['frame'])
+            barra.pack(fill='x', padx=14, pady=(10, 0))
+            tk.Label(barra, text=f"{icono}  {titulo}".strip(),
+                     font=('Segoe UI', 10, 'bold'),
+                     bg=S['frame'], fg=S['sec_fg']).pack(side='left')
+            tk.Frame(interior, bg=S['border'], height=1).pack(
+                fill='x', padx=14, pady=(8, 0))
+            cuerpo = tk.Frame(interior, bg=S['frame'])
+            cuerpo.pack(fill='both', expand=True)
+            return cuerpo
+
+        def _estilos_ttk():
+            """Registra estilos ttk propios de esta ventana.
+
+            Van con prefijo 'Smart.' para no alterar el tema global que
+            aplica modulos/tema_ui.py al resto del programa.
+            """
+            st = ttk.Style()
+            st.configure('Smart.TCombobox',
+                         fieldbackground=S['input'], background=S['btn'],
+                         foreground=S['label'], arrowcolor=S['accent'],
+                         bordercolor=S['border'], lightcolor=S['border'],
+                         darkcolor=S['border'], insertcolor=S['label'])
+            st.map('Smart.TCombobox',
+                   fieldbackground=[('readonly', S['input'])],
+                   foreground=[('readonly', S['label'])],
+                   selectbackground=[('readonly', S['input'])],
+                   selectforeground=[('readonly', S['label'])],
+                   bordercolor=[('focus', S['accent'])])
+            st.configure('Smart.Treeview',
+                         background=S['input'], fieldbackground=S['input'],
+                         foreground=S['label'], borderwidth=0, rowheight=24)
+            st.map('Smart.Treeview',
+                   background=[('selected', S['accent'])],
+                   foreground=[('selected', S['sel_fg'])])
+            st.configure('Smart.Treeview.Heading',
+                         background=S['panel'], foreground=S['muted'],
+                         relief='flat', borderwidth=0,
+                         font=('Segoe UI', 8, 'bold'))
+            st.map('Smart.Treeview.Heading',
+                   background=[('active', S['border'])])
+            st.configure('Smart.Vertical.TScrollbar',
+                         background=S['border'], troughcolor=S['bg'],
+                         bordercolor=S['bg'], arrowcolor=S['muted'],
+                         darkcolor=S['border'], lightcolor=S['border'])
+
+        def _pulir(raiz):
+            """Pasada final de estilo: aplica el aspecto oscuro a todo el arbol.
+
+            Solo toca apariencia (colores, relieve, cursor). No altera
+            comandos, textos ni bindings existentes.
+            """
+            for w in raiz.winfo_children():
+                try:
+                    # Los ttk van PRIMERO: ttk.Combobox hereda de tk.Entry y
+                    # si no, cae en la rama equivocada y se queda sin estilo
+                    if isinstance(w, ttk.Combobox):
+                        w.config(style='Smart.TCombobox')
+                    elif isinstance(w, ttk.Treeview):
+                        w.config(style='Smart.Treeview')
+                    elif isinstance(w, ttk.Scrollbar):
+                        w.config(style='Smart.Vertical.TScrollbar')
+                    elif isinstance(w, tk.Button):
+                        base = w.cget('bg')
+                        w.config(relief='flat', bd=0, highlightthickness=0,
+                                 activebackground=_aclarar(base),
+                                 activeforeground=w.cget('fg'), cursor='hand2')
+                        w.bind('<Enter>',
+                               lambda e, b=w: b.config(bg=_aclarar(b.cget('bg'))),
+                               add='+')
+                        w.bind('<Leave>',
+                               lambda e, b=w, c=base: b.config(bg=c), add='+')
+                    elif isinstance(w, (tk.Entry, tk.Text)):
+                        # Sobre fondo oscuro hay que fijar tambien el color del
+                        # texto y del cursor: por defecto son negros
+                        w.config(relief='flat', bd=0, highlightthickness=1,
+                                 highlightbackground=S['border'],
+                                 highlightcolor=S['accent'],
+                                 fg=S['label'], insertbackground=S['accent'],
+                                 selectbackground=S['accent'],
+                                 selectforeground='#04121c')
+                    elif isinstance(w, tk.Checkbutton):
+                        w.config(fg=S['label'], selectcolor=S['input'],
+                                 activeforeground=S['label'],
+                                 activebackground=w.cget('bg'),
+                                 highlightthickness=0)
+                except Exception:
+                    pass
+                _pulir(w)
+
+        def _aclarar(color, factor=0.16):
+            """Aclara un color #rrggbb para el estado hover."""
+            try:
+                r = int(color[1:3], 16); g = int(color[3:5], 16); b = int(color[5:7], 16)
+                r = min(255, int(r + (255 - r) * factor))
+                g = min(255, int(g + (255 - g) * factor))
+                b = min(255, int(b + (255 - b) * factor))
+                return f'#{r:02x}{g:02x}{b:02x}'
+            except Exception:
+                return color
 
         win = tk.Toplevel(self.root)
         win.title("Editar Solicitud" if solicitud_id else "Registro de Solicitud")
@@ -4861,13 +5118,51 @@ class MainApplication:
         self.sol_saldo = tk.DoubleVar(value=0.0)
 
         # ── HEADER ──
-        header = tk.Frame(win, bg=S['header'], height=50)
+        header = tk.Frame(win, bg=S['header'], height=64)
         header.pack(fill='x', side='top')
         header.pack_propagate(False)
-        tk.Label(header, text="REGISTRO DE SOLICITUD DE LABORATORIO",
-                font=('Segoe UI', 14, 'bold'), bg=S['header'], fg='white').pack(side='left', padx=20, pady=12)
-        tk.Label(header, text=f"{datetime.now().strftime('%d/%m/%Y %H:%M')}",
-                font=('Segoe UI', 10), bg=S['header'], fg='#b0bec5').pack(side='right', padx=20, pady=14)
+
+        titulo_box = tk.Frame(header, bg=S['header'])
+        titulo_box.pack(side='left', padx=20, pady=10)
+        tk.Label(titulo_box, text="REGISTRO DE SOLICITUD DE LABORATORIO",
+                 font=('Segoe UI', 14, 'bold'), bg=S['header'],
+                 fg='white', anchor='w').pack(anchor='w')
+        tk.Label(titulo_box,
+                 text="Orden médica  ›  Toma de muestra  ›  Procesamiento  ›  Validación",
+                 font=('Segoe UI', 8), bg=S['header'],
+                 fg=S['header_sub'], anchor='w').pack(anchor='w')
+
+        meta_box = tk.Frame(header, bg=S['header'])
+        meta_box.pack(side='right', padx=20, pady=10)
+        tk.Label(meta_box, text=f"{datetime.now().strftime('%d/%m/%Y %H:%M')}",
+                 font=('Segoe UI', 10, 'bold'), bg=S['header'],
+                 fg='white', anchor='e').pack(anchor='e')
+        tk.Label(meta_box,
+                 text=f"Operador: {self.user.get('NombreCompleto', 'Usuario')}",
+                 font=('Segoe UI', 8), bg=S['header'],
+                 fg=S['header_sub'], anchor='e').pack(anchor='e')
+
+        # Franja de pasos: orienta al operador sobre el orden de captura
+        pasos = tk.Frame(win, bg=S['panel'], height=34)
+        pasos.pack(fill='x', side='top')
+        pasos.pack_propagate(False)
+        pasos_inner = tk.Frame(pasos, bg=S['panel'])
+        pasos_inner.pack(side='left', padx=20, pady=7)
+        for i, (num, txt) in enumerate([('1', 'Paciente'), ('2', 'Pruebas'),
+                                        ('3', 'Facturación')]):
+            if i:
+                tk.Label(pasos_inner, text="›", font=('Segoe UI', 10),
+                         bg=S['panel'], fg='#94a3b8').pack(side='left', padx=8)
+            tk.Label(pasos_inner, text=f" {num} ", font=('Segoe UI', 8, 'bold'),
+                     bg=S['accent'] if i == 0 else '#cbd5e1',
+                     fg='white' if i == 0 else '#475569').pack(side='left')
+            tk.Label(pasos_inner, text=f" {txt}", font=('Segoe UI', 9, 'bold'),
+                     bg=S['panel'],
+                     fg=S['sec_fg'] if i == 0 else S['muted']).pack(side='left')
+        tk.Label(pasos, text="Los campos marcados con * son obligatorios",
+                 font=('Segoe UI', 8), bg=S['panel'],
+                 fg=S['muted']).pack(side='right', padx=20)
+        tk.Frame(win, bg=S['border'], height=1).pack(fill='x', side='top')
 
         # ── SCROLL AREA ──
         canvas_container = tk.Frame(win, bg=S['bg'])
@@ -4876,7 +5171,12 @@ class MainApplication:
         scrollbar = ttk.Scrollbar(canvas_container, orient='vertical', command=canvas.yview)
         scrollable_frame = tk.Frame(canvas, bg=S['bg'])
         scrollable_frame.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
-        canvas.create_window((0, 0), window=scrollable_frame, anchor='nw')
+        _id_scroll = canvas.create_window((0, 0), window=scrollable_frame, anchor='nw')
+        # El contenido nunca debe ser mas ancho que el area visible: solo hay
+        # barra vertical, asi que lo que se saliera a la derecha (el panel de
+        # facturacion) quedaria inalcanzable en pantallas pequenas.
+        canvas.bind('<Configure>',
+                    lambda e: canvas.itemconfigure(_id_scroll, width=e.width))
         canvas.configure(yscrollcommand=scrollbar.set)
         canvas.pack(side='left', fill='both', expand=True)
         scrollbar.pack(side='right', fill='y')
@@ -4890,19 +5190,23 @@ class MainApplication:
         main_container = tk.Frame(scrollable_frame, bg=S['bg'])
         main_container.pack(fill='both', expand=True, padx=12, pady=8)
 
+        # La facturación se empaqueta PRIMERO: con pack, lo último en
+        # empaquetarse es lo primero que se comprime, y este panel debe
+        # conservar su ancho aunque la pantalla sea estrecha.
+        right_wrap = tk.Frame(main_container, bg=S['border'], width=342)
+        right_wrap.pack(side='right', fill='y', padx=(8, 0))
+        right_wrap.pack_propagate(False)
+        right_col = tk.Frame(right_wrap, bg=S['frame'], width=340)
+        right_col.pack(fill='both', expand=True, padx=1, pady=1)
+        right_col.pack_propagate(False)
+
         left_col = tk.Frame(main_container, bg=S['bg'])
         left_col.pack(side='left', fill='both', expand=True, padx=(0, 8))
-
-        right_col = tk.Frame(main_container, bg=S['frame'], width=340, relief='groove', bd=1)
-        right_col.pack(side='right', fill='y', padx=(8, 0))
-        right_col.pack_propagate(False)
 
         # ==============================================================
         # SECCION 1: DATOS DE LA SOLICITUD
         # ==============================================================
-        sec_datos = tk.LabelFrame(left_col, text=" Datos de la Solicitud ",
-                                  font=('Segoe UI', 10, 'bold'), bg=S['frame'], fg=S['sec_fg'])
-        sec_datos.pack(fill='x', pady=(0, 8))
+        sec_datos = _tarjeta(left_col, "Datos de la Solicitud", "📋")
         datos_frame = tk.Frame(sec_datos, bg=S['frame'])
         datos_frame.pack(fill='x', padx=12, pady=8)
 
@@ -4937,38 +5241,38 @@ class MainApplication:
         # ==============================================================
         # SECCION 2: INFORMACION DEL PACIENTE
         # ==============================================================
-        sec_paciente = tk.LabelFrame(left_col, text=" Informacion del Paciente ",
-                                     font=('Segoe UI', 10, 'bold'), bg=S['frame'], fg=S['sec_fg'])
-        sec_paciente.pack(fill='x', pady=(0, 8))
+        sec_paciente = _tarjeta(left_col, "Información del Paciente", "🧍")
         pac_frame = tk.Frame(sec_paciente, bg=S['frame'])
         pac_frame.pack(fill='x', padx=12, pady=6)
 
         # ── Tarjeta resumen del paciente (siempre visible) ──
-        self.pac_status_frame = tk.Frame(pac_frame, bg='#eceff1', bd=1, relief='solid', highlightthickness=0)
+        self.pac_status_frame = tk.Frame(pac_frame, bg=S['card_bg'], bd=0,
+                                          highlightthickness=1,
+                                          highlightbackground=S['border'])
         self.pac_status_frame.pack(fill='x', pady=(0, 10))
 
-        card_row = tk.Frame(self.pac_status_frame, bg='#eceff1')
+        card_row = tk.Frame(self.pac_status_frame, bg=S['card_bg'])
         card_row.pack(fill='x', padx=10, pady=8)
 
         self.pac_card_avatar = tk.Label(card_row, text="👤", font=('Segoe UI Emoji', 20),
-                                         bg='#eceff1', fg='#546e7a', width=2)
+                                         bg=S['card_bg'], fg=S['card_av'], width=2)
         self.pac_card_avatar.pack(side='left', padx=(0, 10))
 
-        card_text = tk.Frame(card_row, bg='#eceff1')
+        card_text = tk.Frame(card_row, bg=S['card_bg'])
         card_text.pack(side='left', fill='x', expand=True)
         self.lbl_pac_status = tk.Label(card_text, text="Ingrese la cédula para buscar o registrar paciente",
-                                        font=('Segoe UI', 9, 'bold'), bg='#eceff1', fg='#455a64', anchor='w')
+                                        font=('Segoe UI', 9, 'bold'), bg=S['card_bg'], fg=S['card_fg'], anchor='w')
         self.lbl_pac_status.pack(fill='x', anchor='w')
         self.lbl_pac_nombre = tk.Label(card_text, text="—", font=('Segoe UI', 12, 'bold'),
-                                        bg='#eceff1', fg='#263238', anchor='w')
+                                        bg=S['card_bg'], fg=S['card_nom'], anchor='w')
         self.lbl_pac_nombre.pack(fill='x', anchor='w', pady=(1, 2))
         self.lbl_pac_meta = tk.Label(card_text, text="", font=('Segoe UI', 8),
-                                      bg='#eceff1', fg='#607d8b', anchor='w')
+                                      bg=S['card_bg'], fg=S['card_av'], anchor='w')
         self.lbl_pac_meta.pack(fill='x', anchor='w')
 
         # Chip de edad — SIEMPRE visible con placeholder
         self.lbl_edad_calc = tk.Label(card_row, text="— años", font=('Segoe UI', 10, 'bold'),
-                                       bg='#cfd8dc', fg='#455a64', padx=14, pady=7,
+                                       bg=S['edad_bg0'], fg=S['edad_fg0'], padx=14, pady=7,
                                        relief='flat', borderwidth=0)
         self.lbl_edad_calc.pack(side='right', padx=(10, 0))
 
@@ -5047,9 +5351,7 @@ class MainApplication:
         # ==============================================================
         # SECCION 3: MEDICO TRATANTE
         # ==============================================================
-        sec_medico = tk.LabelFrame(left_col, text=" Medico Tratante ",
-                                   font=('Segoe UI', 10, 'bold'), bg=S['frame'], fg=S['sec_fg'])
-        sec_medico.pack(fill='x', pady=(0, 8))
+        sec_medico = _tarjeta(left_col, "Médico Tratante", "🩺")
         med_frame = tk.Frame(sec_medico, bg=S['frame'])
         med_frame.pack(fill='x', padx=12, pady=8)
         tk.Label(med_frame, text="Medico:", font=('Segoe UI', 9, 'bold'), bg=S['frame'], fg=S['label']).pack(side='left')
@@ -5064,22 +5366,22 @@ class MainApplication:
         # ==============================================================
         # SECCION 4: PRUEBAS / ESTUDIOS SOLICITADOS
         # ==============================================================
-        sec_pruebas = tk.LabelFrame(left_col, text=" Pruebas / Estudios Solicitados ",
-                                    font=('Segoe UI', 10, 'bold'), bg=S['frame'], fg=S['sec_fg'])
-        sec_pruebas.pack(fill='both', expand=True, pady=(0, 8))
-
+        sec_pruebas = _tarjeta(left_col, "Pruebas / Estudios Solicitados", "🧪",
+                               expandir=True)
         pruebas_container = tk.Frame(sec_pruebas, bg=S['frame'])
         pruebas_container.pack(fill='both', expand=True, padx=12, pady=8)
 
         # -- Toolbar unificada (Perfil + Buscar + Contador) --
-        toolbar_pruebas = tk.Frame(pruebas_container, bg='#f5f5f5', bd=1, relief='solid', highlightthickness=0)
+        toolbar_pruebas = tk.Frame(pruebas_container, bg=S['panel'],
+                                   highlightthickness=1,
+                                   highlightbackground=S['border'])
         toolbar_pruebas.pack(fill='x', pady=(0, 8))
-        toolbar_inner = tk.Frame(toolbar_pruebas, bg='#f5f5f5')
+        toolbar_inner = tk.Frame(toolbar_pruebas, bg=S['panel'])
         toolbar_inner.pack(fill='x', padx=8, pady=6)
 
         # Perfil
         tk.Label(toolbar_inner, text="🧪  Perfil:", font=('Segoe UI', 9, 'bold'),
-                 bg='#f5f5f5', fg=S['label']).pack(side='left')
+                 bg=S['panel'], fg=S['label']).pack(side='left')
         self.combo_perfil = ttk.Combobox(toolbar_inner, font=('Segoe UI', 9), width=30, state='readonly')
         self.combo_perfil.pack(side='left', padx=(6, 4), ipady=2)
         try:
@@ -5097,7 +5399,7 @@ class MainApplication:
 
         # Búsqueda individual
         tk.Label(toolbar_inner, text="🔍  Buscar:", font=('Segoe UI', 9, 'bold'),
-                 bg='#f5f5f5', fg=S['label']).pack(side='left', padx=(10, 0))
+                 bg=S['panel'], fg=S['label']).pack(side='left', padx=(10, 0))
         self.entry_buscar_prueba = tk.Entry(toolbar_inner, font=('Segoe UI', 9), width=28,
                                              relief='solid', bg=S['input'], bd=1)
         self.entry_buscar_prueba.pack(side='left', padx=6, ipady=3)
@@ -5116,7 +5418,7 @@ class MainApplication:
         # Pill contador (derecha)
         self.pill_contador = tk.Label(toolbar_inner, text=" 0 pruebas ",
                                        font=('Segoe UI', 9, 'bold'),
-                                       bg='#9e9e9e', fg='white', padx=10, pady=4)
+                                       bg=S['pill_off'], fg=S['pill_fg'], padx=10, pady=4)
         self.pill_contador.pack(side='right')
 
         # -- Barra secundaria con acciones sobre selección --
@@ -5132,16 +5434,19 @@ class MainApplication:
         tree_frame = tk.Frame(pruebas_container, bg=S['frame'])
         tree_frame.pack(fill='both', expand=True)
 
-        cols_sel = ('#', 'Codigo', 'Nombre', 'Precio')
+        # 'Codigo' se mantiene en el indice 1: quitar_prueba_sol lee vals[1]
+        cols_sel = ('#', 'Codigo', 'Area', 'Nombre', 'Precio')
         self.tree_pruebas_sel = ttk.Treeview(tree_frame, columns=cols_sel, show='headings', height=10)
         self.tree_pruebas_sel.heading('#', text='#')
-        self.tree_pruebas_sel.heading('Codigo', text='Codigo')
+        self.tree_pruebas_sel.heading('Codigo', text='Código')
+        self.tree_pruebas_sel.heading('Area', text='Área')
         self.tree_pruebas_sel.heading('Nombre', text='Nombre')
         self.tree_pruebas_sel.heading('Precio', text='Precio')
-        self.tree_pruebas_sel.column('#', width=35, anchor='center')
-        self.tree_pruebas_sel.column('Codigo', width=70)
-        self.tree_pruebas_sel.column('Nombre', width=280)
-        self.tree_pruebas_sel.column('Precio', width=75, anchor='e')
+        self.tree_pruebas_sel.column('#', width=32, anchor='center')
+        self.tree_pruebas_sel.column('Codigo', width=72)
+        self.tree_pruebas_sel.column('Area', width=48, anchor='center')
+        self.tree_pruebas_sel.column('Nombre', width=250)
+        self.tree_pruebas_sel.column('Precio', width=72, anchor='e')
 
         vsb_sel = ttk.Scrollbar(tree_frame, orient='vertical', command=self.tree_pruebas_sel.yview)
         self.tree_pruebas_sel.configure(yscrollcommand=vsb_sel.set)
@@ -5163,9 +5468,7 @@ class MainApplication:
         # ==============================================================
         # SECCION 5: OBSERVACIONES
         # ==============================================================
-        sec_obs = tk.LabelFrame(left_col, text=" Observaciones ",
-                                font=('Segoe UI', 10, 'bold'), bg=S['frame'], fg=S['sec_fg'])
-        sec_obs.pack(fill='x', pady=(0, 8))
+        sec_obs = _tarjeta(left_col, "Observaciones", "📝")
         obs_frame = tk.Frame(sec_obs, bg=S['frame'])
         obs_frame.pack(fill='x', padx=12, pady=8)
         tk.Label(obs_frame, text="Diagnostico / Motivo:", font=('Segoe UI', 8), bg=S['frame'], fg=S['label']).pack(anchor='w')
@@ -5176,27 +5479,50 @@ class MainApplication:
         self.txt_observaciones.pack(fill='x')
 
         # ==============================================================
-        # COLUMNA DERECHA: FACTURACION
+        # COLUMNA DERECHA: CONSECUENCIAS + FACTURACION
         # ==============================================================
-        tk.Label(right_col, text="FACTURACION", font=('Segoe UI', 12, 'bold'),
-                bg=S['frame'], fg=S['sec_fg']).pack(pady=8)
+        cab_fact = tk.Frame(right_col, bg=S['header'])
+        cab_fact.pack(fill='x')
+        tk.Label(cab_fact, text="⬢  CONSECUENCIAS", font=('Segoe UI', 11, 'bold'),
+                 bg=S['header'], fg=S['accent']).pack(anchor='w', padx=14, pady=(10, 1))
+        tk.Label(cab_fact, text="Lo que el sistema deduce de la orden",
+                 font=('Segoe UI', 8), bg=S['header'],
+                 fg=S['header_sub']).pack(anchor='w', padx=14, pady=(0, 10))
+
+        # ── Tubos derivados y alertas clinicas ────────────────────────────
+        self._smart_pal = S
+        cons_frame = tk.Frame(right_col, bg=S['frame'])
+        cons_frame.pack(fill='x', padx=8, pady=(8, 0))
+        tk.Label(cons_frame, text="TUBOS A EXTRAER", font=('Segoe UI', 7, 'bold'),
+                 bg=S['frame'], fg=S['muted']).pack(anchor='w')
+        self.frame_tubos = tk.Frame(cons_frame, bg=S['frame'])
+        self.frame_tubos.pack(fill='x', pady=(3, 6))
+        self.frame_alertas = tk.Frame(cons_frame, bg=S['frame'])
+        self.frame_alertas.pack(fill='x')
+
+        tk.Frame(right_col, bg=S['border'], height=1).pack(fill='x', padx=8, pady=8)
+
+        tk.Label(right_col, text="💳  FACTURACIÓN", font=('Segoe UI', 10, 'bold'),
+                 bg=S['frame'], fg=S['label']).pack(anchor='w', padx=14)
 
         # Tasas de cambio
-        tasas_frame = tk.LabelFrame(right_col, text=" Tasas de Cambio (Ref: USD) ",
-                                   font=('Segoe UI', 8, 'bold'), bg=S['frame'], fg=S['label'])
-        tasas_frame.pack(fill='x', padx=8, pady=4)
-        tasas_inner = tk.Frame(tasas_frame, bg=S['frame'])
-        tasas_inner.pack(fill='x', padx=8, pady=6)
-        tk.Label(tasas_inner, text="1 USD =", font=('Segoe UI', 8), bg=S['frame'], fg=S['label']).pack(side='left')
+        tasas_frame = tk.Frame(right_col, bg=S['panel'])
+        tasas_frame.pack(fill='x', padx=8, pady=(8, 4))
+        tk.Label(tasas_frame, text="TASAS DE CAMBIO (Ref: USD)",
+                 font=('Segoe UI', 7, 'bold'), bg=S['panel'],
+                 fg=S['muted']).pack(anchor='w', padx=8, pady=(6, 0))
+        tasas_inner = tk.Frame(tasas_frame, bg=S['panel'])
+        tasas_inner.pack(fill='x', padx=8, pady=(4, 8))
+        tk.Label(tasas_inner, text="1 USD =", font=('Segoe UI', 8), bg=S['panel'], fg=S['label']).pack(side='left')
         self.entry_tasa_bs = tk.Entry(tasas_inner, font=('Segoe UI', 9), width=9, relief='solid', bg=S['input'], bd=1, justify='right')
         self.entry_tasa_bs.pack(side='left', padx=3, ipady=2)
         self.entry_tasa_bs.bind('<KeyRelease>', lambda e: self.calcular_totales())
-        tk.Label(tasas_inner, text="Bs", font=('Segoe UI', 8, 'bold'), bg=S['frame'], fg='#e65100').pack(side='left', padx=(0, 8))
-        tk.Label(tasas_inner, text="=", font=('Segoe UI', 8), bg=S['frame'], fg=S['label']).pack(side='left')
+        tk.Label(tasas_inner, text="Bs", font=('Segoe UI', 8, 'bold'), bg=S['panel'], fg='#e65100').pack(side='left', padx=(0, 8))
+        tk.Label(tasas_inner, text="=", font=('Segoe UI', 8), bg=S['panel'], fg=S['label']).pack(side='left')
         self.entry_tasa_cop = tk.Entry(tasas_inner, font=('Segoe UI', 9), width=9, relief='solid', bg=S['input'], bd=1, justify='right')
         self.entry_tasa_cop.pack(side='left', padx=3, ipady=2)
         self.entry_tasa_cop.bind('<KeyRelease>', lambda e: self.calcular_totales())
-        tk.Label(tasas_inner, text="COP", font=('Segoe UI', 8, 'bold'), bg=S['frame'], fg='#1565c0').pack(side='left')
+        tk.Label(tasas_inner, text="COP", font=('Segoe UI', 8, 'bold'), bg=S['panel'], fg='#1565c0').pack(side='left')
 
         # Cargar tasas desde BD (BCV y manual)
         self._cargar_tasas_solicitud()
@@ -5285,24 +5611,25 @@ class MainApplication:
         self.lbl_saldo.pack(side='right')
 
         # Opciones de pago
-        pago_frame = tk.LabelFrame(fact_frame, text=" Opciones de Pago ",
-                                  font=('Segoe UI', 8, 'bold'), bg='#f5f5f5', fg=S['label'])
+        pago_frame = tk.Frame(fact_frame, bg=S['panel'])
         pago_frame.pack(fill='x', pady=6)
-        pago_inner = tk.Frame(pago_frame, bg='#f5f5f5')
-        pago_inner.pack(fill='x', padx=8, pady=6)
+        tk.Label(pago_frame, text="OPCIONES DE PAGO", font=('Segoe UI', 7, 'bold'),
+                 bg=S['panel'], fg=S['muted']).pack(anchor='w', padx=8, pady=(6, 0))
+        pago_inner = tk.Frame(pago_frame, bg=S['panel'])
+        pago_inner.pack(fill='x', padx=8, pady=(4, 8))
 
-        row_moneda = tk.Frame(pago_inner, bg='#f5f5f5')
+        row_moneda = tk.Frame(pago_inner, bg=S['panel'])
         row_moneda.pack(fill='x', pady=2)
-        tk.Label(row_moneda, text="Moneda:", font=('Segoe UI', 9, 'bold'), bg='#f5f5f5', fg=S['label'], width=9, anchor='w').pack(side='left')
+        tk.Label(row_moneda, text="Moneda:", font=('Segoe UI', 9, 'bold'), bg=S['panel'], fg=S['label'], width=9, anchor='w').pack(side='left')
         self.combo_moneda = ttk.Combobox(row_moneda, font=('Segoe UI', 9), state='readonly', width=17)
         self.combo_moneda['values'] = ['USD (Dolar)', 'Bs (Bolivares)', 'COP (Pesos)']
         self.combo_moneda.set('USD (Dolar)')
         self.combo_moneda.pack(side='left')
         self.combo_moneda.bind('<<ComboboxSelected>>', lambda e: self.actualizar_total_moneda())
 
-        row_forma = tk.Frame(pago_inner, bg='#f5f5f5')
+        row_forma = tk.Frame(pago_inner, bg=S['panel'])
         row_forma.pack(fill='x', pady=2)
-        tk.Label(row_forma, text="Forma:", font=('Segoe UI', 9, 'bold'), bg='#f5f5f5', fg=S['label'], width=9, anchor='w').pack(side='left')
+        tk.Label(row_forma, text="Forma:", font=('Segoe UI', 9, 'bold'), bg=S['panel'], fg=S['label'], width=9, anchor='w').pack(side='left')
         self.combo_forma_pago = ttk.Combobox(row_forma, font=('Segoe UI', 9), state='readonly', width=17)
         self.combo_forma_pago['values'] = ['Efectivo', 'Tarjeta Debito', 'Tarjeta Credito', 'Transferencia', 'Zelle/Pago Movil', 'Mixto']
         self.combo_forma_pago.set('Efectivo')
@@ -5320,15 +5647,28 @@ class MainApplication:
         # Botones
         btn_frame = tk.Frame(right_col, bg=S['frame'])
         btn_frame.pack(fill='x', padx=12, pady=12, side='bottom')
-        tk.Button(btn_frame, text="GUARDAR SOLICITUD", font=('Segoe UI', 10, 'bold'),
-                 bg=S['btn_ok'], fg='white', relief='raised', cursor='hand2',
-                 command=lambda: self.guardar_solicitud_completa(win)).pack(fill='x', pady=2, ipady=6)
-        tk.Button(btn_frame, text="Imprimir Comprobante", font=('Segoe UI', 9),
-                 bg=S['btn_act'], fg=S['btn_act_fg'], relief='raised', cursor='hand2',
-                 command=lambda: self.imprimir_comprobante()).pack(fill='x', pady=2, ipady=4)
+        tk.Frame(btn_frame, bg=S['border'], height=1).pack(fill='x', pady=(0, 10))
+        tk.Button(btn_frame, text="✓   GUARDAR SOLICITUD", font=('Segoe UI', 10, 'bold'),
+                 bg=S['btn_ok'], fg='white', relief='flat', cursor='hand2',
+                 command=lambda: self.guardar_solicitud_completa(win)).pack(fill='x', pady=2, ipady=8)
+        tk.Button(btn_frame, text="🖨   Imprimir Comprobante", font=('Segoe UI', 9),
+                 bg=S['btn_act'], fg=S['btn_act_fg'], relief='flat', cursor='hand2',
+                 command=lambda: self.imprimir_comprobante()).pack(fill='x', pady=2, ipady=5)
         tk.Button(btn_frame, text="Cancelar", font=('Segoe UI', 9),
-                 bg=S['btn'], fg=S['btn_fg'], relief='raised', cursor='hand2',
-                 command=win.destroy).pack(fill='x', pady=2, ipady=4)
+                 bg=S['btn'], fg=S['btn_fg'], relief='flat', cursor='hand2',
+                 command=win.destroy).pack(fill='x', pady=2, ipady=5)
+        tk.Label(btn_frame, text="Ctrl+S guarda  ·  Esc cierra",
+                 font=('Segoe UI', 7), bg=S['frame'],
+                 fg=S['muted']).pack(pady=(6, 0))
+
+        # Atajos de teclado (no sustituyen a los botones, los complementan)
+        win.bind('<Control-s>', lambda e: self.guardar_solicitud_completa(win))
+        win.bind('<Escape>', lambda e: win.destroy())
+
+        # Pasada final: estilos ttk propios y aspecto oscuro en todo el arbol
+        _estilos_ttk()
+        _pulir(win)
+        self._refrescar_consecuencias()
 
         # Guardar referencias
         self.sol_win = win
@@ -5600,11 +5940,13 @@ class MainApplication:
                     txt = f"{dias} días" if meses < 1 else f"{meses} meses"
                 else:
                     txt = f"{anios} años"
-                self.lbl_edad_calc.config(text=txt, bg='#e3f2fd', fg='#0d47a1')
+                _P = getattr(self, '_smart_pal', None) or self._PALETA_CLARA
+                self.lbl_edad_calc.config(text=txt, bg=_P['edad_bg'], fg=_P['edad_fg'])
                 return
             except ValueError:
                 pass
-        self.lbl_edad_calc.config(text="— años", bg='#cfd8dc', fg='#455a64')
+        _P = getattr(self, '_smart_pal', None) or self._PALETA_CLARA
+        self.lbl_edad_calc.config(text="— años", bg=_P['edad_bg0'], fg=_P['edad_fg0'])
 
     def _llenar_campos_paciente(self, pac):
         """Llena los campos inline con datos del paciente encontrado."""
@@ -5660,7 +6002,8 @@ class MainApplication:
         self.pac_nombres.delete(0, 'end')
         self.pac_apellidos.delete(0, 'end')
         self.pac_fecha_nac.delete(0, 'end')
-        self.lbl_edad_calc.config(text="— años", bg='#cfd8dc', fg='#455a64')
+        _P = getattr(self, '_smart_pal', None) or self._PALETA_CLARA
+        self.lbl_edad_calc.config(text="— años", bg=_P['edad_bg0'], fg=_P['edad_fg0'])
         self.pac_sexo.set('')
         self.pac_telefono.delete(0, 'end')
         self._sincronizar_gestante()
@@ -5671,8 +6014,24 @@ class MainApplication:
         self._refrescar_card_paciente()
         self.pac_cedula.focus_set()
 
+    # Los pasteles claros que usan las llamadas historicas, traducidos al
+    # panel oscuro. Asi no hay que tocar los ocho puntos que las emiten.
+    _PASTEL_A_OSCURO = {
+        '#e8f5e9': ('#0d2b22', '#34d399'),   # exito
+        '#fff3e0': ('#2e2410', '#fbbf24'),   # aviso
+        '#ffebee': ('#2d1618', '#f87171'),   # error
+        '#e3f2fd': ('#10233a', '#7dd3fc'),   # informativo
+        '#eceff1': ('#0f1a2b', '#cbd5e1'),   # neutro
+    }
+
     def _set_pac_status(self, texto, bg_color, fg_color):
         """Actualiza el indicador de estado del paciente (card completo)."""
+        # La traduccion solo aplica con el tema oscuro; en claro los pasteles
+        # originales son los correctos
+        if (getattr(self, '_smart_pal', {}) or {}).get('modo') == 'oscuro':
+            par = self._PASTEL_A_OSCURO.get(str(bg_color).lower())
+            if par:
+                bg_color, fg_color = par
         try:
             self.pac_status_frame.config(bg=bg_color)
             self.lbl_pac_status.config(text=texto, bg=bg_color, fg=fg_color)
@@ -5807,10 +6166,13 @@ class MainApplication:
 
         try:
             pruebas = db.query(f"""
-                SELECT PruebaID, CodigoPrueba, NombrePrueba, Precio
-                FROM Pruebas
-                WHERE Activo=True AND NombrePrueba LIKE '%{safe}%'
-                ORDER BY NombrePrueba
+                SELECT p.PruebaID, p.CodigoPrueba, p.NombrePrueba, p.Precio,
+                       a.CodigoArea
+                FROM Pruebas p LEFT JOIN Areas a ON p.AreaID = a.AreaID
+                WHERE p.Activo=True
+                  AND (p.NombrePrueba LIKE '%{safe}%'
+                       OR p.CodigoPrueba LIKE '%{safe}%')
+                ORDER BY p.NombrePrueba
             """)
             if not pruebas:
                 self._set_pac_status(f"No se encontro prueba: '{texto}'", '#ffebee', '#c62828')
@@ -5860,11 +6222,16 @@ class MainApplication:
         ids_ya = {p['id'] for p in getattr(self, 'sol_pruebas_seleccionadas', [])}
         safe = texto.replace("'", "''")
         try:
+            # Se busca tambien por codigo: el area viaja en el resultado para
+            # que el operador no dependa del prefijo, que no es fiable
             pruebas = db.query(f"""
-                SELECT TOP 15 PruebaID, CodigoPrueba, NombrePrueba, Precio
-                FROM Pruebas
-                WHERE Activo=True AND NombrePrueba LIKE '%{safe}%'
-                ORDER BY NombrePrueba
+                SELECT TOP 15 p.PruebaID, p.CodigoPrueba, p.NombrePrueba,
+                       p.Precio, a.CodigoArea
+                FROM Pruebas p LEFT JOIN Areas a ON p.AreaID = a.AreaID
+                WHERE p.Activo=True
+                  AND (p.NombrePrueba LIKE '%{safe}%'
+                       OR p.CodigoPrueba LIKE '%{safe}%')
+                ORDER BY p.NombrePrueba
             """) or []
         except Exception as e:
             _log.error("Error autocompletado pruebas: %s", e)
@@ -5878,20 +6245,23 @@ class MainApplication:
     def _autocomplete_mostrar(self, pruebas):
         """Crea o actualiza el popup Listbox con las sugerencias debajo del entry."""
         try:
+            P = getattr(self, '_smart_pal', None) or self._PALETA_CLARA
             if not self._autocomplete_win or not self._autocomplete_win.winfo_exists():
                 self._autocomplete_win = tk.Toplevel(self.sol_win)
                 try:
                     self._autocomplete_win.wm_overrideredirect(True)
                 except Exception:
                     pass
-                self._autocomplete_win.configure(bg='#888')
-                inner = tk.Frame(self._autocomplete_win, bg='#888', bd=1)
+                self._autocomplete_win.configure(bg=P['border'])
+                inner = tk.Frame(self._autocomplete_win, bg=P['border'], bd=1)
                 inner.pack(fill='both', expand=True, padx=1, pady=1)
+                # Monoespaciada: es lo que permite que codigo, area y precio
+                # queden en columnas alineadas dentro de un Listbox
                 self._autocomplete_listbox = tk.Listbox(
-                    inner, font=('Segoe UI', 10), height=8,
-                    bg='white', fg='#222', activestyle='dotbox',
+                    inner, font=('Consolas', 10), height=8,
+                    bg=P['input'], fg=P['label'], activestyle='none',
                     highlightthickness=0, bd=0, relief='flat',
-                    selectbackground='#1565c0', selectforeground='white'
+                    selectbackground=P['accent'], selectforeground=P['sel_fg']
                 )
                 self._autocomplete_listbox.pack(fill='both', expand=True)
                 self._autocomplete_listbox.bind('<Return>', self._autocomplete_seleccionar)
@@ -5903,19 +6273,27 @@ class MainApplication:
             self.entry_buscar_prueba.update_idletasks()
             x = self.entry_buscar_prueba.winfo_rootx()
             y = self.entry_buscar_prueba.winfo_rooty() + self.entry_buscar_prueba.winfo_height() + 2
-            w = max(self.entry_buscar_prueba.winfo_width(), 420)
+            # Mas ancho: ahora caben codigo, area, nombre y precio
+            w = max(self.entry_buscar_prueba.winfo_width(), 560)
             self._autocomplete_win.geometry(f"{w}x180+{x}+{y}")
 
             self._autocomplete_data = []
             for p in pruebas:
                 precio = float(p.get('Precio') or 0)
                 nombre = p.get('NombrePrueba') or ''
-                self._autocomplete_listbox.insert('end', f"  {nombre}")
+                codigo = str(p.get('CodigoPrueba') or '').strip()
+                area = str(p.get('CodigoArea') or '—').strip()
+                # Codigo y area en columnas fijas: el area es el dato fiable,
+                # el prefijo del codigo no siempre coincide con ella
+                etiqueta = (f" {codigo[:9]:<9} {area[:4]:<4} {nombre[:44]}"
+                            + (f"   ${precio:,.2f}" if precio else "   s/precio"))
+                self._autocomplete_listbox.insert('end', etiqueta)
                 self._autocomplete_data.append({
                     'id': p['PruebaID'],
-                    'codigo': p.get('CodigoPrueba') or '',
+                    'codigo': codigo,
                     'nombre': nombre,
                     'precio': precio,
+                    'area': area,
                 })
 
             try:
@@ -6039,14 +6417,157 @@ class MainApplication:
         popup.wait_window()
         return resultado[0]
 
+    # Color de tapa por tipo de muestra, con el codigo real de TiposMuestra
+    _TAPAS_MUESTRA = {
+        'SANGRE':  ('#a78bfa', 'Sangre venosa'),
+        'ORINA':   ('#fbbf24', 'Orina'),
+        'HECES':   ('#a16207', 'Heces'),
+        'ESPUTO':  ('#38bdf8', 'Esputo'),
+        'LCR':     ('#e2e8f0', 'LCR'),
+        'SEMEN':   ('#94a3b8', 'Semen'),
+        'EXUDADO': ('#34d399', 'Exudado'),
+    }
+
+    def _refrescar_consecuencias(self):
+        """Deriva tubos y alertas clinicas de las pruebas seleccionadas.
+
+        Solo informa: no modifica la seleccion ni la facturacion. Cuando una
+        prueba no tiene tipo de muestra en el catalogo (hoy la mayoria) se
+        declara «sin definir» en vez de suponerlo.
+        """
+        if not hasattr(self, 'frame_tubos'):
+            return
+        S = getattr(self, '_smart_pal', None)
+        if not S:
+            return
+
+        for w in self.frame_tubos.winfo_children():
+            w.destroy()
+        for w in self.frame_alertas.winfo_children():
+            w.destroy()
+
+        seleccion = getattr(self, 'sol_pruebas_seleccionadas', []) or []
+        if not seleccion:
+            tk.Label(self.frame_tubos, text="—", font=('Segoe UI', 8),
+                     bg=S['frame'], fg=S['muted']).pack(anchor='w')
+            return
+
+        # Tipo de muestra de cada prueba seleccionada
+        conteo, sin_definir, ayuno = {}, 0, False
+        try:
+            ids = [int(p['id']) for p in seleccion if str(p.get('id', '')).strip()]
+            mapa = {}
+            if ids:
+                filas = db.query(
+                    "SELECT p.PruebaID, tm.CodigoTipoMuestra, tm.RequiereAyuno "
+                    "FROM Pruebas p LEFT JOIN TiposMuestra tm "
+                    "ON p.TipoMuestraID = tm.TipoMuestraID "
+                    f"WHERE p.PruebaID IN ({','.join(str(i) for i in ids)})"
+                ) or []
+                for f in filas:
+                    mapa[f.get('PruebaID')] = (f.get('CodigoTipoMuestra'),
+                                               f.get('RequiereAyuno'))
+            for i in ids:
+                cod, req = mapa.get(i, (None, None))
+                if cod:
+                    conteo[cod] = conteo.get(cod, 0) + 1
+                    if req:
+                        ayuno = True
+                else:
+                    sin_definir += 1
+        except Exception as e:
+            _log.warning("No se pudieron derivar los tubos: %s", e)
+            sin_definir = len(seleccion)
+
+        def _chip(padre, texto, color_tapa, borde, fg):
+            c = tk.Frame(padre, bg=borde)
+            c.pack(side='left', padx=(0, 5), pady=2)
+            i = tk.Frame(c, bg=S['input'])
+            i.pack(padx=1, pady=1)
+            tk.Canvas(i, width=9, height=9, bg=color_tapa,
+                      highlightthickness=0).pack(side='left', padx=(6, 4), pady=4)
+            tk.Label(i, text=texto, font=('Segoe UI', 8), bg=S['input'],
+                     fg=fg).pack(side='left', padx=(0, 8))
+
+        fila = tk.Frame(self.frame_tubos, bg=S['frame'])
+        fila.pack(fill='x')
+        for cod, n in sorted(conteo.items()):
+            color, nombre = self._TAPAS_MUESTRA.get(cod, ('#64748b', cod))
+            _chip(fila, f"{nombre} ×{n}", color, S['border'], S['label'])
+        if sin_definir:
+            _chip(fila, f"Sin definir ×{sin_definir}", '#3f4a5c',
+                  S['warn'], S['warn'])
+
+        # Alertas
+        def _alerta(icono, texto, color, fondo):
+            f = tk.Frame(self.frame_alertas, bg=fondo)
+            f.pack(fill='x', pady=2)
+            tk.Frame(f, bg=color, width=3).pack(side='left', fill='y')
+            tk.Label(f, text=f" {icono}  {texto}", font=('Segoe UI', 8),
+                     bg=fondo, fg=color, anchor='w', justify='left',
+                     wraplength=270).pack(side='left', fill='x',
+                                          expand=True, padx=(4, 6), pady=4)
+
+        if ayuno:
+            _alerta("🍽", "Requiere ayuno — confirme con el paciente",
+                    S['warn'], S['warn_bg'])
+        if sin_definir:
+            _alerta("ℹ", f"{sin_definir} prueba{'s' if sin_definir != 1 else ''} "
+                         f"sin tipo de muestra en el catálogo: verifique el tubo",
+                    S['accent'], S['panel'])
+
+        # Coherencia entre sexo del paciente y pruebas seleccionadas
+        try:
+            sexo = (self.pac_sexo.get() or '')[:1].upper()
+            if sexo:
+                incoherentes = []
+                for p in seleccion:
+                    nom = str(p.get('nombre', '')).upper()
+                    if sexo == 'F' and ('PSA' in nom or 'PROSTAT' in nom):
+                        incoherentes.append(p.get('nombre'))
+                    if sexo == 'M' and ('EMBARAZO' in nom or 'GESTACION' in nom):
+                        incoherentes.append(p.get('nombre'))
+                for nom in incoherentes[:2]:
+                    _alerta("⛔", f"{nom} no corresponde al sexo registrado",
+                            S['dang'], S['dang_bg'])
+        except Exception:
+            pass
+
+    def _codigo_area_por_prueba(self, ids):
+        """Codigo de area de cada PruebaID. El area es el dato fiable; el
+        prefijo del codigo no siempre coincide con ella.
+
+        Ojo: no confundir con _areas_de_pruebas(), que agrupa areas para la
+        impresion por area y recibe filas completas, no identificadores.
+        """
+        mapa = {}
+        ids = [int(i) for i in ids if str(i).strip().isdigit()]
+        if not ids:
+            return mapa
+        try:
+            filas = db.query(
+                "SELECT p.PruebaID, a.CodigoArea "
+                "FROM Pruebas p LEFT JOIN Areas a ON p.AreaID = a.AreaID "
+                f"WHERE p.PruebaID IN ({','.join(str(i) for i in ids)})"
+            ) or []
+            for f in filas:
+                mapa[f.get('PruebaID')] = (f.get('CodigoArea') or '—')
+        except Exception as e:
+            _log.warning("No se pudo resolver el area de las pruebas: %s", e)
+        return mapa
+
     def _refrescar_lista_seleccionadas(self):
         """Reconstruye el treeview unico de pruebas seleccionadas."""
         for item in self.tree_pruebas_sel.get_children():
             self.tree_pruebas_sel.delete(item)
+        areas = self._codigo_area_por_prueba(
+            [p.get('id') for p in self.sol_pruebas_seleccionadas])
         for i, p in enumerate(self.sol_pruebas_seleccionadas, 1):
             precio = float(p.get('precio') or 0)
+            area = p.get('area') or areas.get(p.get('id'), '—')
             self.tree_pruebas_sel.insert('', 'end', values=(
-                i, p.get('codigo', ''), p.get('nombre', ''), f"${precio:,.2f}"
+                i, p.get('codigo', ''), area, p.get('nombre', ''),
+                f"${precio:,.2f}"
             ))
         # Actualizar barra resumen
         n = len(self.sol_pruebas_seleccionadas)
@@ -6056,8 +6577,11 @@ class MainApplication:
         # Actualizar pill contador
         if hasattr(self, 'pill_contador'):
             txt = f" {n} prueba{'s' if n != 1 else ''} "
-            color = '#1a237e' if n > 0 else '#9e9e9e'
-            self.pill_contador.config(text=txt, bg=color)
+            _P = getattr(self, '_smart_pal', None) or self._PALETA_CLARA
+            color = _P['pill_on'] if n > 0 else _P['pill_off']
+            self.pill_contador.config(text=txt, bg=color, fg=_P['pill_fg'])
+        # Tubos y alertas clinicas derivadas
+        self._refrescar_consecuencias()
 
     def _verificar_solicitudes_existentes(self, paciente):
         """Verifica si el paciente tiene solicitudes activas del mismo día."""
@@ -11671,8 +12195,8 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                                                textColor=PDF_COLOR_ACCENT,
                                                alignment=TA_CENTER, spaceBefore=6, spaceAfter=3)
                             ))
-                            elements.append(RLImage(img_gtt,
-                                                    width=gtt_grafica_w, height=gtt_grafica_h))
+                            elements.append(Image(img_gtt,
+                                                  width=gtt_grafica_w, height=gtt_grafica_h))
                             elements.append(Spacer(1, 0.06*inch))
                             elements.append(Paragraph(
                                 "Ref. ADA: Basal <100 mg/dL normal; 2h <140 normal, "

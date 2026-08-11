@@ -258,7 +258,7 @@ class GestorEquipos:
             f"IIF(ProximoMantenimiento < #{fecha_hoy}#, 'VENCIDO', 'PROXIMO') AS EstadoMant "
             f"FROM [Equipos] "
             f"WHERE Activo=True AND ProximoMantenimiento IS NOT NULL "
-            f"AND ProximoMantenimiento <= #{fecha_limite}# "
+            f"AND ProximoMantenimiento <= #{fecha_limite} 23:59:59# "
             f"ORDER BY ProximoMantenimiento ASC"
         )
         return self.db.query(sql) or []

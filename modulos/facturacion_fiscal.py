@@ -779,7 +779,7 @@ class FacturacionFiscal:
             FROM Facturas f
             INNER JOIN Pacientes p ON f.PacienteID = p.PacienteID
             WHERE f.FechaEmision BETWEEN #{fecha_desde.strftime('%m/%d/%Y')}#
-                AND #{fecha_hasta.strftime('%m/%d/%Y')}#
+                AND #{fecha_hasta.strftime('%m/%d/%Y')} 23:59:59#
             ORDER BY f.FechaEmision, f.NumeroFactura
         """)
 
@@ -845,7 +845,7 @@ class FacturacionFiscal:
                 SUM(CASE WHEN Anulada=False THEN MontoIGTF ELSE 0 END) as TotalIGTF
             FROM Facturas
             WHERE FechaEmision BETWEEN #{fecha_desde.strftime('%m/%d/%Y')}#
-                AND #{fecha_hasta.strftime('%m/%d/%Y')}#
+                AND #{fecha_hasta.strftime('%m/%d/%Y')} 23:59:59#
         """)
 
         return {
@@ -983,7 +983,7 @@ class FacturacionFiscal:
             f"FROM [CuentasPorPagar] AS cp "
             f"LEFT JOIN [Proveedores] AS p ON cp.ProveedorID = p.ProveedorID "
             f"WHERE cp.FechaEmision >= #{fecha_desde.strftime('%m/%d/%Y')}# "
-            f"AND cp.FechaEmision <= #{fecha_hasta.strftime('%m/%d/%Y')}# "
+            f"AND cp.FechaEmision <= #{fecha_hasta.strftime('%m/%d/%Y')} 23:59:59# "
             f"ORDER BY cp.FechaEmision ASC"
         )
         compras = self.db.query(sql) or []
@@ -1034,7 +1034,7 @@ class FacturacionFiscal:
             f"SELECT SUM(MontoRetencion) AS TotalRetIVA "
             f"FROM [RetencionesISLR] "
             f"WHERE FechaDocumento >= #{fecha_desde.strftime('%m/%d/%Y')}# "
-            f"AND FechaDocumento <= #{fecha_hasta.strftime('%m/%d/%Y')}#"
+            f"AND FechaDocumento <= #{fecha_hasta.strftime('%m/%d/%Y')} 23:59:59#"
         )
         try:
             ret_result = self.db.query_one(ret_iva_sql) or {}

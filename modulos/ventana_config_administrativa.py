@@ -19,6 +19,12 @@ class VentanaConfigAdministrativa:
     Ventana para configurar todos los aspectos administrativos del laboratorio.
     """
 
+    # Destinos posibles para las cotizaciones (ver modulos/impresoras.py)
+    _ETIQUETAS_ROL_COTIZACION = {
+        'facturacion': 'Impresora de facturación',
+        'resultados': 'Impresora de resultados',
+    }
+
     def __init__(self, parent, db, callback_guardar=None):
         """
         Inicializa la ventana de configuración administrativa.
@@ -79,6 +85,7 @@ class VentanaConfigAdministrativa:
 
         # Crear pestañas
         self._crear_tab_informacion()
+        self._crear_tab_apariencia()
         self._crear_tab_impresion()
         self._crear_tab_resultados()
         self._crear_tab_financiera()
@@ -250,6 +257,58 @@ class VentanaConfigAdministrativa:
 
         return tab, scrollable_frame
 
+    # Descripción de cada tema, para que la elección no sea a ciegas
+    _TEMAS_VENTANA = (
+        ('claro',  '☀️  Tema claro',
+         'Fondo blanco y tarjetas de borde fino. Recomendado para recepciones '
+         'con mucha luz natural o fluorescente:\nel texto oscuro sobre fondo '
+         'claro cansa menos la vista en ambientes muy iluminados.'),
+        ('oscuro', '🌙  Tema oscuro',
+         'Superficies oscuras con acento cian, estilo panel de control. '
+         'Recomendado para turnos nocturnos o salas\ncon poca luz, y para '
+         'pantallas donde el brillo del fondo blanco molesta.'),
+    )
+
+    def _crear_tab_apariencia(self):
+        """Crea la pestaña de apariencia de las ventanas de trabajo."""
+        tab, marco = self._crear_tab_con_scroll("🎨 Apariencia")
+
+        row = 0
+        ttk.Label(marco, text="Tema de las ventanas de trabajo:",
+                  font=('Segoe UI', 11, 'bold')).grid(
+                      row=row, column=0, sticky='w', pady=(4, 2))
+        row += 1
+
+        ttk.Label(marco,
+                  text="Se aplica a la ventana de Registro de Solicitud. El cambio "
+                       "se ve al abrirla de nuevo;\nno hace falta reiniciar el "
+                       "programa.",
+                  foreground='#64748b', justify='left').grid(
+                      row=row, column=0, columnspan=2, sticky='w', padx=20)
+        row += 1
+
+        self.var_tema_ventanas = tk.StringVar(value='claro')
+        for valor, etiqueta, ayuda in self._TEMAS_VENTANA:
+            caja = ttk.Frame(marco)
+            caja.grid(row=row, column=0, columnspan=2, sticky='w',
+                      padx=20, pady=(12, 0))
+            ttk.Radiobutton(caja, text=etiqueta, value=valor,
+                            variable=self.var_tema_ventanas).pack(anchor='w')
+            ttk.Label(caja, text=ayuda, foreground='#94a3b8',
+                      justify='left').pack(anchor='w', padx=24)
+            row += 1
+
+        ttk.Separator(marco, orient='horizontal').grid(
+            row=row, column=0, columnspan=2, sticky='ew', pady=18)
+        row += 1
+
+        ttk.Label(marco,
+                  text="El resto de las ventanas del sistema conservan su "
+                       "apariencia habitual: sólo el Registro de\nSolicitud "
+                       "está preparado para ambos temas.",
+                  foreground='#94a3b8', justify='left').grid(
+                      row=row, column=0, columnspan=2, sticky='w', padx=20)
+
     def _crear_tab_impresion(self):
         """Crea la pestaña de configuración de impresión."""
         tab, scrollable_frame = self._crear_tab_con_scroll("🖨️ Impresión")
@@ -350,6 +409,32 @@ class VentanaConfigAdministrativa:
         self.lbl_impresoras_estado.pack(side='left', padx=10)
         row += 1
 
+        # ── Destino de las cotizaciones ───────────────────────────────────
+        from modulos.impresoras import ROL_COTIZACIONES_DEFECTO
+
+        cot_frame = ttk.Frame(scrollable_frame)
+        cot_frame.grid(row=row, column=0, columnspan=2, sticky='w',
+                       padx=20, pady=(12, 0))
+        ttk.Label(cot_frame, text="Las cotizaciones salen por:").pack(side='left')
+        self.var_rol_cotizaciones = tk.StringVar(
+            value=self._ETIQUETAS_ROL_COTIZACION[ROL_COTIZACIONES_DEFECTO])
+        self.combo_rol_cotizaciones = ttk.Combobox(
+            cot_frame, textvariable=self.var_rol_cotizaciones,
+            values=list(self._ETIQUETAS_ROL_COTIZACION.values()),
+            state='readonly', width=34)
+        self.combo_rol_cotizaciones.pack(side='left', padx=8)
+        row += 1
+
+        ttk.Label(scrollable_frame,
+                  text="La cotización se imprime en hoja completa, así que "
+                       "puede salir por la impresora de resultados\nsi la de "
+                       "facturación está reservada para papel fiscal o matriz "
+                       "de puntos.",
+                  foreground='#94a3b8', justify='left').grid(
+                      row=row, column=0, columnspan=2, sticky='w',
+                      padx=20, pady=(2, 0))
+        row += 1
+
         ttk.Label(scrollable_frame,
                   text="«Directo» envía el documento sin mostrar el diálogo de "
                        "impresión: recomendado para recibos y etiquetas.\n"
@@ -421,7 +506,16 @@ class VentanaConfigAdministrativa:
 
     def _cargar_impresoras_en_interfaz(self, config):
         """Refleja en la interfaz las impresoras guardadas en la BD."""
-        from modulos.impresoras import ROLES, ORDEN_ROLES
+        from modulos.impresoras import (ROLES, ORDEN_ROLES, ROLES_COTIZACION,
+                                        ROL_COTIZACIONES_DEFECTO,
+                                        COLUMNA_ROL_COTIZACIONES)
+
+        guardado = (config.get(COLUMNA_ROL_COTIZACIONES) or '').strip().lower()
+        if guardado not in ROLES_COTIZACION:
+            guardado = ROL_COTIZACIONES_DEFECTO
+        if hasattr(self, 'var_rol_cotizaciones'):
+            self.var_rol_cotizaciones.set(
+                self._ETIQUETAS_ROL_COTIZACION[guardado])
 
         for rol in ORDEN_ROLES:
             info = ROLES[rol]
@@ -457,6 +551,18 @@ class VentanaConfigAdministrativa:
                 'directo': bool(self.vars_impresora_directo[rol].get()),
             }
         return asignaciones
+
+    def _rol_cotizaciones_seleccionado(self):
+        """Rol elegido para las cotizaciones, o None si no está en pantalla."""
+        from modulos.impresoras import ROL_COTIZACIONES_DEFECTO
+
+        if not hasattr(self, 'var_rol_cotizaciones'):
+            return None
+        etiqueta = self.var_rol_cotizaciones.get()
+        for rol, texto in self._ETIQUETAS_ROL_COTIZACION.items():
+            if texto == etiqueta:
+                return rol
+        return ROL_COTIZACIONES_DEFECTO
 
     def _crear_tab_resultados(self):
         """Crea la pestaña de configuración de visualización de resultados."""
@@ -994,6 +1100,12 @@ class VentanaConfigAdministrativa:
             self.entry_web.delete(0, tk.END)
             self.entry_web.insert(0, config.get('SitioWeb') or '')
 
+            # Apariencia
+            if hasattr(self, 'var_tema_ventanas'):
+                tema = str(config.get('TemaVentanas') or '').strip().lower()
+                validos = [v for v, _e, _a in self._TEMAS_VENTANA]
+                self.var_tema_ventanas.set(tema if tema in validos else 'claro')
+
             # Logo
             if config.get('RutaLogo'):
                 import os
@@ -1155,6 +1267,11 @@ class VentanaConfigAdministrativa:
 
             self.configurador.actualizar_informacion_basica(datos_info)
 
+            # Apariencia de las ventanas de trabajo
+            if hasattr(self, 'var_tema_ventanas'):
+                self.configurador.actualizar_tema_ventanas(
+                    self.var_tema_ventanas.get())
+
             # Logo
             if self.logo_ruta_temporal:
                 self.configurador.guardar_logo(self.logo_ruta_temporal)
@@ -1177,7 +1294,8 @@ class VentanaConfigAdministrativa:
 
             # Impresoras por rol (se permite repetir una misma impresora)
             self.configurador.actualizar_configuracion_impresoras(
-                self._recolectar_impresoras())
+                self._recolectar_impresoras(),
+                self._rol_cotizaciones_seleccionado())
 
             # Resultados
             datos_res = {

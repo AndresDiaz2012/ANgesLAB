@@ -28,7 +28,8 @@ Copyright (c) 2024-2026 ANgesLAB Solutions
 import sys
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
+# El script vive en scripts/migraciones/, la aplicacion dos niveles arriba
+BASE_DIR = Path(__file__).resolve().parents[2]
 
 NOMBRE_PRUEBA = "PERFIL DE RESISTENCIA A INSULINA"
 

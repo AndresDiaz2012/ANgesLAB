@@ -61,6 +61,10 @@ class ConfiguradorAdministrativo:
         'ImpresoraRecibosDirecto': 'BIT',
         'ImpresoraEtiquetas': 'TEXT(255)',
         'ImpresoraEtiquetasDirecto': 'BIT',
+        # Rol por el que salen las cotizaciones: facturacion o resultados
+        'RolCotizaciones': 'TEXT(20)',
+        # Apariencia de las ventanas de trabajo: 'claro' u 'oscuro'
+        'TemaVentanas': 'TEXT(10)',
         # Resultados
         'MostrarValoresReferencia': 'BIT',
         'MostrarUnidades': 'BIT',
@@ -242,7 +246,8 @@ class ConfiguradorAdministrativo:
             logging.getLogger("angeslab.config_administrativa").warning("Error al actualizar configuración de impresión: %s", e)
             return False
 
-    def actualizar_configuracion_impresoras(self, asignaciones):
+    def actualizar_configuracion_impresoras(self, asignaciones,
+                                            rol_cotizaciones=None):
         """
         Guarda la impresora asignada a cada rol.
 
@@ -250,13 +255,50 @@ class ConfiguradorAdministrativo:
             asignaciones (dict): {rol: {'impresora': str, 'directo': bool}}
                 Roles válidos: resultados, facturacion, recibos, etiquetas.
                 Se permite repetir la misma impresora en varios roles.
+            rol_cotizaciones (str): 'facturacion' o 'resultados'; indica por
+                cuál impresora salen las cotizaciones. None deja el actual.
         """
         try:
             from modulos.impresoras import GestorImpresoras
-            return GestorImpresoras(self.db).guardar(asignaciones)
+            return GestorImpresoras(self.db).guardar(asignaciones,
+                                                     rol_cotizaciones)
         except Exception as e:
             logging.getLogger("angeslab.config_administrativa").warning(
                 "Error al actualizar impresoras: %s", e)
+            return False
+
+    # Valores admitidos para el tema de las ventanas de trabajo
+    TEMAS_VALIDOS = ('claro', 'oscuro')
+    TEMA_POR_DEFECTO = 'claro'
+
+    def obtener_tema_ventanas(self):
+        """Devuelve 'claro' u 'oscuro'; nunca lanza excepcion."""
+        try:
+            cfg = self.obtener_configuracion() or {}
+            valor = str(cfg.get('TemaVentanas') or '').strip().lower()
+            if valor in self.TEMAS_VALIDOS:
+                return valor
+        except Exception as e:
+            logging.getLogger("angeslab.config_administrativa").warning(
+                "No se pudo leer el tema de ventanas: %s", e)
+        return self.TEMA_POR_DEFECTO
+
+    def actualizar_tema_ventanas(self, tema):
+        """Guarda el tema elegido para las ventanas de trabajo.
+
+        Args:
+            tema (str): 'claro' u 'oscuro'. Cualquier otro valor se ignora.
+        """
+        valor = str(tema or '').strip().lower()
+        if valor not in self.TEMAS_VALIDOS:
+            return False
+        try:
+            self.db.execute(
+                f"UPDATE ConfiguracionLaboratorio SET [TemaVentanas] = '{valor}'")
+            return True
+        except Exception as e:
+            logging.getLogger("angeslab.config_administrativa").warning(
+                "Error al guardar el tema de ventanas: %s", e)
             return False
 
     def actualizar_configuracion_resultados(self, datos):

@@ -18,16 +18,21 @@ Modulos principales (importados con try/except por ANgesLAB.pyw):
 - historial_clinico: Historial clinico y comparativas
 - splash_screen: Pantalla de inicio
 
-Modulos auxiliares (disponibles para uso futuro):
-- reportes_resultados: Generacion de reportes por area
-- plantillas_reportes: Plantillas de reportes en HTML (incluye R40-R43 Microbiologia)
-- form_inf_config: Configuracion de formularios de impresion (incluye Form_Inf_Microbiologia)
-- flujo_trabajo: Gestion del flujo de trabajo
+Modulos auxiliares:
 - utilidades_db: Utilidades de mantenimiento de BD
-- reportes_especificaciones: Reportes segun especificaciones tecnicas
 - envio_resultados: Envio de resultados por email/PDF
 - whatsapp_envio: Envio por WhatsApp con el PDF adjuntado automaticamente
 - antibioticos_restricciones: Aplicabilidad de antibioticos por edad y gestacion
+- impresoras: Asignacion de impresora por rol y envio directo por GDI
+- cotizaciones: Cotizaciones/presupuestos y su conversion a solicitud
+- portal_resultados: Portal web de consulta con QR
+- tasas_cambio: Tasas BCV y conversion multi-moneda
+- ia_interpretacion / graficas_historial: Apoyo clinico en el historial
+
+Nota: en la limpieza de 2026-08 se eliminaron cinco modulos que ningun archivo
+importaba (reportes_resultados, plantillas_reportes, form_inf_config,
+flujo_trabajo y reportes_especificaciones). Siguen disponibles en el historial
+de git si alguna vez se quieren reactivar.
 
 Copyright 2024-2026 ANgesLAB Solutions
 ================================================================================

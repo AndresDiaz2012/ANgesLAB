@@ -298,22 +298,14 @@ class QRGenerator:
         return '\n'.join(lineas)
 
     @staticmethod
-    def generar_qr_image(numero_solicitud, fecha_solicitud, nombre_paciente,
+    def generar_qr_buffer(numero_solicitud, fecha_solicitud, nombre_paciente,
                           size_px=150, cedula='', nombre_lab='', estado=''):
         """
-        Genera imagen QR y retorna un ImageReader listo para ReportLab.
+        Genera el PNG del QR y lo devuelve como BytesIO (o None).
 
-        Args:
-            numero_solicitud: Número de la solicitud
-            fecha_solicitud: Fecha en formato dd/mm/yyyy
-            nombre_paciente: Nombre completo del paciente
-            size_px: Tamaño en píxeles de la imagen
-            cedula: Cédula del paciente
-            nombre_lab: Nombre del laboratorio
-            estado: Estado de la solicitud
-
-        Returns:
-            ImageReader con la imagen PNG, o None si no está disponible
+        Es la base de generar_qr_image() y generar_rl_image(): el buffer
+        crudo sirve para ambos consumidores, mientras que el ImageReader
+        solo lo acepta canvas.drawImage().
         """
         if not QRGenerator.disponible():
             return None
@@ -341,13 +333,37 @@ class QRGenerator:
             buf = io.BytesIO()
             img.save(buf, format='PNG')
             buf.seek(0)
-            # Envolver en ImageReader para compatibilidad con canvas.drawImage
-            if REPORTLAB_OK:
-                return ImageReader(buf)
             return buf
 
         except Exception:
             return None
+
+    @staticmethod
+    def generar_qr_image(numero_solicitud, fecha_solicitud, nombre_paciente,
+                          size_px=150, cedula='', nombre_lab='', estado=''):
+        """
+        Genera imagen QR y retorna un ImageReader listo para ReportLab.
+
+        Args:
+            numero_solicitud: Número de la solicitud
+            fecha_solicitud: Fecha en formato dd/mm/yyyy
+            nombre_paciente: Nombre completo del paciente
+            size_px: Tamaño en píxeles de la imagen
+            cedula: Cédula del paciente
+            nombre_lab: Nombre del laboratorio
+            estado: Estado de la solicitud
+
+        Returns:
+            ImageReader con la imagen PNG, o None si no está disponible
+        """
+        buf = QRGenerator.generar_qr_buffer(
+            numero_solicitud, fecha_solicitud, nombre_paciente,
+            size_px, cedula, nombre_lab, estado
+        )
+        if buf is None:
+            return None
+        # Envolver en ImageReader para compatibilidad con canvas.drawImage
+        return ImageReader(buf) if REPORTLAB_OK else buf
 
     @staticmethod
     def generar_rl_image(numero_solicitud, fecha_solicitud, nombre_paciente, width, height,
@@ -365,7 +381,8 @@ class QRGenerator:
         if not REPORTLAB_OK:
             return None
 
-        buf = QRGenerator.generar_qr_image(
+        # Debe ser el buffer crudo: RLImage no acepta un ImageReader
+        buf = QRGenerator.generar_qr_buffer(
             numero_solicitud, fecha_solicitud, nombre_paciente,
             cedula=cedula, nombre_lab=nombre_lab, estado=estado
         )
