@@ -452,8 +452,8 @@ class GeneradorFacturaPDF:
         letras = ''
         try:
             letras = monto_en_letras(total, moneda) or ''
-        except Exception:
-            pass
+        except Exception as _exc:
+            _log.warning("generar: %s", _exc)
         if letras:
             story.append(Spacer(1, 6))
             story.append(Paragraph(

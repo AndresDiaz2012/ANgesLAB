@@ -2892,8 +2892,8 @@ class MainApplication:
                 if params_agregados > 0:
                     pass  # Prueba creada/actualizada correctamente
 
-        except Exception:
-            pass
+        except Exception as _exc:
+            _log.warning("_crear_catalogo_microbiologia: %s", _exc)
 
     def _asegurar_tabla_pendientes(self):
         """Crea la tabla Pendientes en la BD si no existe."""
@@ -5883,8 +5883,8 @@ class MainApplication:
             for widget in self.frame_total_pagar.winfo_children():
                 if isinstance(widget, tk.Label) and 'TOTAL' in widget.cget('text'):
                     widget.config(bg=self.frame_total_pagar.cget('bg'))
-        except Exception:
-            pass
+        except Exception as _exc:
+            _log.warning("actualizar_total_moneda: %s", _exc)
 
     # ── Paciente inline: auto-búsqueda y llenado ──────────────────
 
@@ -7625,8 +7625,8 @@ class MainApplication:
                         UsuarioAnula INTEGER
                     )
                 """)
-            except Exception:
-                pass
+            except Exception as _exc:
+                _log.warning("_verificar_tabla_recibos: %s", _exc)
 
     def imprimir_comprobante(self):
         """Genera un comprobante simple de la solicitud"""
@@ -8691,8 +8691,8 @@ Forma de Pago: {self.combo_forma_pago.get()}
                     from modulos.valores_referencia import GestorValoresReferencia
                     _grupo_etario = GestorValoresReferencia.clasificar_grupo_etario(
                         edad_dias, sexo_valor)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    _log.warning("cargar_pruebas_resultado: %s", _exc)
 
             # Colores y iconos por grupo
             _grupo_config = {
@@ -8720,8 +8720,8 @@ Forma de Pago: {self.combo_forma_pago.get()}
             if hasattr(self, '_banner_demo_frame') and self._banner_demo_frame:
                 try:
                     self._banner_demo_frame.destroy()
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    _log.warning("cargar_pruebas_resultado: %s", _exc)
 
             self._banner_demo_frame = tk.Frame(self.pruebas_res_frame, bg='white')
             self._banner_demo_frame.pack(fill='x', padx=5, pady=(2, 5))
@@ -9047,8 +9047,8 @@ Forma de Pago: {self.combo_forma_pago.get()}
                                 )
                                 if ref_especifico:
                                     valor_ref = ref_especifico
-                            except Exception:
-                                pass  # Fallback silencioso al valor generico
+                            except Exception as _exc:
+                                _log.warning("cargar_pruebas_resultado: %s", _exc)
 
                         # Obtener resultado guardado si existe
                         resultado_guardado = db.query_one(f"""
@@ -9083,8 +9083,8 @@ Forma de Pago: {self.combo_forma_pago.get()}
                                     ORDER BY Frecuencia DESC, Orden ASC
                                 """)
                                 opciones_param = [o['Valor'] for o in opts] if opts else []
-                            except Exception:
-                                pass
+                            except Exception as _exc:
+                                _log.warning("cargar_pruebas_resultado: %s", _exc)
 
                             # Si no hay opciones, usar opciones genericas basadas en el nombre
                             if not opciones_param:
@@ -9544,8 +9544,8 @@ Forma de Pago: {self.combo_forma_pago.get()}
                                              '<<ComboboxSelected>>'):
                                     try:
                                         entry_param.bind(_sec, _refrescar_germenes, add='+')
-                                    except Exception:
-                                        pass
+                                    except Exception as _exc:
+                                        _log.warning("cargar_pruebas_resultado: %s", _exc)
 
                         self.parametro_entries[detalle_id].append({
                             'param_id': param_id,
@@ -9871,8 +9871,8 @@ Forma de Pago: {self.combo_forma_pago.get()}
                         'UsuarioResultado': self.user.get('UsuarioID', 1)
                     }, f"DetalleID={detalle_id}")
                     count += 1
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    _log.warning("guardar_todos_resultados: %s", _exc)
 
         if count > 0:
             messagebox.showinfo("Éxito", f"{count} resultados guardados")
@@ -9893,8 +9893,8 @@ Forma de Pago: {self.combo_forma_pago.get()}
                         'UsuarioResultado': self.user.get('UsuarioID', 1)
                     }, f"DetalleID={detalle_id}")
                     count += 1
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    _log.warning("validar_todos_resultados: %s", _exc)
 
         if count > 0:
             # Actualizar estado de la solicitud
@@ -9903,8 +9903,8 @@ Forma de Pago: {self.combo_forma_pago.get()}
                 try:
                     db.update('Solicitudes', {'EstadoSolicitud': 'Completada'},
                               f"SolicitudID={sol_id}")
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    _log.warning("validar_todos_resultados: %s", _exc)
 
             messagebox.showinfo("Éxito",
                                 f"{count} resultados validados\nSolicitud marcada como Completada")
@@ -10326,8 +10326,8 @@ Forma de Pago: {self.combo_forma_pago.get()}
                     fuera_de_rango = False
                     try:
                         tipo_alerta, fuera_de_rango = self._calcular_alerta(valor, valor_ref)
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        _log.warning("guardar_resultados_parametros: %s", _exc)
 
                     campos = {
                         'Valor': valor,
@@ -10371,8 +10371,8 @@ Forma de Pago: {self.combo_forma_pago.get()}
                 # ── 2. Operaciones secundarias (no bloquean) ──
                 try:
                     self.registrar_uso_valor(param_id, valor)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    _log.warning("guardar_resultados_parametros: %s", _exc)
                 try:
                     if self.auditoria:
                         # Si el resultado ya estaba validado, esto es una
@@ -10385,8 +10385,8 @@ Forma de Pago: {self.combo_forma_pago.get()}
                         self.auditoria.despues_guardar_resultado(
                             detalle_id, param_id, valor, 'Capturado',
                             estado_anterior, _accion)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    _log.warning("guardar_resultados_parametros: %s", _exc)
 
         # Mostrar errores si los hubo
         if errores and not silencioso:
@@ -10401,8 +10401,8 @@ Forma de Pago: {self.combo_forma_pago.get()}
                     'Estado': 'Capturado',
                     'FechaResultado': datetime.now()
                 }, f"DetalleID={detalle_id}")
-            except Exception:
-                pass
+            except Exception as _exc:
+                _log.warning("guardar_resultados_parametros: %s", _exc)
 
             # Ejecutar cálculos automáticos (per-test)
             calculos_realizados = self.ejecutar_calculos_automaticos(detalle_id)
@@ -10414,8 +10414,8 @@ Forma de Pago: {self.combo_forma_pago.get()}
                 if det_info:
                     cross = self._ejecutar_calculos_cross_test(det_info['SolicitudID'])
                     calculos_realizados += cross
-            except Exception:
-                pass
+            except Exception as _exc:
+                _log.warning("guardar_resultados_parametros: %s", _exc)
 
             if not silencioso:
                 if calculos_realizados > 0:
@@ -10543,8 +10543,8 @@ Forma de Pago: {self.combo_forma_pago.get()}
                         hoy = datetime.now()
                         edad = hoy.year - fn.year - ((hoy.month, hoy.day) < (fn.month, fn.day))
                         valores['edad'] = edad
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        _log.warning("ejecutar_calculos_automaticos: %s", _exc)
 
             resultados = calculador.ejecutar_calculos(valores)
 
@@ -10617,11 +10617,11 @@ Forma de Pago: {self.combo_forma_pago.get()}
                                     entry.insert(0, valor_str)
                                     try:
                                         entry.config(fg='#2196F3')  # Color azul para valores calculados
-                                    except Exception:
-                                        pass
+                                    except Exception as _exc:
+                                        _log.warning("ejecutar_calculos_automaticos: %s", _exc)
                                     break
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        _log.warning("ejecutar_calculos_automaticos: %s", _exc)
 
             return calculos_guardados
 
@@ -10752,8 +10752,8 @@ Forma de Pago: {self.combo_forma_pago.get()}
                         hoy = datetime.now()
                         edad = hoy.year - fn.year - ((hoy.month, hoy.day) < (fn.month, fn.day))
                         valores_global['edad'] = edad
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        _log.warning("_ejecutar_calculos_cross_test: %s", _exc)
 
             # 2. Ejecutar cálculos con el pool combinado
             resultados = calculador.ejecutar_calculos(valores_global)
@@ -10816,12 +10816,12 @@ Forma de Pago: {self.combo_forma_pago.get()}
                                     entry.insert(0, valor_str)
                                     try:
                                         entry.config(fg='#2196F3')
-                                    except Exception:
-                                        pass
+                                    except Exception as _exc:
+                                        _log.warning("_ejecutar_calculos_cross_test: %s", _exc)
                                     break
 
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        _log.warning("_ejecutar_calculos_cross_test: %s", _exc)
 
             return calculos_guardados
 
@@ -10904,8 +10904,8 @@ Forma de Pago: {self.combo_forma_pago.get()}
                         fuera_de_rango = False
                         try:
                             tipo_alerta, fuera_de_rango = self._calcular_alerta(valor, valor_ref)
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            _log.warning("guardar_todos_parametros: %s", _exc)
 
                         campos = {
                             'Valor': valor,
@@ -10941,8 +10941,8 @@ Forma de Pago: {self.combo_forma_pago.get()}
                         'Estado': 'Capturado',
                         'FechaResultado': datetime.now()
                     }, f"DetalleID={detalle_id}")
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    _log.warning("guardar_todos_parametros: %s", _exc)
 
         # Guardar resultados simples
         for detalle_id, data in self.resultado_entries.items():
@@ -10955,8 +10955,8 @@ Forma de Pago: {self.combo_forma_pago.get()}
                         'FechaResultado': datetime.now()
                     }, f"DetalleID={detalle_id}")
                     total += 1
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    _log.warning("guardar_todos_parametros: %s", _exc)
 
         # Mostrar errores si los hubo
         if errores_total and not silencioso:
@@ -10978,8 +10978,8 @@ Forma de Pago: {self.combo_forma_pago.get()}
                 if det_info:
                     cross = self._ejecutar_calculos_cross_test(det_info['SolicitudID'])
                     total_calculos += cross
-            except Exception:
-                pass
+            except Exception as _exc:
+                _log.warning("guardar_todos_parametros: %s", _exc)
 
             if not silencioso:
                 if total_calculos > 0:
@@ -11023,8 +11023,8 @@ Forma de Pago: {self.combo_forma_pago.get()}
             try:
                 db.execute(f"UPDATE ResultadosParametros SET Estado = 'Validado' WHERE DetalleID = {detalle_id}")
                 db.update('DetalleSolicitudes', {'Estado': 'Validado'}, f"DetalleID={detalle_id}")
-            except Exception:
-                pass
+            except Exception as _exc:
+                _log.warning("validar_todos_parametros: %s", _exc)
 
         # Validar resultados simples
         for detalle_id, data in self.resultado_entries.items():
@@ -11035,8 +11035,8 @@ Forma de Pago: {self.combo_forma_pago.get()}
                         'Estado': 'Validado',
                         'FechaResultado': datetime.now()
                     }, f"DetalleID={detalle_id}")
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    _log.warning("validar_todos_parametros: %s", _exc)
 
         # Marcar solicitud como completada
         sol_id = getattr(self, 'sol_id_resultado', None)
@@ -11044,8 +11044,8 @@ Forma de Pago: {self.combo_forma_pago.get()}
             try:
                 db.update('Solicitudes', {'EstadoSolicitud': 'Completada'},
                           f"SolicitudID={sol_id}")
-            except Exception:
-                pass
+            except Exception as _exc:
+                _log.warning("validar_todos_parametros: %s", _exc)
 
         messagebox.showinfo("Éxito",
                             f"Todos los resultados validados\n"
@@ -11561,8 +11561,8 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                     )
                     for bio in (bios_todos or []):
                         bioanalistas_por_area[bio.get('AreaID') or 0] = bio
-            except Exception:
-                pass  # Si falla, usa fallback (NombreDirector)
+            except Exception as _exc:
+                _log.warning("generar_pdf_resultados: %s", _exc)
 
             # Sufijo de area para no confundir informes parciales con el completo
             _sufijo_area = ''
@@ -11669,8 +11669,8 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                     hoy = datetime.now()
                     edad = hoy.year - fn.year - ((hoy.month, hoy.day) < (fn.month, fn.day))
                     edad_texto = f"{edad} Años"
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    _log.warning("generar_pdf_resultados: %s", _exc)
 
             # Información del laboratorio
             nombre_lab = config_lab.get('NombreLaboratorio', 'LABORATORIO CLÍNICO') if config_lab else 'LABORATORIO CLÍNICO'
@@ -12279,8 +12279,8 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                                 )
                                 if _ref_esp:
                                     vref = _ref_esp
-                            except Exception:
-                                pass
+                            except Exception as _exc:
+                                _log.warning("generar_pdf_resultados: %s", _exc)
                         if not vref and resultado:
                             vref = str(resultado.get('ValorReferencia') or '').strip()
                         if not vref:
@@ -12837,8 +12837,8 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                             )
                             if _ref_esp:
                                 valor_ref = _ref_esp
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            _log.warning("generar_pdf_resultados: %s", _exc)
                     # Para parámetros calculados: resolver referencia por sexo+edad
                     if not valor_ref and CALCULOS_AUTOMATICOS_DISPONIBLE:
                         try:
@@ -12852,8 +12852,8 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                                 _ref_calc = _calc.obtener_referencia_calculo(_nombre_norm, _pdf_sexo, _edad_pac)
                                 if _ref_calc:
                                     valor_ref = _ref_calc
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            _log.warning("generar_pdf_resultados: %s", _exc)
                     # Fallback a lo guardado en ResultadosParametros
                     if not valor_ref and resultado:
                         valor_ref = str(resultado.get('ValorReferencia') or '').strip()
@@ -18459,8 +18459,8 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
                     hoy = datetime.now()
                     anios = hoy.year - fn.year - ((hoy.month, hoy.day) < (fn.month, fn.day))
                     edad = f" | {anios} años"
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    _log.warning("cargar_pruebas_resultado_vet: %s", _exc)
 
             sexo = sol.get('Sexo') or ''
             sexo_txt = f" | {'Macho' if sexo == 'M' else 'Hembra'}" if sexo else ""
@@ -18719,8 +18719,8 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
                 self.gestor_vet.db.update('DetalleSolicitudesVet', {
                     'Estado': 'Capturado'
                 }, f"DetalleVetID = {detalle_id}")
-            except Exception:
-                pass
+            except Exception as _exc:
+                _log.warning("guardar_resultados_vet: %s", _exc)
 
             # Ejecutar calculos automaticos
             calc = self.gestor_vet.ejecutar_calculos_hematologia(detalle_id)
@@ -18776,8 +18776,8 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
         try:
             self.gestor_vet.db.update('SolicitudesVet', {'EstadoSolicitud': 'Completado'},
                                       f"SolicitudVetID = {self.sol_id_resultado_vet}")
-        except Exception:
-            pass
+        except Exception as _exc:
+            _log.warning("validar_todos_vet: %s", _exc)
 
         messagebox.showinfo("Éxito", "Todos los resultados validados")
         self.cargar_pruebas_resultado_vet()
@@ -18840,8 +18840,8 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
                 bioanalistas_vet_precarga = db.query(
                     "SELECT b.BioanalistaID FROM Bioanalistas b WHERE b.Activo = True"
                 )
-            except Exception:
-                pass
+            except Exception as _exc:
+                _log.warning("generar_pdf_resultado_vet: %s", _exc)
 
             left_margin = 0.5 * inch
             right_margin = 0.5 * inch
@@ -18865,8 +18865,8 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
                     hoy = datetime.now()
                     edad = hoy.year - fn.year - ((hoy.month, hoy.day) < (fn.month, fn.day))
                     edad_texto = f"{edad} Años"
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    _log.warning("generar_pdf_resultado_vet: %s", _exc)
 
             nombre_lab = config_lab.get('NombreLaboratorio', 'LABORATORIO CLÍNICO') if config_lab else 'LABORATORIO CLÍNICO'
             direccion_lab = config_lab.get('Direccion', '') if config_lab else ''
@@ -18960,8 +18960,8 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
                     "FROM Bioanalistas b LEFT JOIN Areas a ON b.AreaID = a.AreaID "
                     "WHERE b.Activo = True ORDER BY b.NombreCompleto"
                 )
-            except Exception:
-                pass
+            except Exception as _exc:
+                _log.warning("generar_pdf_resultado_vet: %s", _exc)
 
             def draw_footer(canvas_pdf, doc):
                 canvas_pdf.saveState()

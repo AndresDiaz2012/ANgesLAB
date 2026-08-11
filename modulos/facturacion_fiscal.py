@@ -27,6 +27,16 @@ from datetime import datetime, date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 import os
 
+
+try:
+    from modulos.logging_config import obtener_logger
+    _log = obtener_logger('angeslab.facturacion_fiscal')
+except Exception:  # pragma: no cover - respaldo si falta el modulo
+    import logging as _logging
+    _log = _logging.getLogger('angeslab.facturacion_fiscal')
+    _log.addHandler(_logging.NullHandler())
+
+
 # ============================================================================
 # CONFIGURACION FISCAL
 # ============================================================================
@@ -85,8 +95,8 @@ class ConfiguracionFiscal:
         config = None
         try:
             config = db.query_one("SELECT * FROM ConfiguracionLaboratorio")
-        except Exception:
-            pass
+        except Exception as _exc:
+            _log.warning("cargar_datos_contribuyente: %s", _exc)
         if not config:
             config = db.query_one("SELECT * FROM ConfiguracionSistema")
         return {
@@ -409,8 +419,8 @@ class FacturacionFiscal:
             if gestor_tasas:
                 try:
                     tasa_cop = gestor_tasas.get_tasa_actual('COP_USD')
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    _log.warning("crear_factura: %s", _exc)
             tasa_cop_dec = Decimal(str(tasa_cop))
             if tasa_cop_dec > 0:
                 monto_total_usd = float((total_dec / tasa_cop_dec).quantize(
@@ -681,8 +691,8 @@ class FacturacionFiscal:
                 forma_pago_nombre = fp['Nombre']
                 if forma_pago_nombre in ConfiguracionFiscal.FORMAS_PAGO_IGTF:
                     aplica_igtf = True
-        except Exception:
-            pass
+        except Exception as _exc:
+            _log.warning("registrar_cobro: %s", _exc)
 
         if aplica_igtf and self.config.get('igtf_activo', True):
             tasa_igtf = self.config.get('tasa_igtf', ConfiguracionFiscal.TASA_IGTF)
@@ -1039,8 +1049,8 @@ class FacturacionFiscal:
         try:
             ret_result = self.db.query_one(ret_iva_sql) or {}
             totales['total_retenciones_islr'] = Decimal(str(ret_result.get('TotalRetIVA', 0) or 0))
-        except Exception:
-            pass
+        except Exception as _exc:
+            _log.warning("generar_libro_compras: %s", _exc)
 
         return {
             'periodo_desde': fecha_desde,
@@ -1064,8 +1074,8 @@ class FacturacionFiscal:
                 'RegistroID': registro_id,
                 'ValorNuevo': detalle
             })
-        except Exception:
-            pass  # No fallar si no se puede registrar auditoria
+        except Exception as _exc:
+            _log.warning("_registrar_auditoria: %s", _exc)
 
 
 # ============================================================================

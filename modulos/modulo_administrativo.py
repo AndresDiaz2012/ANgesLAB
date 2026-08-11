@@ -16,6 +16,16 @@ Copyright © 2024-2026 ANgesLAB Solutions
 from datetime import datetime, date, timedelta
 
 
+try:
+    from modulos.logging_config import obtener_logger
+    _log = obtener_logger('angeslab.modulo_administrativo')
+except Exception:  # pragma: no cover - respaldo si falta el modulo
+    import logging as _logging
+    _log = _logging.getLogger('angeslab.modulo_administrativo')
+    _log.addHandler(_logging.NullHandler())
+
+
+
 class GestorCajaChica:
     """Gestión de caja chica: apertura, cierre y movimientos."""
 
@@ -264,8 +274,8 @@ class GestorCuentasPorCobrar:
                         f"'Importado de Solicitud #{sol.get('NumeroSolicitud', '')}')"
                     )
                     importadas += 1
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    _log.warning("importar_solicitudes_pendientes: %s", _exc)
 
             return importadas, f"{importadas} solicitud(es) importada(s) como cuentas por cobrar"
         except Exception as e:
@@ -297,8 +307,8 @@ class GestorCuentasPorCobrar:
                             fv = datetime.strptime(fv, '%m/%d/%Y')
                         dias = (hoy - fv).days
                         c['DiasVencida'] = max(0, dias)
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        _log.warning("listar_cuentas: %s", _exc)
             return cuentas
         except Exception:
             return []
@@ -324,8 +334,8 @@ class GestorCuentasPorCobrar:
                         if isinstance(fv, str):
                             fv = datetime.strptime(fv, '%m/%d/%Y')
                         dias = (hoy - fv).days
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        _log.warning("obtener_resumen_cartera: %s", _exc)
 
                 if dias <= 0:
                     resumen['vigente'] += saldo
