@@ -6417,7 +6417,19 @@ class MainApplication:
         popup.wait_window()
         return resultado[0]
 
-    # Color de tapa por tipo de muestra, con el codigo real de TiposMuestra
+    # Color real de la tapa del tubo, como lo pide el laboratorio.
+    # La clave es el texto de Pruebas.TuboRecomendado.
+    _TAPAS_TUBO = {
+        'MORADO':   '#8e6fb5',   # EDTA — hematologia
+        'ROJO':     '#c0392b',   # suero — quimica y hormonas
+        'AMARILLO': '#d4a017',   # electrolitos
+        'AZUL':     '#3f8fd0',   # citrato — coagulacion y dimero D
+        'VERDE':    '#27ae60',   # heparina
+        'GRIS':     '#7f8c8d',   # fluoruro
+        'NEGRO':    '#2c3e50',   # VSG
+    }
+
+    # Reserva: si la prueba no tiene tubo asignado se muestra el tipo de muestra
     _TAPAS_MUESTRA = {
         'SANGRE':  ('#a78bfa', 'Sangre venosa'),
         'ORINA':   ('#fbbf24', 'Orina'),
@@ -6427,6 +6439,15 @@ class MainApplication:
         'SEMEN':   ('#94a3b8', 'Semen'),
         'EXUDADO': ('#34d399', 'Exudado'),
     }
+
+    @classmethod
+    def _color_tubo(cls, texto):
+        """Color de la tapa a partir del texto de TuboRecomendado."""
+        t = str(texto or '').upper()
+        for clave, color in cls._TAPAS_TUBO.items():
+            if clave in t:
+                return color
+        return '#64748b'
 
     def _refrescar_consecuencias(self):
         """Deriva tubos y alertas clinicas de las pruebas seleccionadas.
@@ -6454,25 +6475,33 @@ class MainApplication:
 
         # Tipo de muestra de cada prueba seleccionada
         conteo, sin_definir, ayuno = {}, 0, False
+        horas_ayuno = 0
         try:
             ids = [int(p['id']) for p in seleccion if str(p.get('id', '')).strip()]
             mapa = {}
             if ids:
                 filas = db.query(
-                    "SELECT p.PruebaID, tm.CodigoTipoMuestra, tm.RequiereAyuno "
+                    "SELECT p.PruebaID, p.TuboRecomendado, p.RequiereAyuno, "
+                    "p.HorasAyuno, tm.CodigoTipoMuestra "
                     "FROM Pruebas p LEFT JOIN TiposMuestra tm "
                     "ON p.TipoMuestraID = tm.TipoMuestraID "
                     f"WHERE p.PruebaID IN ({','.join(str(i) for i in ids)})"
                 ) or []
                 for f in filas:
-                    mapa[f.get('PruebaID')] = (f.get('CodigoTipoMuestra'),
-                                               f.get('RequiereAyuno'))
+                    mapa[f.get('PruebaID')] = (
+                        f.get('TuboRecomendado'), f.get('CodigoTipoMuestra'),
+                        f.get('RequiereAyuno'), f.get('HorasAyuno'))
             for i in ids:
-                cod, req = mapa.get(i, (None, None))
-                if cod:
-                    conteo[cod] = conteo.get(cod, 0) + 1
+                tubo, cod, req, hrs = mapa.get(i, (None, None, None, None))
+                # El tubo concreto manda sobre el tipo de muestra generico
+                etiqueta = (str(tubo).strip() if tubo else
+                            (self._TAPAS_MUESTRA.get(cod, (None, cod))[1]
+                             if cod else None))
+                if etiqueta:
+                    conteo[etiqueta] = conteo.get(etiqueta, 0) + 1
                     if req:
                         ayuno = True
+                        horas_ayuno = max(horas_ayuno, int(hrs or 0))
                 else:
                     sin_definir += 1
         except Exception as e:
@@ -6491,9 +6520,9 @@ class MainApplication:
 
         fila = tk.Frame(self.frame_tubos, bg=S['frame'])
         fila.pack(fill='x')
-        for cod, n in sorted(conteo.items()):
-            color, nombre = self._TAPAS_MUESTRA.get(cod, ('#64748b', cod))
-            _chip(fila, f"{nombre} ×{n}", color, S['border'], S['label'])
+        for etiqueta, n in sorted(conteo.items()):
+            _chip(fila, f"{etiqueta} ×{n}", self._color_tubo(etiqueta),
+                  S['border'], S['label'])
         if sin_definir:
             _chip(fila, f"Sin definir ×{sin_definir}", '#3f4a5c',
                   S['warn'], S['warn'])
@@ -6509,7 +6538,8 @@ class MainApplication:
                                           expand=True, padx=(4, 6), pady=4)
 
         if ayuno:
-            _alerta("🍽", "Requiere ayuno — confirme con el paciente",
+            det = f"{horas_ayuno} h de ayuno" if horas_ayuno else "ayuno"
+            _alerta("🍽", f"Requiere {det} — confirme con el paciente",
                     S['warn'], S['warn_bg'])
         if sin_definir:
             _alerta("ℹ", f"{sin_definir} prueba{'s' if sin_definir != 1 else ''} "
