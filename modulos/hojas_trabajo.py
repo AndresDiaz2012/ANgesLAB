@@ -55,11 +55,145 @@ AREAS_LAB = {
 }
 
 
+# ── Estados de solicitud que representan trabajo por hacer ──────────────────
+# El sistema crea las solicitudes como 'Pendiente' y las pasa a 'En Proceso' y
+# luego a 'Completada'. La version anterior filtraba por ('Registrada',
+# 'En Proceso', 'Recibida'), nombres que este sistema no usa: la consulta no
+# devolvia nunca una fila y la hoja de trabajo salia siempre vacia.
+# Se aceptan tambien los nombres antiguos por si una base vieja los trae.
+ESTADOS_PENDIENTES = ('Pendiente', 'Registrada', 'Recibida', 'En Proceso')
+ESTADOS_COMPLETADOS = ('Completada', 'Validada')
+
+
+def _lista_sql(valores):
+    """Convierte una tupla de estados en una lista SQL entre parentesis."""
+    return "(" + ", ".join(f"'{v}'" for v in valores) + ")"
+
+
 class GeneradorHojasTrabajo:
     """Genera hojas de trabajo PDF por área para captura de resultados."""
 
     def __init__(self, db):
         self.db = db
+
+    # ------------------------------------------------------------------
+    # Consultas
+    # ------------------------------------------------------------------
+    def _filtro_estados(self, incluir_completadas=False):
+        estados = ESTADOS_PENDIENTES
+        if incluir_completadas:
+            estados = estados + ESTADOS_COMPLETADOS
+        return _lista_sql(estados)
+
+    def areas_con_trabajo(self, fecha: date = None,
+                          incluir_completadas: bool = False) -> list:
+        """
+        Áreas que tienen pruebas pendientes en la fecha, con su cantidad.
+
+        Permite mostrar en pantalla qué hojas tiene sentido generar en vez de
+        sacar una hoja en blanco por cada área del laboratorio.
+
+        Returns lista de dicts: {'area_id', 'nombre', 'abrev', 'pruebas',
+        'solicitudes'}
+        """
+        fecha = fecha or date.today()
+        fecha_str = fecha.strftime('%m/%d/%Y')
+        fecha_sig = (fecha + timedelta(days=1)).strftime('%m/%d/%Y')
+
+        # Access no admite COUNT(DISTINCT ...): se agrupa primero por área y
+        # solicitud en una subconsulta y luego se suma
+        sql = (
+            f"SELECT t.AreaID, t.NombreArea, "
+            f"SUM(t.Pruebas) AS Pruebas, COUNT(*) AS Solicitudes "
+            f"FROM (SELECT pr.AreaID AS AreaID, a.NombreArea AS NombreArea, "
+            f"      s.SolicitudID AS SolicitudID, COUNT(*) AS Pruebas "
+            f"      FROM ((([Solicitudes] AS s "
+            f"      INNER JOIN [DetalleSolicitudes] AS ds "
+            f"          ON s.SolicitudID = ds.SolicitudID) "
+            f"      INNER JOIN [Pruebas] AS pr ON ds.PruebaID = pr.PruebaID) "
+            f"      LEFT JOIN [Areas] AS a ON pr.AreaID = a.AreaID) "
+            f"      WHERE s.FechaSolicitud >= #{fecha_str}# "
+            f"      AND s.FechaSolicitud < #{fecha_sig}# "
+            f"      AND s.EstadoSolicitud IN "
+            f"          {self._filtro_estados(incluir_completadas)} "
+            f"      GROUP BY pr.AreaID, a.NombreArea, s.SolicitudID) AS t "
+            f"GROUP BY t.AreaID, t.NombreArea "
+            f"ORDER BY t.NombreArea"
+        )
+        try:
+            filas = self.db.query(sql) or []
+        except Exception as e:
+            _log.error("No se pudo consultar el trabajo por área: %s", e)
+            return []
+
+        salida = []
+        for f in filas:
+            area_id = f.get('AreaID')
+            if area_id is None:
+                continue
+            info = AREAS_LAB.get(area_id, {})
+            salida.append({
+                'area_id': area_id,
+                'nombre': f.get('NombreArea') or info.get('nombre',
+                                                          f'Área {area_id}'),
+                'abrev': info.get('abrev', f'A{area_id}'),
+                'pruebas': int(f.get('Pruebas') or 0),
+                'solicitudes': int(f.get('Solicitudes') or 0),
+            })
+        return salida
+
+    def _parametros_de_prueba(self, prueba_id, detalle_id):
+        """
+        Parámetros que hay que anotar para esa prueba.
+
+        Se leen de ParametrosPrueba (la definición de la prueba), no de
+        ResultadosParametros: esa tabla solo tiene filas DESPUES de capturar un
+        resultado, así que consultarla dejaba la hoja de trabajo sin una sola
+        línea donde escribir, que es justo para lo que sirve la hoja.
+
+        El valor ya capturado, si existe, se trae con un LEFT JOIN para poder
+        reimprimir una hoja parcialmente llena.
+        """
+        # Se consulta en dos pasos a propósito: Access rechaza un LEFT JOIN
+        # cuyo ON mezcla una comparación entre campos con una constante
+        # («La expresión JOIN no se admite»), que es justo lo que hace falta
+        # para traer el valor de un DetalleID concreto.
+        sql = (
+            f"SELECT pp.ParametroID, par.NombreParametro, par.Observaciones, "
+            f"u.NombreUnidad AS Unidad, pp.Secuencia "
+            f"FROM (([ParametrosPrueba] AS pp "
+            f"INNER JOIN [Parametros] AS par ON pp.ParametroID = par.ParametroID) "
+            f"LEFT JOIN [Unidades] AS u ON par.UnidadID = u.UnidadID) "
+            f"WHERE pp.PruebaID = {int(prueba_id)} "
+            f"ORDER BY pp.Secuencia"
+        )
+        try:
+            filas = self.db.query(sql) or []
+        except Exception as e:
+            _log.warning("No se pudieron leer los parámetros de la prueba %s: %s",
+                         prueba_id, e)
+            return []
+
+        # Valores ya capturados, para poder reimprimir una hoja a medio llenar
+        capturados = {}
+        try:
+            for r in self.db.query(
+                    f"SELECT ParametroID, Valor, ValorReferencia "
+                    f"FROM [ResultadosParametros] "
+                    f"WHERE DetalleID = {int(detalle_id)}") or []:
+                capturados[r.get('ParametroID')] = r
+        except Exception as e:
+            _log.debug("Sin resultados previos para el detalle %s: %s",
+                       detalle_id, e)
+
+        for f in filas:
+            previo = capturados.get(f.get('ParametroID')) or {}
+            f['Resultado'] = previo.get('Valor') or ''
+            # El valor de referencia vive en Parametros.Observaciones hasta que
+            # se captura el resultado y se copia a ResultadosParametros
+            f['ValorReferencia'] = (previo.get('ValorReferencia')
+                                    or f.get('Observaciones') or '')
+        return filas
 
     def generar_hoja_area(self, area_id: int, fecha: date = None,
                            ruta_salida: str = None,
@@ -80,12 +214,16 @@ class GeneradorHojasTrabajo:
             raise RuntimeError("ReportLab no está instalado")
 
         fecha = fecha or date.today()
-        area_info = AREAS_LAB.get(area_id, {'nombre': f'Área {area_id}', 'abrev': '???'})
-
-        # Obtener solicitudes pendientes del día para esta área
-        estados_filtro = "('Registrada', 'En Proceso', 'Recibida')"
-        if incluir_completadas:
-            estados_filtro = "('Registrada', 'En Proceso', 'Recibida', 'Completada')"
+        area_info = dict(AREAS_LAB.get(
+            area_id, {'nombre': f'Área {area_id}', 'abrev': f'A{area_id}'}))
+        # El nombre real del área manda sobre el mapeo fijo del módulo
+        try:
+            fila_area = self.db.query_one(
+                f"SELECT NombreArea FROM [Areas] WHERE AreaID = {int(area_id)}")
+            if fila_area and fila_area.get('NombreArea'):
+                area_info['nombre'] = fila_area['NombreArea']
+        except Exception:
+            pass
 
         fecha_str = fecha.strftime('%m/%d/%Y')
         fecha_sig = (fecha + timedelta(days=1)).strftime('%m/%d/%Y')
@@ -96,14 +234,14 @@ class GeneradorHojasTrabajo:
             f"p.Nombres, p.Apellidos, p.NumeroDocumento, p.Sexo, p.FechaNacimiento, "
             f"ds.DetalleID, ds.Estado AS EstadoPrueba, "
             f"pr.PruebaID, pr.NombrePrueba, pr.CodigoPrueba "
-            f"FROM [Solicitudes] AS s "
-            f"INNER JOIN [Pacientes] AS p ON s.PacienteID = p.PacienteID "
-            f"INNER JOIN [DetalleSolicitudes] AS ds ON s.SolicitudID = ds.SolicitudID "
+            f"FROM (([Solicitudes] AS s "
+            f"INNER JOIN [Pacientes] AS p ON s.PacienteID = p.PacienteID) "
+            f"INNER JOIN [DetalleSolicitudes] AS ds ON s.SolicitudID = ds.SolicitudID) "
             f"INNER JOIN [Pruebas] AS pr ON ds.PruebaID = pr.PruebaID "
             f"WHERE pr.AreaID = {int(area_id)} "
             f"AND s.FechaSolicitud >= #{fecha_str}# "
             f"AND s.FechaSolicitud < #{fecha_sig}# "
-            f"AND s.EstadoSolicitud IN {estados_filtro} "
+            f"AND s.EstadoSolicitud IN {self._filtro_estados(incluir_completadas)} "
             f"ORDER BY s.NumeroSolicitud, pr.NombrePrueba"
         )
         filas = self.db.query(sql) or []
@@ -131,24 +269,17 @@ class GeneradorHojasTrabajo:
                 'codigo': f.get('CodigoPrueba', ''),
                 'estado': f.get('EstadoPrueba', ''),
                 'detalle_id': f.get('DetalleID'),
+                'prueba_id': f.get('PruebaID'),
             })
 
-        # Obtener parámetros para cada prueba
+        # Parámetros a anotar de cada prueba
         for sid, sol_data in solicitudes.items():
             for prueba in sol_data['pruebas']:
                 det_id = prueba.get('detalle_id')
-                if det_id:
-                    params = self.db.query(
-                        f"SELECT rp.ParametroID, par.NombreParametro, "
-                        f"u.NombreUnidad AS Unidad, "
-                        f"rp.Valor AS Resultado, rp.ValorReferencia "
-                        f"FROM [ResultadosParametros] AS rp "
-                        f"INNER JOIN [Parametros] AS par ON rp.ParametroID = par.ParametroID "
-                        f"LEFT JOIN [Unidades] AS u ON par.UnidadID = u.UnidadID "
-                        f"WHERE rp.DetalleID={int(det_id)} "
-                        f"ORDER BY par.NombreParametro"
-                    ) or []
-                    prueba['parametros'] = params
+                pr_id = prueba.get('prueba_id')
+                if det_id and pr_id:
+                    prueba['parametros'] = self._parametros_de_prueba(pr_id,
+                                                                     det_id)
 
         # Generar PDF
         if not ruta_salida:
@@ -160,9 +291,17 @@ class GeneradorHojasTrabajo:
         return self._generar_pdf(area_info, fecha, solicitudes, ruta_salida)
 
     def generar_todas_areas(self, fecha: date = None,
-                             ruta_directorio: str = None) -> list:
+                             ruta_directorio: str = None,
+                             incluir_completadas: bool = False,
+                             solo_con_trabajo: bool = True) -> list:
         """
-        Genera hojas de trabajo para todas las áreas.
+        Genera hojas de trabajo para las áreas que tienen trabajo ese día.
+
+        Antes recorría las trece áreas del mapeo y devolvía una hoja por cada
+        una, aunque estuviera vacía: se imprimían once o doce hojas en blanco.
+
+        Args:
+            solo_con_trabajo: si es False genera todas las áreas conocidas.
 
         Returns:
             Lista de rutas de PDFs generados
@@ -171,14 +310,22 @@ class GeneradorHojasTrabajo:
         ruta_dir = ruta_directorio or tempfile.gettempdir()
         rutas = []
 
-        for area_id in AREAS_LAB:
+        if solo_con_trabajo:
+            areas = [a['area_id']
+                     for a in self.areas_con_trabajo(fecha, incluir_completadas)]
+        else:
+            areas = list(AREAS_LAB)
+
+        for area_id in areas:
             try:
+                abrev = AREAS_LAB.get(area_id, {}).get('abrev', f'A{area_id}')
                 ruta = self.generar_hoja_area(
                     area_id, fecha,
                     ruta_salida=os.path.join(
                         ruta_dir,
-                        f"HojaTrabajo_{AREAS_LAB[area_id]['abrev']}_{fecha.strftime('%Y%m%d')}.pdf"
-                    )
+                        f"HojaTrabajo_{abrev}_{fecha.strftime('%Y%m%d')}.pdf"
+                    ),
+                    incluir_completadas=incluir_completadas
                 )
                 rutas.append(ruta)
             except Exception as e:
@@ -225,10 +372,15 @@ class GeneradorHojasTrabajo:
                    fill=1, stroke=0)
             c.setFillColor(black)
             c.setFont('Helvetica-Bold', 8)
-            paciente_info = (
-                f"{sol['numero']}  |  {sol['paciente']}  |  CI: {sol['cedula']}"
-                f"  |  {sol['sexo']}  |  {sol['edad']}"
-            )
+            # Un campo vacio se omite en vez de imprimir la palabra «None»
+            partes = [sol['numero'], sol['paciente']]
+            if sol.get('cedula'):
+                partes.append(f"CI: {sol['cedula']}")
+            if sol.get('sexo'):
+                partes.append(str(sol['sexo']))
+            if sol.get('edad'):
+                partes.append(str(sol['edad']))
+            paciente_info = "  |  ".join(str(x or '') for x in partes)
             c.drawString(margen_izq + 3 * mm, y_pos + 1 * mm, paciente_info)
             y_pos -= 0.9 * cm
 
@@ -236,8 +388,8 @@ class GeneradorHojasTrabajo:
             for prueba in sol['pruebas']:
                 c.setFont('Helvetica-Bold', 7)
                 c.setFillColor(HexColor('#1565c0'))
-                codigo = prueba.get('codigo', '')
-                nombre_pr = prueba.get('nombre', '')
+                codigo = prueba.get('codigo') or ''
+                nombre_pr = prueba.get('nombre') or ''
                 c.drawString(margen_izq + 2 * mm, y_pos + 1 * mm,
                              f"▸ {codigo} - {nombre_pr}")
                 c.setFillColor(black)
@@ -264,10 +416,10 @@ class GeneradorHojasTrabajo:
                             y_pos = page_h - 3.5 * cm
 
                         c.setFont('Helvetica', 7)
-                        nombre_p = (param.get('NombreParametro') or '')[:35]
-                        unidad = param.get('Unidad', '')
-                        val_ref = (param.get('ValorReferencia') or '')[:25]
-                        resultado = param.get('Resultado') or ''
+                        nombre_p = str(param.get('NombreParametro') or '')[:35]
+                        unidad = param.get('Unidad') or ''
+                        val_ref = str(param.get('ValorReferencia') or '')[:25]
+                        resultado = str(param.get('Resultado') or '')
 
                         c.drawString(margen_izq + 1 * cm, y_pos + 1 * mm, nombre_p)
                         c.drawString(margen_izq + 9 * cm, y_pos + 1 * mm, unidad)

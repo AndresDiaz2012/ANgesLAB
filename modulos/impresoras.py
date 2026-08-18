@@ -4,19 +4,17 @@
 GESTION DE IMPRESORAS POR ROL - ANgesLAB
 ================================================================================
 El laboratorio trabaja con varias impresoras a la vez (una laser para informes,
-una fiscal o de matriz para facturas, una termica para recibos y otra de
-etiquetas). Este modulo asigna una impresora a cada rol y envia cada documento
-a la que le corresponde.
+otra para cotizaciones, una fiscal o de matriz para facturas, una termica para
+recibos y otra de etiquetas). Este modulo asigna una impresora a cada rol y
+envia cada documento a la que le corresponde, con sus propias opciones de
+papel, calidad y copias.
 
 Roles definidos:
-    resultados   - informes de resultados, hojas de trabajo
+    resultados   - informes de resultados, hojas de trabajo, interpretaciones
+    cotizaciones - cotizaciones y presupuestos
     facturacion  - facturas, notas de credito/debito
     recibos      - recibos de caja (ticket 80 mm)
     etiquetas    - etiquetas de tubos (rollo 80 mm)
-
-Las cotizaciones son un caso aparte: se imprimen en hoja completa igual que un
-informe, asi que el usuario elige si salen por la impresora de facturacion (por
-defecto) o por la de resultados. Ver ROLES_COTIZACION mas abajo.
 
 Es perfectamente valido asignar la misma impresora fisica a varios roles: cada
 trabajo se envia igual, de forma independiente.
@@ -26,30 +24,33 @@ Como se imprime (y por que no con SetDefaultPrinter)
 Cambiar la impresora predeterminada del sistema para imprimir y restaurarla
 despues es una carrera: ShellExecute('print') es asincrono, asi que si se
 imprime un recibo y una etiqueta casi a la vez, el segundo trabajo puede salir
-por la impresora del primero. Ademas, si el PDF esta asociado a Microsoft Edge
-(lo habitual en Windows 11) los verbos 'print' y 'printto' ni siquiera estan
-registrados y no se imprime nada.
+por la impresora del primero. Ademas, si el PDF esta asociado a Edge o a
+Acrobat, el verbo 'print' se limita a abrir el visor y dejar el documento en
+pantalla: el sistema no imprime nada, imprime el visor (o no imprime).
 
-Por eso se intenta en este orden:
+Por eso se imprime asi:
 
-  1. GDI directo: se rasteriza el PDF con PyMuPDF y se envia pagina por pagina
-     al contexto de dispositivo de la impresora indicada. Funciona con
-     cualquier impresora instalada, sin dialogos y sin tocar nada global.
-  2. Verbo 'printto' del shell, que recibe el nombre de la impresora.
-  3. Impresora predeterminada temporal, serializado con un lock (ultimo
-     recurso, solo si el sistema no ofrece nada mejor).
+  1. GDI directo (unica via normal): se abre el DEVMODE de la impresora, se le
+     aplican las opciones del rol (papel, orientacion, calidad, bandeja), se
+     rasteriza el PDF con PyMuPDF y se envia pagina por pagina al contexto de
+     dispositivo. Funciona con cualquier impresora instalada, sin dialogos,
+     sin visores y sin tocar nada global. Devuelve el numero de trabajo del
+     spooler, que queda registrado en el log.
+  2. Verbo 'printto' del shell: solo como respaldo si el equipo no tiene
+     PyMuPDF/pywin32 completos.
 
-Si todo falla, el llamador abre el PDF en pantalla para que no se pierda el
-documento.
+Si todo falla el llamador se entera (estado 'fallo_impresion' o
+'sin_impresora') y decide si abre el PDF en pantalla, pero siempre avisando:
+abrir el visor NO es imprimir.
 
 Copyright 2024-2026 ANgesLAB Solutions
 ================================================================================
 """
 
 import os
+import json
 import logging
 import threading
-import time
 
 try:
     from modulos.logging_config import obtener_logger
@@ -65,11 +66,19 @@ except Exception:
 ROLES = {
     'resultados': {
         'etiqueta': 'Resultados e informes',
-        'ayuda': 'Informes, hojas de trabajo e interpretaciones (y cotizaciones '
-                 'si así se configura)',
+        'ayuda': 'Informes de resultados, hojas de trabajo e interpretaciones',
         'columna': 'ImpresoraResultados',
         'columna_directo': 'ImpresoraResultadosDirecto',
         'directo_defecto': False,
+        'papel': 'hoja',
+    },
+    'cotizaciones': {
+        'etiqueta': 'Cotizaciones',
+        'ayuda': 'Cotizaciones y presupuestos para el paciente',
+        'columna': 'ImpresoraCotizaciones',
+        'columna_directo': 'ImpresoraCotizacionesDirecto',
+        'directo_defecto': False,
+        'papel': 'hoja',
     },
     'facturacion': {
         'etiqueta': 'Facturación',
@@ -77,48 +86,58 @@ ROLES = {
         'columna': 'ImpresoraFacturacion',
         'columna_directo': 'ImpresoraFacturacionDirecto',
         'directo_defecto': False,
+        'papel': 'hoja',
     },
     'recibos': {
         'etiqueta': 'Recibos de caja',
         'ayuda': 'Ticket de 80 mm que se entrega al paciente',
         'columna': 'ImpresoraRecibos',
         'columna_directo': 'ImpresoraRecibosDirecto',
-        'directo_defecto': False,
+        'directo_defecto': True,
+        'papel': 'rollo',
     },
     'etiquetas': {
         'etiqueta': 'Etiquetas de muestras',
         'ayuda': 'Rollo de 80 mm para identificar los tubos',
         'columna': 'ImpresoraEtiquetas',
         'columna_directo': 'ImpresoraEtiquetasDirecto',
-        'directo_defecto': False,
+        'directo_defecto': True,
+        'papel': 'rollo',
     },
 }
 
 # Orden estable para la interfaz de configuración
-ORDEN_ROLES = ('resultados', 'facturacion', 'recibos', 'etiquetas')
+ORDEN_ROLES = ('resultados', 'cotizaciones', 'facturacion', 'recibos',
+               'etiquetas')
 
 # Nombres alternativos que usan las llamadas existentes del sistema
 ALIAS_ROLES = {
     'informes': 'resultados',
     'resultado': 'resultados',
+    'informe': 'resultados',
     'hoja_trabajo': 'resultados',
+    'hojas_trabajo': 'resultados',
     'ia': 'resultados',
-    'cotizacion': 'facturacion',
-    'cotizaciones': 'facturacion',
-    'presupuesto': 'facturacion',
-    'presupuestos': 'facturacion',
+    'interpretacion': 'resultados',
+    'cotizacion': 'cotizaciones',
+    'presupuesto': 'cotizaciones',
+    'presupuestos': 'cotizaciones',
     'factura': 'facturacion',
+    'facturas': 'facturacion',
     'nota_credito': 'facturacion',
     'nota_debito': 'facturacion',
     'recibo': 'recibos',
     'etiqueta': 'etiquetas',
 }
 
-# ── Cotizaciones: rol configurable ─────────────────────────────────────────
-# La cotización es un documento comercial, pero se imprime en hoja completa
-# igual que un informe. Muchos laboratorios tienen la impresora de facturación
-# reservada para papel fiscal o matriz de puntos, así que se permite mandar
-# las cotizaciones por la impresora de resultados.
+# Columna donde se guardan las opciones de papel/calidad de cada rol (JSON)
+COLUMNA_OPCIONES = 'OpcionesImpresoras'
+
+# ── Cotizaciones: respaldo cuando no tienen impresora propia ────────────────
+# Antes las cotizaciones no tenían rol propio y salían por facturación o por
+# resultados según esta preferencia. Ahora tienen su propia impresora; esta
+# opción se conserva como respaldo para las instalaciones que aún no la han
+# asignado, para que ninguna cotización se quede sin destino.
 ALIAS_COTIZACION = ('cotizacion', 'cotizaciones', 'presupuesto', 'presupuestos')
 ROLES_COTIZACION = ('facturacion', 'resultados')
 ROL_COTIZACIONES_DEFECTO = 'facturacion'
@@ -137,6 +156,72 @@ def normalizar_rol(rol):
     r = str(rol).strip().lower()
     r = ALIAS_ROLES.get(r, r)
     return r if r in ROLES else None
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Opciones de impresión por rol
+# ══════════════════════════════════════════════════════════════════════════
+# escala:
+#   'ajustar' - reduce la página si no cabe, nunca la amplía (hoja completa)
+#   'real'    - tamaño real, sin tocar (recibos y etiquetas térmicas)
+#   'llenar'  - amplía o reduce hasta ocupar el área imprimible (etiquetas
+#               cuyo PDF es más pequeño que la etiqueta física)
+ESCALAS = ('ajustar', 'real', 'llenar')
+CALIDADES = ('alta', 'media', 'borrador')
+ORIENTACIONES = ('vertical', 'horizontal')
+
+# DMRES_HIGH / DMRES_MEDIUM / DMRES_DRAFT
+_CALIDAD_DM = {'alta': -4, 'media': -3, 'borrador': -1}
+_ORIENTACION_DM = {'vertical': 1, 'horizontal': 2}
+
+OPCIONES_DEFECTO = {
+    'copias': 1,
+    'calidad': 'alta',
+    'orientacion': 'vertical',
+    'escala': 'ajustar',
+    'papel': 0,      # DMPAPER_*; 0 = el que tenga configurado la impresora
+    'bandeja': 0,    # DMBIN_*;   0 = la que tenga configurada la impresora
+}
+
+# Los roles de rollo salen a tamaño real: escalar un ticket de 80 mm para que
+# "quepa" en la hoja lo deja ilegible
+OPCIONES_DEFECTO_ROL = {
+    'recibos': {'escala': 'real'},
+    'etiquetas': {'escala': 'real'},
+}
+
+
+def opciones_defecto(rol):
+    """Opciones iniciales de un rol (copia nueva, editable sin efectos)."""
+    datos = dict(OPCIONES_DEFECTO)
+    datos.update(OPCIONES_DEFECTO_ROL.get(rol, {}))
+    return datos
+
+
+def normalizar_opciones(rol, datos):
+    """Devuelve las opciones del rol saneadas, sin valores imposibles."""
+    base = opciones_defecto(rol)
+    if not isinstance(datos, dict):
+        return base
+    try:
+        base['copias'] = max(1, min(99, int(datos.get('copias') or 1)))
+    except Exception:
+        pass
+    calidad = str(datos.get('calidad') or '').strip().lower()
+    if calidad in CALIDADES:
+        base['calidad'] = calidad
+    orientacion = str(datos.get('orientacion') or '').strip().lower()
+    if orientacion in ORIENTACIONES:
+        base['orientacion'] = orientacion
+    escala = str(datos.get('escala') or '').strip().lower()
+    if escala in ESCALAS:
+        base['escala'] = escala
+    for campo in ('papel', 'bandeja'):
+        try:
+            base[campo] = int(datos.get(campo) or 0)
+        except Exception:
+            pass
+    return base
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -171,62 +256,288 @@ def listar_impresoras():
     return nombres, predeterminada
 
 
+# Banderas de estado del spooler que impiden o entorpecen la impresión
+_ESTADOS_IMPRESORA = (
+    (0x00000002, 'Error'),
+    (0x00000008, 'Papel atascado'),
+    (0x00000010, 'Sin papel'),
+    (0x00000040, 'Problema de papel'),
+    (0x00000080, 'Sin conexión'),
+    (0x00001000, 'No disponible'),
+    (0x00040000, 'Sin tinta / tóner'),
+    (0x00100000, 'Requiere intervención'),
+    (0x00400000, 'Tapa abierta'),
+    (0x00000001, 'En pausa'),
+    (0x00020000, 'Tinta / tóner bajo'),
+    (0x00000400, 'Imprimiendo'),
+    (0x00000200, 'Ocupada'),
+)
+
+# Attributes: casilla «Usar impresora sin conexión» de Windows
+_ATRIBUTO_OFFLINE = 0x00000400
+
+# Estas banderas impiden que salga el papel; el resto son informativas
+_MASCARA_BLOQUEO = (0x00000002 | 0x00000008 | 0x00000010 | 0x00000040 |
+                    0x00000080 | 0x00001000 | 0x00040000 | 0x00100000 |
+                    0x00400000)
+
+
+def estado_impresora(nombre):
+    """
+    Consulta el spooler y describe cómo está una impresora.
+
+    Returns dict con:
+        existe    - la impresora está instalada
+        texto     - descripción corta para mostrar en pantalla
+        lista     - True si puede imprimir ahora mismo
+        bloqueada - True si hay un problema que impide imprimir
+        trabajos  - trabajos pendientes en su cola
+    """
+    salida = {'nombre': nombre or '', 'existe': False, 'texto': 'No asignada',
+              'lista': False, 'bloqueada': False, 'trabajos': 0}
+    if not nombre:
+        return salida
+    try:
+        import win32print
+    except Exception:
+        # Sin pywin32 no se puede consultar, pero tampoco se puede afirmar
+        # que esté mal: se asume utilizable y ya avisará el envío
+        salida.update({'existe': True, 'texto': 'Estado desconocido',
+                       'lista': True})
+        return salida
+
+    try:
+        h = win32print.OpenPrinter(nombre)
+    except Exception:
+        salida['texto'] = 'No instalada en este equipo'
+        return salida
+
+    try:
+        info = win32print.GetPrinter(h, 2)
+        estado = int(info.get('Status', 0) or 0)
+        atributos = int(info.get('Attributes', 0) or 0)
+        salida['existe'] = True
+        salida['trabajos'] = int(info.get('cJobs', 0) or 0)
+
+        motivos = [txt for bit, txt in _ESTADOS_IMPRESORA if estado & bit]
+        if atributos & _ATRIBUTO_OFFLINE:
+            motivos.insert(0, 'Marcada «sin conexión» en Windows')
+            salida['bloqueada'] = True
+        if estado & _MASCARA_BLOQUEO:
+            salida['bloqueada'] = True
+
+        if motivos:
+            salida['texto'] = ' · '.join(motivos[:2])
+        else:
+            salida['texto'] = 'Lista'
+        if salida['trabajos']:
+            salida['texto'] += f" ({salida['trabajos']} en cola)"
+        salida['lista'] = not salida['bloqueada']
+    except Exception as e:
+        _log.debug("No se pudo leer el estado de '%s': %s", nombre, e)
+        salida.update({'existe': True, 'texto': 'Estado desconocido',
+                       'lista': True})
+    finally:
+        try:
+            win32print.ClosePrinter(h)
+        except Exception:
+            pass
+    return salida
+
+
+def motor_disponible():
+    """
+    True si el equipo puede imprimir por GDI (la vía real de impresión).
+
+    Si devuelve False solo queda el respaldo por shell, que en la práctica
+    termina abriendo el visor de PDF en vez de imprimir.
+    """
+    try:
+        import fitz          # noqa: F401  (PyMuPDF)
+        import win32ui       # noqa: F401
+        import win32print    # noqa: F401
+        from PIL import ImageWin  # noqa: F401
+        return True
+    except Exception as e:
+        _log.debug("Motor de impresión GDI no disponible: %s", e)
+        return False
+
+
+def diagnostico_motor():
+    """Lista de librerías que faltan para poder imprimir, vacía si está todo."""
+    faltan = []
+    for modulo, paquete in (('fitz', 'PyMuPDF'), ('win32print', 'pywin32'),
+                            ('win32ui', 'pywin32'), ('PIL', 'Pillow')):
+        try:
+            __import__(modulo)
+        except Exception:
+            if paquete not in faltan:
+                faltan.append(paquete)
+    return faltan
+
+
 # ══════════════════════════════════════════════════════════════════════════
 #  Envío del documento a una impresora concreta
 # ══════════════════════════════════════════════════════════════════════════
-# Serializa el respaldo que cambia la impresora predeterminada
-_lock_impresion = threading.Lock()
-
-# Margen para que el visor de PDF lea la predeterminada antes de restaurarla
-_ESPERA_RESTAURAR = 4.0
-
-
 # Resolución máxima a la que se rasteriza; por encima el consumo de memoria
 # crece sin mejora visible en papel
 _DPI_MAXIMO = 300
 
+# Serializa el acceso al DEVMODE de una misma impresora
+_lock_devmode = threading.Lock()
 
-def _imprimir_gdi(ruta, impresora, copias=1):
+
+def _preparar_devmode(impresora, opciones):
+    """
+    DEVMODE de la impresora con las opciones del rol aplicadas.
+
+    Returns (devmode, driver) o (None, None) si no se pudo preparar; en ese
+    caso se imprime con la configuración que tenga la impresora.
+    """
+    try:
+        import win32print
+        import win32con
+    except Exception:
+        return None, None
+
+    opciones = opciones or {}
+    try:
+        with _lock_devmode:
+            h = win32print.OpenPrinter(impresora)
+            try:
+                info = win32print.GetPrinter(h, 2)
+                dm = info['pDevMode']
+                driver = info.get('pDriverName') or 'winspool'
+                if dm is None:
+                    return None, None
+
+                campos = 0
+                # Las copias se hacen repitiendo el documento (ver mas abajo):
+                # dejar aqui un valor > 1 las multiplicaria dos veces
+                dm.Copies = 1
+                campos |= win32con.DM_COPIES
+
+                calidad = _CALIDAD_DM.get(
+                    str(opciones.get('calidad') or 'alta').lower())
+                if calidad:
+                    dm.PrintQuality = calidad
+                    campos |= win32con.DM_PRINTQUALITY
+
+                orientacion = _ORIENTACION_DM.get(
+                    str(opciones.get('orientacion') or 'vertical').lower())
+                if orientacion:
+                    dm.Orientation = orientacion
+                    campos |= win32con.DM_ORIENTATION
+
+                try:
+                    papel = int(opciones.get('papel') or 0)
+                except Exception:
+                    papel = 0
+                if papel > 0:
+                    dm.PaperSize = papel
+                    campos |= win32con.DM_PAPERSIZE
+
+                try:
+                    bandeja = int(opciones.get('bandeja') or 0)
+                except Exception:
+                    bandeja = 0
+                if bandeja > 0:
+                    dm.DefaultSource = bandeja
+                    campos |= win32con.DM_DEFAULTSOURCE
+
+                dm.Fields = dm.Fields | campos
+                # El driver valida y completa lo que no admita
+                win32print.DocumentProperties(
+                    0, h, impresora, dm, dm,
+                    win32con.DM_IN_BUFFER | win32con.DM_OUT_BUFFER)
+                return dm, driver
+            finally:
+                try:
+                    win32print.ClosePrinter(h)
+                except Exception:
+                    pass
+    except Exception as e:
+        _log.debug("No se pudo preparar el DEVMODE de '%s': %s", impresora, e)
+        return None, None
+
+
+def _crear_dc(impresora, devmode, driver):
+    """Contexto de dispositivo de la impresora, con DEVMODE si se pudo."""
+    import win32ui
+    if devmode is not None:
+        try:
+            import win32gui
+            handle = win32gui.CreateDC(driver or 'winspool', impresora, devmode)
+            if handle:
+                return win32ui.CreateDCFromHandle(handle)
+        except Exception as e:
+            _log.debug("CreateDC con DEVMODE falló en '%s': %s", impresora, e)
+    dc = win32ui.CreateDC()
+    dc.CreatePrinterDC(impresora)
+    return dc
+
+
+def _factor_escala(escala, ancho_disp, alto_disp, ancho_real, alto_real):
+    """Cuánto hay que escalar la página para el modo de escala pedido."""
+    if ancho_real <= 0 or alto_real <= 0:
+        return 1.0
+    ajuste = min(ancho_disp / ancho_real, alto_disp / alto_real)
+    if escala == 'real':
+        # Tamaño físico exacto; solo se reduce si literalmente no cabe
+        return min(1.0, ajuste)
+    if escala == 'llenar':
+        return ajuste
+    # 'ajustar': reduce si no cabe, nunca amplía
+    return min(ajuste, 1.0)
+
+
+def _imprimir_gdi(ruta, impresora, copias=1, opciones=None, titulo=None):
     """
     Rasteriza el PDF y lo envía al contexto de dispositivo de la impresora.
 
-    Es el método preferido: no usa verbos del shell ni la impresora
-    predeterminada, así que cada rol imprime en la suya sin interferencias.
+    Es el método real de impresión: no usa verbos del shell, no abre ningún
+    visor y no toca la impresora predeterminada, así que cada rol imprime en
+    la suya sin interferencias.
 
-    Returns True si el documento se envió al spooler.
+    Returns (True, id_del_ultimo_trabajo) o (False, mensaje_de_error).
     """
     try:
         import fitz                      # PyMuPDF
-        import win32ui
         import win32con
         from PIL import Image, ImageWin
     except ImportError as e:
-        _log.debug("Impresión GDI no disponible: %s", e)
-        return False
+        return False, f"Falta una librería de impresión: {e}"
+
+    opciones = normalizar_opciones(None, opciones or {})
+    escala_modo = opciones.get('escala', 'ajustar')
+    devmode, driver = _preparar_devmode(impresora, opciones)
+    nombre_trabajo = titulo or os.path.basename(ruta)
 
     doc = None
+    ultimo_trabajo = 0
     try:
         doc = fitz.open(ruta)
         if doc.page_count == 0:
-            return False
+            return False, "El PDF no tiene páginas"
 
         for _ in range(max(1, int(copias or 1))):
-            hdc = win32ui.CreateDC()
-            hdc.CreatePrinterDC(impresora)
+            hdc = _crear_dc(impresora, devmode, driver)
             try:
                 # Área imprimible y resolución reales de la impresora
                 ancho_disp = hdc.GetDeviceCaps(win32con.HORZRES)
                 alto_disp = hdc.GetDeviceCaps(win32con.VERTRES)
                 dpi_x = hdc.GetDeviceCaps(win32con.LOGPIXELSX) or 203
                 dpi_y = hdc.GetDeviceCaps(win32con.LOGPIXELSY) or 203
-                escala = min(_DPI_MAXIMO / dpi_x, _DPI_MAXIMO / dpi_y, 1.0)
+                # No se rasteriza por encima de _DPI_MAXIMO: más resolución
+                # solo gasta memoria, no mejora el papel
+                factor_dpi = min(_DPI_MAXIMO / dpi_x, _DPI_MAXIMO / dpi_y, 1.0)
 
-                hdc.StartDoc(os.path.basename(ruta))
+                trabajo = hdc.StartDoc(nombre_trabajo)
                 try:
                     for pagina in doc:
                         hdc.StartPage()
-                        matriz = fitz.Matrix(dpi_x / 72.0 * escala,
-                                             dpi_y / 72.0 * escala)
+                        matriz = fitz.Matrix(dpi_x / 72.0 * factor_dpi,
+                                             dpi_y / 72.0 * factor_dpi)
                         pix = pagina.get_pixmap(matrix=matriz, alpha=False)
                         img = Image.frombytes('RGB', (pix.width, pix.height),
                                               pix.samples)
@@ -234,17 +545,23 @@ def _imprimir_gdi(ruta, impresora, copias=1):
                         # Tamaño real de la página en píxeles de la impresora
                         ancho_real = pagina.rect.width / 72.0 * dpi_x
                         alto_real = pagina.rect.height / 72.0 * dpi_y
-                        # Solo se reduce si no cabe: nunca se amplía, para que
-                        # un ticket de 80 mm no salga estirado en una hoja A4
-                        factor = min(ancho_disp / ancho_real,
-                                     alto_disp / alto_real, 1.0)
+                        factor = _factor_escala(escala_modo,
+                                                ancho_disp, alto_disp,
+                                                ancho_real, alto_real)
                         w_dest = max(1, int(ancho_real * factor))
                         h_dest = max(1, int(alto_real * factor))
-                        x = max(0, (ancho_disp - w_dest) // 2)  # centrado
+                        # El rollo se ancla a la izquierda (el cabezal empieza
+                        # ahí); la hoja completa se centra
+                        x = 0 if escala_modo == 'real' else \
+                            max(0, (ancho_disp - w_dest) // 2)
                         ImageWin.Dib(img).draw(hdc.GetHandleOutput(),
                                                (x, 0, x + w_dest, h_dest))
                         hdc.EndPage()
                     hdc.EndDoc()
+                    try:
+                        ultimo_trabajo = int(trabajo or 0)
+                    except Exception:
+                        ultimo_trabajo = 0
                 except Exception:
                     try:
                         hdc.AbortDoc()
@@ -256,11 +573,11 @@ def _imprimir_gdi(ruta, impresora, copias=1):
                     hdc.DeleteDC()
                 except Exception:
                     pass
-        return True
+        return True, ultimo_trabajo
 
     except Exception as e:
         _log.warning("Impresión GDI falló en '%s': %s", impresora, e)
-        return False
+        return False, str(e)
     finally:
         if doc is not None:
             try:
@@ -270,7 +587,14 @@ def _imprimir_gdi(ruta, impresora, copias=1):
 
 
 def _imprimir_printto(ruta, impresora):
-    """Imprime con el verbo 'printto' (no toca la impresora predeterminada)."""
+    """
+    Respaldo por shell cuando el equipo no tiene el motor GDI completo.
+
+    Depende de que el visor de PDF instalado registre el verbo 'printto'.
+    Con Edge o con algunos Acrobat recientes no está registrado y lo único
+    que ocurre es que se abre el documento en pantalla, por eso es el último
+    recurso y no la vía normal.
+    """
     try:
         import win32api
         win32api.ShellExecute(0, 'printto', ruta, f'"{impresora}"', '.', 0)
@@ -280,75 +604,64 @@ def _imprimir_printto(ruta, impresora):
         return False
 
 
-def _imprimir_predeterminada(ruta, impresora):
+def enviar_documento(ruta, impresora, copias=1, opciones=None, titulo=None):
     """
-    Respaldo: fija la impresora como predeterminada, imprime y la restaura.
+    Envía un PDF a una impresora concreta y explica qué pasó.
 
-    Se ejecuta en un hilo aparte y bajo lock para que dos trabajos
-    simultáneos no se pisen la configuración global.
+    Returns dict:
+        ok        - True si el trabajo entró al spooler
+        metodo    - 'gdi' | 'printto' | ''
+        trabajo   - número de trabajo del spooler (0 si no se conoce)
+        impresora - nombre de la impresora
+        error     - motivo del fallo cuando ok es False
     """
-    def _tarea():
-        with _lock_impresion:
-            anterior = None
-            try:
-                import win32print
-                import win32api
-                try:
-                    anterior = win32print.GetDefaultPrinter()
-                except Exception:
-                    anterior = None
-                win32print.SetDefaultPrinter(impresora)
-                win32api.ShellExecute(0, 'print', ruta, None, '.', 0)
-                # El visor necesita leer la predeterminada antes de restaurarla
-                time.sleep(_ESPERA_RESTAURAR)
-            except Exception as e:
-                _log.error("No se pudo imprimir en '%s': %s", impresora, e)
-            finally:
-                if anterior:
-                    try:
-                        import win32print
-                        win32print.SetDefaultPrinter(anterior)
-                    except Exception:
-                        pass
+    salida = {'ok': False, 'metodo': '', 'trabajo': 0,
+              'impresora': impresora or '', 'error': ''}
 
-    threading.Thread(target=_tarea, name='ANgesLAB-Impresion',
-                     daemon=True).start()
-    return True
-
-
-def enviar_a_impresora(ruta, impresora, copias=1):
-    """
-    Envía un PDF a una impresora concreta.
-
-    Returns True si el trabajo se pudo encolar.
-    """
     if not ruta or not os.path.exists(ruta):
+        salida['error'] = "No se encontró el archivo a imprimir"
         _log.error("Archivo inexistente: %s", ruta)
-        return False
+        return salida
     if not impresora:
-        return False
+        salida['error'] = "No hay impresora asignada"
+        return salida
 
     copias = max(1, int(copias or 1))
 
-    # 1) GDI directo: la vía fiable, sin diálogos ni estado global
-    if _imprimir_gdi(ruta, impresora, copias):
-        _log.info("Documento enviado a '%s' (GDI): %s", impresora,
-                  os.path.basename(ruta))
-        return True
+    # Aviso previo: si el spooler ya dice que la impresora está mal, el
+    # trabajo se encola igual pero se deja constancia del motivo
+    estado = estado_impresora(impresora)
+    if not estado['existe']:
+        salida['error'] = f"La impresora «{impresora}» no está instalada en este equipo"
+        return salida
+    if estado['bloqueada']:
+        _log.warning("La impresora '%s' reporta: %s", impresora, estado['texto'])
 
-    # 2) Verbo 'printto' del shell
+    # 1) GDI directo: la vía real de impresión
+    ok, detalle = _imprimir_gdi(ruta, impresora, copias, opciones, titulo)
+    if ok:
+        salida.update({'ok': True, 'metodo': 'gdi', 'trabajo': detalle})
+        _log.info("Documento enviado a '%s' (GDI, trabajo %s): %s",
+                  impresora, detalle, os.path.basename(ruta))
+        if estado['bloqueada']:
+            salida['aviso'] = estado['texto']
+        return salida
+    salida['error'] = str(detalle)
+
+    # 2) Respaldo por shell (equipos sin PyMuPDF/pywin32 completos)
     if all(_imprimir_printto(ruta, impresora) for _ in range(copias)):
+        salida.update({'ok': True, 'metodo': 'printto', 'error': ''})
         _log.info("Documento enviado a '%s' (printto): %s", impresora,
                   os.path.basename(ruta))
-        return True
+        return salida
 
-    # 3) Último recurso: impresora predeterminada temporal
-    if _imprimir_predeterminada(ruta, impresora):
-        _log.info("Documento enviado a '%s' (predeterminada): %s", impresora,
-                  os.path.basename(ruta))
-        return True
+    _log.error("No se pudo imprimir en '%s': %s", impresora, salida['error'])
+    return salida
 
-    return False
+
+def enviar_a_impresora(ruta, impresora, copias=1, opciones=None, titulo=None):
+    """Compatibilidad: envía el documento y devuelve solo True/False."""
+    return enviar_documento(ruta, impresora, copias, opciones, titulo)['ok']
 
 
 def abrir_documento(ruta):
@@ -366,22 +679,127 @@ def abrir_documento(ruta):
 
 
 # ══════════════════════════════════════════════════════════════════════════
+#  Página de prueba
+# ══════════════════════════════════════════════════════════════════════════
+def generar_pagina_prueba(rol=None, impresora='', laboratorio='', carpeta=None):
+    """
+    Crea un PDF de prueba con el tamaño típico del rol.
+
+    Sirve para confirmar que la impresora responde, que el papel entra
+    derecho y que la escala configurada es la correcta.
+
+    Returns la ruta del PDF, o None si no se pudo generar.
+    """
+    try:
+        import fitz
+    except Exception as e:
+        _log.warning("No se puede generar la página de prueba: %s", e)
+        return None
+
+    from datetime import datetime
+
+    r = normalizar_rol(rol) or 'resultados'
+    es_rollo = ROLES[r].get('papel') == 'rollo'
+    # 80 mm de ancho para rollo; carta para hoja completa
+    ancho, alto = (226.8, 400.0) if es_rollo else (612.0, 792.0)
+    margen = 10 if es_rollo else 45
+
+    try:
+        doc = fitz.open()
+        pagina = doc.new_page(width=ancho, height=alto)
+
+        # Marco del área útil: si algún borde sale cortado, el papel o la
+        # escala están mal configurados
+        pagina.draw_rect(fitz.Rect(margen, margen, ancho - margen, alto - margen),
+                         color=(0.1, 0.35, 0.7), width=1)
+
+        y = margen + 22
+        tam_tit = 11 if es_rollo else 16
+        pagina.insert_text((margen + 8, y), "ANgesLAB", fontsize=tam_tit,
+                           fontname='helv', color=(0.1, 0.35, 0.7))
+        y += tam_tit + 4
+        pagina.insert_text((margen + 8, y), "PÁGINA DE PRUEBA",
+                           fontsize=tam_tit - 3, fontname='hebo')
+        y += tam_tit + 8
+
+        lineas = [
+            f"Función: {ROLES[r]['etiqueta']}",
+            f"Impresora: {impresora or '(no indicada)'}",
+            f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}",
+        ]
+        if laboratorio:
+            lineas.insert(0, f"Laboratorio: {laboratorio}")
+        for linea in lineas:
+            pagina.insert_text((margen + 8, y), linea[:60], fontsize=8,
+                               fontname='helv')
+            y += 12
+
+        y += 6
+        pagina.insert_text((margen + 8, y),
+                           "Si lee este texto completo y el marco no sale",
+                           fontsize=7, fontname='helv')
+        y += 10
+        pagina.insert_text((margen + 8, y),
+                           "cortado, la impresora está bien configurada.",
+                           fontsize=7, fontname='helv')
+        y += 18
+
+        # Regla de 1 cm: permite comprobar que no hay escalado indebido
+        pagina.insert_text((margen + 8, y), "Regla (1 cm por marca):",
+                           fontsize=7, fontname='helv')
+        y += 8
+        x = margen + 8
+        limite = ancho - margen - 8
+        i = 0
+        while x <= limite:
+            largo = 10 if i % 5 else 16
+            pagina.draw_line(fitz.Point(x, y), fitz.Point(x, y + largo),
+                             width=0.7)
+            x += 28.35            # 1 cm en puntos
+            i += 1
+        pagina.draw_line(fitz.Point(margen + 8, y), fitz.Point(min(x - 28.35, limite), y),
+                         width=0.7)
+
+        # Escala de grises: comprueba tinta/tóner
+        y += 34
+        pagina.insert_text((margen + 8, y), "Tinta:", fontsize=7, fontname='helv')
+        x = margen + 45
+        for tono in (0.0, 0.25, 0.5, 0.75):
+            if x + 22 > limite:
+                break
+            pagina.draw_rect(fitz.Rect(x, y - 7, x + 20, y + 3),
+                             color=None, fill=(tono, tono, tono))
+            x += 24
+
+        destino = carpeta or os.environ.get('TEMP') or os.getcwd()
+        ruta = os.path.join(destino, f"angeslab_prueba_{r}.pdf")
+        doc.save(ruta)
+        doc.close()
+        return ruta
+    except Exception as e:
+        _log.error("No se pudo generar la página de prueba: %s", e)
+        return None
+
+
+# ══════════════════════════════════════════════════════════════════════════
 #  Gestor de asignaciones
 # ══════════════════════════════════════════════════════════════════════════
 class GestorImpresoras:
-    """Lee y guarda qué impresora atiende cada rol."""
+    """Lee y guarda qué impresora atiende cada rol y con qué opciones."""
 
     def __init__(self, db):
         self.db = db
         self._cache = None
+        self._opciones = {}
         self._rol_cotizaciones = ROL_COTIZACIONES_DEFECTO
 
     def invalidar_cache(self):
         self._cache = None
+        self._opciones = {}
 
     def asignaciones(self, refrescar=False):
         """
-        Devuelve {rol: {'impresora': str, 'directo': bool}} para los 4 roles.
+        Devuelve {rol: {'impresora': str, 'directo': bool}} para todos los roles.
 
         Un rol sin impresora asignada queda con cadena vacía.
         """
@@ -395,6 +813,13 @@ class GestorImpresoras:
         except Exception as e:
             _log.warning("No se pudo leer la configuración de impresoras: %s", e)
 
+        # Las columnas BIT que Access crea con ALTER TABLE nacen en False, no
+        # en NULL, asi que un valor por defecto True jamas se aplicaria. Se usa
+        # OpcionesImpresoras como marca de «esto ya se configuro alguna vez»:
+        # mientras siga vacia mandan los valores de fabrica de cada rol.
+        sin_configurar = not (config.get(COLUMNA_OPCIONES) or '').strip() \
+            if config else True
+
         salida = {}
         for rol in ORDEN_ROLES:
             info = ROLES[rol]
@@ -402,44 +827,81 @@ class GestorImpresoras:
             directo = config.get(info['columna_directo'])
             salida[rol] = {
                 'impresora': (valor or '').strip() if valor else '',
-                'directo': info['directo_defecto'] if directo is None
+                'directo': info['directo_defecto']
+                           if (directo is None or sin_configurar)
                            else bool(directo),
             }
 
-        # Destino elegido para las cotizaciones (facturación o resultados)
+        # Respaldo para instalaciones que aún no asignaron impresora propia
+        # a las cotizaciones
         elegido = (config.get(COLUMNA_ROL_COTIZACIONES) or '').strip().lower()
         self._rol_cotizaciones = (elegido if elegido in ROLES_COTIZACION
                                   else ROL_COTIZACIONES_DEFECTO)
 
+        self._opciones = self._leer_opciones(config)
         self._cache = salida
         return salida
 
+    @staticmethod
+    def _leer_opciones(config):
+        """Opciones por rol guardadas como JSON; siempre devuelve algo usable."""
+        crudo = config.get(COLUMNA_OPCIONES) if config else None
+        datos = {}
+        if crudo:
+            try:
+                datos = json.loads(crudo) or {}
+            except Exception as e:
+                _log.warning("Opciones de impresión ilegibles, se usan las "
+                             "de fábrica: %s", e)
+                datos = {}
+        return {rol: normalizar_opciones(rol, datos.get(rol))
+                for rol in ORDEN_ROLES}
+
+    def opciones_de(self, rol):
+        """Opciones de papel/calidad/copias del rol."""
+        self.asignaciones()
+        r = self._resolver_rol(rol) or normalizar_rol(rol)
+        if not r:
+            return dict(OPCIONES_DEFECTO)
+        return dict(self._opciones.get(r) or opciones_defecto(r))
+
+    def todas_las_opciones(self):
+        """Copia de las opciones de todos los roles."""
+        self.asignaciones()
+        return {rol: dict(self._opciones.get(rol) or opciones_defecto(rol))
+                for rol in ORDEN_ROLES}
+
     def rol_cotizaciones(self):
-        """Rol por el que salen las cotizaciones: 'facturacion' o 'resultados'."""
+        """Rol de respaldo para cotizaciones: 'facturacion' o 'resultados'."""
         self.asignaciones()          # asegura que la configuración esté leída
         return self._rol_cotizaciones
 
     def _resolver_rol(self, rol):
         """
-        Nombre canónico del rol, aplicando la preferencia de cotizaciones.
+        Nombre canónico del rol al que sale realmente el documento.
 
-        Una cotización va al rol configurado; si ese rol no tiene impresora
-        asignada se usa el otro, para que el documento salga igual en vez de
+        Las cotizaciones salen por su propia impresora. Si todavía no tiene
+        ninguna asignada se recurre al rol de respaldo configurado y, si ese
+        tampoco tiene, al otro, para que el documento salga igual en vez de
         quedarse sin destino.
         """
-        if es_alias_cotizacion(rol):
-            asig = self.asignaciones()
-            preferido = self._rol_cotizaciones
-            if asig.get(preferido, {}).get('impresora'):
-                return preferido
-            alterno = ('resultados' if preferido == 'facturacion'
-                       else 'facturacion')
-            if asig.get(alterno, {}).get('impresora'):
-                _log.info("Cotización enviada al rol '%s': '%s' no tiene "
-                          "impresora asignada", alterno, preferido)
-                return alterno
+        r = normalizar_rol(rol)
+        if r != 'cotizaciones':
+            return r
+
+        asig = self.asignaciones()
+        if asig.get('cotizaciones', {}).get('impresora'):
+            return 'cotizaciones'
+
+        preferido = self._rol_cotizaciones
+        if asig.get(preferido, {}).get('impresora'):
+            _log.info("Cotización enviada al rol de respaldo '%s'", preferido)
             return preferido
-        return normalizar_rol(rol)
+        alterno = ('resultados' if preferido == 'facturacion' else 'facturacion')
+        if asig.get(alterno, {}).get('impresora'):
+            _log.info("Cotización enviada al rol de respaldo '%s'", alterno)
+            return alterno
+        return 'cotizaciones'
 
     def impresora_de(self, rol):
         """Nombre de la impresora asignada al rol, o '' si no hay."""
@@ -456,25 +918,46 @@ class GestorImpresoras:
         asig = self.asignaciones().get(r, {})
         return bool(asig.get('directo')) and bool(asig.get('impresora'))
 
-    def imprimir(self, ruta, rol, copias=1):
+    def imprimir(self, ruta, rol, copias=None, titulo=None):
         """
-        Envía el documento a la impresora del rol.
+        Envía el documento a la impresora del rol con sus opciones.
 
-        Returns True si se encoló; False si el rol no tiene impresora
-        asignada o el envío falló (el llamador decide el respaldo).
+        Returns dict de enviar_documento; 'ok' es False si el rol no tiene
+        impresora asignada o el envío falló (el llamador decide el respaldo).
         """
         impresora = self.impresora_de(rol)
         if not impresora:
-            return False
-        return enviar_a_impresora(ruta, impresora, copias)
+            return {'ok': False, 'metodo': '', 'trabajo': 0, 'impresora': '',
+                    'error': 'sin_impresora'}
+        opciones = self.opciones_de(rol)
+        n = copias if copias else opciones.get('copias', 1)
+        return enviar_documento(ruta, impresora, n, opciones, titulo)
 
-    def guardar(self, asignaciones, rol_cotizaciones=None):
+    def imprimir_prueba(self, rol, laboratorio=''):
+        """Genera y envía una página de prueba por el rol indicado."""
+        impresora = self.impresora_de(rol)
+        if not impresora:
+            return {'ok': False, 'error': 'sin_impresora', 'impresora': '',
+                    'metodo': '', 'trabajo': 0}
+        ruta = generar_pagina_prueba(rol, impresora, laboratorio)
+        if not ruta:
+            return {'ok': False, 'impresora': impresora, 'metodo': '',
+                    'trabajo': 0,
+                    'error': 'No se pudo generar la página de prueba '
+                             '(falta PyMuPDF)'}
+        opciones = dict(self.opciones_de(rol))
+        opciones['copias'] = 1
+        return enviar_documento(ruta, impresora, 1, opciones,
+                                'ANgesLAB - Página de prueba')
+
+    def guardar(self, asignaciones, rol_cotizaciones=None, opciones=None):
         """
-        Persiste las asignaciones.
+        Persiste las asignaciones y las opciones de cada rol.
 
         asignaciones: {rol: {'impresora': str, 'directo': bool}}
+        opciones: {rol: {'copias','calidad','orientacion','escala','papel'}}
         Se permite repetir la misma impresora en varios roles.
-        rol_cotizaciones: 'facturacion' o 'resultados'; None deja el actual.
+        rol_cotizaciones: rol de respaldo; None deja el actual.
         """
         campos = []
         for rol, datos in (asignaciones or {}).items():
@@ -497,6 +980,13 @@ class GestorImpresoras:
             if destino in ROLES_COTIZACION:
                 campos.append(f"[{COLUMNA_ROL_COTIZACIONES}] = '{destino}'")
 
+        if opciones is not None:
+            limpias = {rol: normalizar_opciones(rol, (opciones or {}).get(rol))
+                       for rol in ORDEN_ROLES}
+            texto = json.dumps(limpias, ensure_ascii=False)
+            campos.append(
+                f"[{COLUMNA_OPCIONES}] = '{texto.replace(chr(39), chr(39)*2)}'")
+
         if not campos:
             return False
         try:
@@ -512,23 +1002,59 @@ class GestorImpresoras:
 # ══════════════════════════════════════════════════════════════════════════
 #  Atajo de alto nivel
 # ══════════════════════════════════════════════════════════════════════════
-def imprimir_documento(db, ruta, rol, copias=1, abrir_si_falla=True):
-    """
-    Imprime en la impresora del rol; si no hay ninguna asignada abre el PDF.
+# Estados que devuelve imprimir_documento()
+IMPRESO = 'impreso'                    # el trabajo entró al spooler
+SIN_IMPRESORA = 'sin_impresora'        # el rol no tiene impresora asignada
+FALLO_IMPRESION = 'fallo_impresion'    # hay impresora pero rechazó el trabajo
+ABIERTO = 'abierto'                    # solo se abrió en pantalla
+ERROR = 'error'                        # ni siquiera se pudo abrir
 
-    Returns 'impreso', 'abierto' o 'error'.
+
+def imprimir_documento(db, ruta, rol, copias=None, abrir_si_falla=True,
+                       titulo=None, detalle=None):
+    """
+    Imprime en la impresora del rol.
+
+    Si el rol no tiene impresora o la impresión falla, abre el PDF en pantalla
+    (cuando abrir_si_falla) pero el estado devuelto deja claro que NO se
+    imprimió, para que la interfaz pueda avisar en vez de dar por bueno que
+    salió el papel.
+
+    Args:
+        detalle: dict opcional donde se copia el resultado completo del envío
+                 (impresora, método, número de trabajo, error).
+
+    Returns 'impreso' | 'sin_impresora' | 'fallo_impresion' | 'abierto' | 'error'
     """
     if not ruta or not os.path.exists(ruta):
-        return 'error'
+        return ERROR
+
+    resultado = {'ok': False, 'error': 'sin_impresora', 'impresora': '',
+                 'metodo': '', 'trabajo': 0}
     try:
-        gestor = GestorImpresoras(db)
-        if gestor.imprimir(ruta, rol, copias):
-            return 'impreso'
+        resultado = GestorImpresoras(db).imprimir(ruta, rol, copias, titulo)
     except Exception as e:
-        _log.error("Error imprimiendo (%s): %s", rol, e)
-    if abrir_si_falla and abrir_documento(ruta):
-        return 'abierto'
-    return 'error'
+        _log.error("Error imprimiendo (%s): %s", rol, e, exc_info=True)
+        resultado = {'ok': False, 'error': str(e), 'impresora': '',
+                     'metodo': '', 'trabajo': 0}
+
+    if isinstance(detalle, dict):
+        detalle.clear()
+        detalle.update(resultado)
+
+    if resultado.get('ok'):
+        return IMPRESO
+
+    if abrir_si_falla:
+        abrir_documento(ruta)
+    if resultado.get('error') == 'sin_impresora':
+        return SIN_IMPRESORA
+    return FALLO_IMPRESION
+
+
+def se_imprimio(estado):
+    """True solo si el documento llegó de verdad a la impresora."""
+    return estado == IMPRESO
 
 
 def crear_gestor_impresoras(db):

@@ -55,13 +55,18 @@ class ConfiguradorAdministrativo:
         # Impresoras por rol (ver modulos/impresoras.py)
         'ImpresoraResultados': 'TEXT(255)',
         'ImpresoraResultadosDirecto': 'BIT',
+        'ImpresoraCotizaciones': 'TEXT(255)',
+        'ImpresoraCotizacionesDirecto': 'BIT',
         'ImpresoraFacturacion': 'TEXT(255)',
         'ImpresoraFacturacionDirecto': 'BIT',
         'ImpresoraRecibos': 'TEXT(255)',
         'ImpresoraRecibosDirecto': 'BIT',
         'ImpresoraEtiquetas': 'TEXT(255)',
         'ImpresoraEtiquetasDirecto': 'BIT',
-        # Rol por el que salen las cotizaciones: facturacion o resultados
+        # Papel, calidad y copias de cada rol, en JSON
+        'OpcionesImpresoras': 'MEMO',
+        # Rol de respaldo de las cotizaciones mientras no tengan impresora
+        # propia: facturacion o resultados
         'RolCotizaciones': 'TEXT(20)',
         # Apariencia de las ventanas de trabajo: 'claro' u 'oscuro'
         'TemaVentanas': 'TEXT(10)',
@@ -247,21 +252,26 @@ class ConfiguradorAdministrativo:
             return False
 
     def actualizar_configuracion_impresoras(self, asignaciones,
-                                            rol_cotizaciones=None):
+                                            rol_cotizaciones=None,
+                                            opciones=None):
         """
-        Guarda la impresora asignada a cada rol.
+        Guarda la impresora asignada a cada rol y sus opciones de papel.
 
         Args:
             asignaciones (dict): {rol: {'impresora': str, 'directo': bool}}
-                Roles válidos: resultados, facturacion, recibos, etiquetas.
-                Se permite repetir la misma impresora en varios roles.
-            rol_cotizaciones (str): 'facturacion' o 'resultados'; indica por
-                cuál impresora salen las cotizaciones. None deja el actual.
+                Roles válidos: resultados, cotizaciones, facturacion, recibos,
+                etiquetas. Se permite repetir la misma impresora en varios.
+            rol_cotizaciones (str): rol de respaldo de las cotizaciones
+                ('facturacion' o 'resultados') mientras no tengan impresora
+                propia asignada. None deja el actual.
+            opciones (dict): {rol: {'copias', 'calidad', 'orientacion',
+                'escala', 'papel', 'bandeja'}}. None deja las actuales.
         """
         try:
             from modulos.impresoras import GestorImpresoras
             return GestorImpresoras(self.db).guardar(asignaciones,
-                                                     rol_cotizaciones)
+                                                     rol_cotizaciones,
+                                                     opciones)
         except Exception as e:
             logging.getLogger("angeslab.config_administrativa").warning(
                 "Error al actualizar impresoras: %s", e)

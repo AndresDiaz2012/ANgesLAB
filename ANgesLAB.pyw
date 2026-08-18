@@ -10,7 +10,8 @@ Licencia : Propietaria — consulte LICENSE para los términos de uso.
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-from datetime import datetime, date
+import shutil
+from datetime import datetime, date, timedelta
 import os
 import sys
 
@@ -88,6 +89,7 @@ try:
     from modulos.impresoras import (
         GestorImpresoras, imprimir_documento, listar_impresoras,
         normalizar_rol, ROLES as ROLES_IMPRESORA,
+        abrir_documento as abrir_documento_impresion,
     )
     IMPRESORAS_DISPONIBLE = True
 except ImportError:
@@ -1496,6 +1498,8 @@ class MainApplication:
             items_operacion.append(("🧪", "Pruebas", self.show_pruebas))
             items_operacion.append(("🔧", "Parámetros", self.show_parametros))
         items_operacion.append(("📝", "Resultados", self.show_resultados))
+        items_operacion.append(("📄", "Hojas de Trabajo", self.show_hojas_trabajo))
+        items_operacion.append(("🖨️", "Reimprimir", self.show_reimpresion))
         items_operacion.append(("📊", "Historial", self.show_historial_clinico))
 
         self._create_menu_section("Operación", items_operacion, expanded=True)
@@ -1524,7 +1528,6 @@ class MainApplication:
                     ("📦", "Inventario", self.show_inventario),
                     ("🔬", "Equipos", self.show_equipos),
                     ("🏷️", "Etiquetas", self.show_etiquetas),
-                    ("📄", "Hojas de Trabajo", self.show_hojas_trabajo),
                 ]
             self._create_menu_section("Administrativo", items_admin, expanded=False)
 
@@ -5276,6 +5279,12 @@ class MainApplication:
                                        relief='flat', borderwidth=0)
         self.lbl_edad_calc.pack(side='right', padx=(10, 0))
 
+        # Contexto del paciente conocido: se muestra solo si tiene historial
+        self.pac_contexto_frame = tk.Frame(pac_frame, bg=S['frame'], bd=0,
+                                           highlightthickness=1,
+                                           highlightbackground='#c7d2fe')
+        self._pac_contexto = None
+
         self.pac_id_seleccionado = None
         self._pac_auto_filled = False
 
@@ -5719,16 +5728,53 @@ class MainApplication:
             return
 
         pruebas_agregadas = False
+        # Pruebas que este paciente ya se hizo hace poco: se avisa una sola vez
+        # por tanda, para no encadenar dialogos cuando se agregan varias
+        repetidas = []
         for item in sel:
             if item in self.pruebas_data:
                 data = self.pruebas_data[item]
+                dias = self._dias_desde_ultima_vez(data.get('id'))
+                if dias is not None:
+                    repetidas.append((data.get('nombre') or data.get('codigo'),
+                                      dias))
                 self.sol_pruebas_seleccionadas.append(data)
                 pruebas_agregadas = True
+
+        if repetidas:
+            self._avisar_pruebas_repetidas(repetidas)
 
         if pruebas_agregadas:
             self._refrescar_lista_seleccionadas()
 
         self.calcular_totales()
+
+    def _avisar_pruebas_repetidas(self, repetidas):
+        """
+        Avisa de pruebas ya hechas hace poco y ofrece quitarlas.
+
+        No las bloquea: repetir un control es legitimo. Solo evita el gasto y
+        la molestia de pinchar otra vez a un paciente por una prueba que el
+        laboratorio ya le hizo la semana pasada.
+        """
+        detalle = "\n".join(
+            f"   • {nombre}: hace {dias} día(s)"
+            for nombre, dias in repetidas[:8])
+        if len(repetidas) > 8:
+            detalle += f"\n   • ... y {len(repetidas) - 8} más"
+
+        quitar = messagebox.askyesno(
+            "Prueba ya realizada",
+            f"Este paciente ya tiene resultado reciente de:\n\n{detalle}\n\n"
+            "¿Desea quitarlas de la solicitud?",
+            parent=self.sol_win)
+        if not quitar:
+            return
+
+        nombres = {n for n, _ in repetidas}
+        self.sol_pruebas_seleccionadas = [
+            p for p in self.sol_pruebas_seleccionadas
+            if (p.get('nombre') or p.get('codigo')) not in nombres]
 
     def quitar_prueba_sol(self):
         """Quita una prueba de la lista de seleccionadas"""
@@ -5915,6 +5961,7 @@ class MainApplication:
                 self._pac_auto_filled = False
                 self._set_pac_status("NUEVO — complete los datos y se registrara al guardar",
                                      '#fff3e0', '#e65100')
+                self._limpiar_contexto_paciente()
                 # Mover foco al campo Nombres
                 self.pac_nombres.focus_set()
 
@@ -5989,6 +6036,145 @@ class MainApplication:
         self._set_pac_status(f"✓  Paciente encontrado en el sistema",
                              '#e8f5e9', '#1b5e20')
         self._refrescar_card_paciente()
+        self._cargar_contexto_paciente()
+
+    # ══════════════════════════════════════════════════════════════════
+    # CONTEXTO DEL PACIENTE EN EL REGISTRO
+    # ══════════════════════════════════════════════════════════════════
+    # El laboratorio ya sabe cosas del paciente que vuelve: cuando vino, que
+    # le salio alterado y que se le hizo. Hasta ahora ese conocimiento vivia
+    # solo en la pantalla de Historial, asi que en el mostrador no se usaba.
+
+    # Dentro de esta ventana se avisa de una prueba repetida
+    DIAS_VENTANA_REPETICION = 90
+
+    def _limpiar_contexto_paciente(self):
+        """Oculta el panel de contexto (paciente nuevo o formulario limpio)."""
+        self._pac_contexto = None
+        frame = getattr(self, 'pac_contexto_frame', None)
+        if frame is None:
+            return
+        for hijo in frame.winfo_children():
+            hijo.destroy()
+        try:
+            frame.pack_forget()
+        except Exception:
+            pass
+
+    def _cargar_contexto_paciente(self):
+        """Consulta el historial del paciente y pinta el panel de contexto."""
+        self._limpiar_contexto_paciente()
+        frame = getattr(self, 'pac_contexto_frame', None)
+        if frame is None or not self.pac_id_seleccionado:
+            return
+        if not (HISTORIAL_CLINICO_DISPONIBLE and self.gestor_historial):
+            return
+
+        try:
+            ctx = self.gestor_historial.contexto_para_ingreso(
+                self.pac_id_seleccionado, self.DIAS_VENTANA_REPETICION)
+        except Exception as e:
+            _log.warning("No se pudo cargar el contexto del paciente: %s", e)
+            return
+
+        self._pac_contexto = ctx
+        if not ctx.get('es_conocido'):
+            return      # primera visita: no hay nada que contar
+
+        frame.pack(fill='x', pady=(0, 10))
+
+        # ── Encabezado: cuantas visitas y hace cuanto ─────────────────────
+        cab = tk.Frame(frame, bg='#eef2ff')
+        cab.pack(fill='x')
+
+        dias = ctx.get('dias_desde_ultima')
+        if dias is None:
+            cuando = ''
+        elif dias == 0:
+            cuando = ' · última hoy'
+        elif dias == 1:
+            cuando = ' · última ayer'
+        else:
+            cuando = f' · última hace {dias} días'
+        visitas = ctx.get('total_visitas', 0)
+        tk.Label(cab,
+                 text=f"🗂  Paciente conocido · {visitas} visita(s){cuando}",
+                 font=('Segoe UI', 9, 'bold'), bg='#eef2ff', fg='#1e3a8a',
+                 anchor='w', padx=10, pady=5).pack(side='left')
+
+        if ctx.get('ultima_orden'):
+            tk.Button(cab, text="🔁  Repetir última orden",
+                      font=('Segoe UI', 8, 'bold'), bg='#1e3a8a', fg='white',
+                      relief='flat', padx=10, pady=3, cursor='hand2',
+                      command=self._repetir_ultima_orden).pack(side='right',
+                                                               padx=8, pady=4)
+
+        # ── Alertas de la ultima visita ───────────────────────────────────
+        alertas = ctx.get('alertas_ultima') or []
+        if alertas:
+            cuerpo = tk.Frame(frame, bg='#fff7ed')
+            cuerpo.pack(fill='x')
+            # padx/pady de un widget admiten una sola medida; la tupla solo
+            # vale en el gestor de geometria
+            tk.Label(cuerpo,
+                     text=f"⚠  En su última visita, {len(alertas)} parámetro(s) "
+                          "fuera de rango:",
+                     font=('Segoe UI', 8, 'bold'), bg='#fff7ed', fg='#9a3412',
+                     anchor='w', padx=10).pack(fill='x', pady=(5, 2))
+
+            chips = tk.Frame(cuerpo, bg='#fff7ed')
+            chips.pack(fill='x', padx=10, pady=(0, 6))
+            for a in alertas[:6]:
+                flecha = '↑' if a.get('tipo') == 'alto' else '↓'
+                color = '#b91c1c' if a.get('tipo') == 'alto' else '#1d4ed8'
+                unidad = f" {a.get('unidad')}" if a.get('unidad') else ''
+                tk.Label(chips,
+                         text=f"{a.get('parametro', '')} {flecha} "
+                              f"{a.get('valor', '')}{unidad}",
+                         font=('Segoe UI', 8), bg='white', fg=color,
+                         padx=6, pady=2, relief='solid', bd=1
+                         ).pack(side='left', padx=(0, 5))
+            if len(alertas) > 6:
+                tk.Label(chips, text=f"+{len(alertas) - 6} más",
+                         font=('Segoe UI', 8), bg='#fff7ed',
+                         fg='#9a3412').pack(side='left')
+
+    def _repetir_ultima_orden(self):
+        """Carga en la solicitud las pruebas de la visita anterior."""
+        ctx = getattr(self, '_pac_contexto', None) or {}
+        orden = ctx.get('ultima_orden') or []
+        if not orden:
+            return
+
+        ya = {str(p.get('codigo')) for p in self.sol_pruebas_seleccionadas}
+        agregadas, repetidas = 0, 0
+        for pr in orden:
+            codigo = str(pr.get('CodigoPrueba') or '')
+            if codigo in ya:
+                repetidas += 1
+                continue
+            self.sol_pruebas_seleccionadas.append({
+                'id': pr.get('PruebaID'),
+                'codigo': codigo,
+                'nombre': pr.get('NombrePrueba') or '',
+                'precio': float(pr.get('Precio') or 0),
+            })
+            ya.add(codigo)
+            agregadas += 1
+
+        if agregadas:
+            self._refrescar_lista_seleccionadas()
+            self.calcular_totales()
+
+        detalle = f"{agregadas} prueba(s) agregada(s)"
+        if repetidas:
+            detalle += f", {repetidas} ya estaba(n) en la lista"
+        messagebox.showinfo("Repetir orden", detalle + ".", parent=self.sol_win)
+
+    def _dias_desde_ultima_vez(self, prueba_id):
+        """Días desde que se hizo esa prueba, o None si no es reciente."""
+        ctx = getattr(self, '_pac_contexto', None) or {}
+        return (ctx.get('recientes') or {}).get(prueba_id)
 
     def _limpiar_campos_paciente(self):
         """Limpia todos los campos del paciente para ingresar uno nuevo."""
@@ -6012,6 +6198,7 @@ class MainApplication:
         self._set_pac_status("Ingrese la cédula para buscar o registrar paciente",
                              '#eceff1', '#455a64')
         self._refrescar_card_paciente()
+        self._limpiar_contexto_paciente()
         self.pac_cedula.focus_set()
 
     # Los pasteles claros que usan las llamadas historicas, traducidos al
@@ -7344,9 +7531,14 @@ class MainApplication:
             self.portal_qr = crear_gestor_portal(db)
         return self.portal_qr
 
-    def _generar_pdf_recibo(self, numero_recibo, solicitud_id, total, pruebas_lista=None):
+    def _generar_pdf_recibo(self, numero_recibo, solicitud_id, total,
+                            pruebas_lista=None, imprimir=True):
         """
         Genera un PDF con formato de ticket/recibo térmico.
+
+        Con imprimir=False solo devuelve la ruta del PDF, sin enviarlo a la
+        impresora: así la pantalla de reimpresión puede ofrecer vista previa
+        y guardado además de la impresión.
 
         El ticket lleva solo el encabezado del laboratorio, los datos del
         paciente y el QR de consulta de resultados: no se imprime el detalle
@@ -7356,7 +7548,7 @@ class MainApplication:
         compatibilidad con las llamadas existentes, pero ya no se usan.
         """
         if not REPORTLAB_AVAILABLE:
-            return
+            return None
 
         try:
             from reportlab.lib.pagesizes import portrait
@@ -7562,10 +7754,13 @@ class MainApplication:
 
             # Sale por la impresora asignada a recibos; si no hay ninguna
             # configurada se abre en pantalla.
-            self.imprimir_por_rol(ruta_pdf, 'recibos')
+            if imprimir:
+                self.imprimir_por_rol(ruta_pdf, 'recibos')
+            return ruta_pdf
 
         except Exception as e:
             _log.error("Error generando PDF recibo: %s", e, exc_info=True)
+            return None
 
     def _generar_factura_legacy(self, solicitud_id, total, pruebas):
         """Genera una factura para la solicitud (método legacy)"""
@@ -11103,14 +11298,18 @@ Forma de Pago: {self.combo_forma_pago.get()}
             self._gestor_impresoras = GestorImpresoras(db)
         return self._gestor_impresoras
 
-    def imprimir_por_rol(self, pdf_path, rol, abrir_si_falla=True):
+    def imprimir_por_rol(self, pdf_path, rol, abrir_si_falla=True,
+                         avisar=True, copias=None):
         """
         Envía un documento a la impresora asignada a su rol.
 
-        Si el rol no tiene impresora configurada abre el PDF en pantalla,
-        de modo que el flujo nunca se queda sin salida.
+        Si el rol no tiene impresora configurada, o la impresora rechaza el
+        trabajo, el PDF se abre en pantalla como respaldo Y se avisa: abrir el
+        visor no es imprimir, y dar eso por bueno es justo lo que hacía que el
+        usuario creyera que el sistema imprimía cuando no lo hacía.
 
-        Returns 'impreso', 'abierto' o 'error'.
+        Returns 'impreso', 'sin_impresora', 'fallo_impresion', 'abierto' o
+        'error'.
         """
         if not pdf_path or not os.path.exists(pdf_path):
             return 'error'
@@ -11120,16 +11319,61 @@ Forma de Pago: {self.combo_forma_pago.get()}
                 return 'abierto'
             except Exception:
                 return 'error'
-        return imprimir_documento(db, pdf_path, rol,
-                                  abrir_si_falla=abrir_si_falla)
+
+        detalle = {}
+        estado = imprimir_documento(db, pdf_path, rol, copias=copias,
+                                    abrir_si_falla=abrir_si_falla,
+                                    detalle=detalle)
+        if avisar and estado != 'impreso':
+            self._avisar_impresion_fallida(rol, estado, detalle)
+        return estado
+
+    # Un rol solo avisa una vez por sesión de que no tiene impresora: el aviso
+    # sirve para que el usuario lo configure, no para estorbarle en cada recibo
+    _roles_ya_avisados = set()
+
+    def _avisar_impresion_fallida(self, rol, estado, detalle=None):
+        """Explica por qué no salió el papel, sin repetirse en cada documento."""
+        try:
+            nombre_rol = ROLES_IMPRESORA[normalizar_rol(rol) or 'resultados']['etiqueta']
+        except Exception:
+            nombre_rol = str(rol)
+
+        if estado == 'sin_impresora':
+            if rol in self._roles_ya_avisados:
+                return
+            self._roles_ya_avisados.add(rol)
+            messagebox.showwarning(
+                "Documento no impreso",
+                f"La función «{nombre_rol}» no tiene impresora asignada, así "
+                "que el documento solo se abrió en pantalla.\n\n"
+                "Asígnele una impresora en:\n"
+                "Administración → Configuración Administrativa → Impresión.")
+            return
+
+        if estado == 'fallo_impresion':
+            motivo = (detalle or {}).get('error') or 'motivo desconocido'
+            impresora = (detalle or {}).get('impresora') or ''
+            messagebox.showerror(
+                "Documento no impreso",
+                f"No se pudo imprimir en «{impresora}».\n\n"
+                f"Motivo: {motivo}\n\n"
+                "El documento se abrió en pantalla para que no se pierda.")
+            return
+
+        if estado == 'error':
+            messagebox.showerror(
+                "Documento no impreso",
+                f"No se pudo imprimir ni abrir el documento de "
+                f"«{nombre_rol}».")
 
     def obtener_impresora_configurada(self, tipo='resultados'):
         """
         Impresora asignada a un rol en la configuración.
 
         Args:
-            tipo: rol o alias ('resultados', 'facturacion', 'recibos',
-                  'etiquetas', 'cotizacion', 'informes'...)
+            tipo: rol o alias ('resultados', 'cotizaciones', 'facturacion',
+                  'recibos', 'etiquetas', 'informes'...)
         Returns:
             str: Nombre de la impresora o None
         """
@@ -11141,69 +11385,109 @@ Forma de Pago: {self.combo_forma_pago.get()}
                 pass
         return None
 
-    def imprimir_pdf_en_impresora(self, pdf_path, tipo='resultados', titulo='Imprimir Documento'):
+    def imprimir_pdf_en_impresora(self, pdf_path, tipo='resultados',
+                                  titulo='Imprimir Documento'):
         """
         Envía el PDF a la impresora del rol indicado.
 
         Si el rol está marcado como «directo» en la configuración, imprime sin
-        preguntar. En caso contrario muestra el diálogo con esa impresora ya
-        preseleccionada.
+        preguntar. En caso contrario muestra el diálogo con esa impresora y
+        sus opciones de papel ya preseleccionadas.
+
+        Returns True si el trabajo llegó a la impresora.
         """
         if not pdf_path or not os.path.exists(pdf_path):
             messagebox.showerror("Error", "No se encontró el archivo PDF para imprimir.")
             return False
 
-        # Impresión directa: el rol ya tiene impresora y así está configurado
+        if not IMPRESORAS_DISPONIBLE:
+            messagebox.showwarning(
+                "Imprimir",
+                "El módulo de impresión no está disponible.\n\n"
+                "El documento se abrirá en pantalla; use Ctrl+P para imprimir.")
+            try:
+                os.startfile(pdf_path)
+            except Exception:
+                webbrowser.open(pdf_path)
+            return False
+
+        from modulos.impresoras import (enviar_documento, estado_impresora,
+                                        normalizar_opciones, diagnostico_motor)
+
+        rol = normalizar_rol(tipo) or 'resultados'
         gestor = self.gestor_impresoras()
+        opciones_rol = dict(normalizar_opciones(rol, None))
         if gestor:
             try:
-                if gestor.es_directo(tipo):
-                    if gestor.imprimir(pdf_path, tipo):
+                opciones_rol = dict(gestor.opciones_de(rol))
+            except Exception:
+                pass
+
+        # Impresión directa: el rol ya tiene impresora y así está configurado
+        if gestor:
+            try:
+                if gestor.es_directo(rol):
+                    resultado = gestor.imprimir(pdf_path, rol, titulo=titulo)
+                    if resultado.get('ok'):
                         return True
+                    # Falló la vía directa: se avisa y se abre el diálogo para
+                    # que el usuario pueda elegir otra impresora
+                    self._avisar_impresion_fallida(rol, 'fallo_impresion',
+                                                   resultado)
             except Exception:
                 pass  # Si falla, seguir con el diálogo
 
-        # Obtener lista de impresoras
-        if IMPRESORAS_DISPONIBLE:
-            impresoras, impresora_default = listar_impresoras()
-        else:
-            impresoras, impresora_default = [], ""
+        # Sin el motor GDI el sistema no imprime: solo abriría el visor
+        faltan = diagnostico_motor()
+        if faltan:
+            if messagebox.askyesno(
+                    "Imprimir",
+                    "Este equipo no puede imprimir directamente porque le "
+                    f"falta: {', '.join(faltan)}.\n\n"
+                    "Instálelo con:  pip install -r requirements.txt\n\n"
+                    "¿Desea abrir el PDF en pantalla para imprimirlo desde "
+                    "el visor?"):
+                try:
+                    os.startfile(pdf_path)
+                except Exception:
+                    webbrowser.open(pdf_path)
+            return False
 
+        impresoras, impresora_default = listar_impresoras()
         if not impresoras:
             messagebox.showerror("Error",
                 "No se detectaron impresoras instaladas en el sistema.\n\n"
                 "Instale una impresora y vuelva a intentar.")
             return False
 
-        # Impresora configurada en BD
-        impresora_configurada = self.obtener_impresora_configurada(tipo)
+        impresora_configurada = self.obtener_impresora_configurada(rol)
+        etiqueta_rol = ROLES_IMPRESORA[rol]['etiqueta']
+        resultado_final = {'ok': False}
 
-        # Crear diálogo de impresión
+        # ── Diálogo ───────────────────────────────────────────────────────
         win = tk.Toplevel(self.root)
         win.title(titulo)
         win.configure(bg='white')
         win.grab_set()
         win.focus_set()
-        hacer_ventana_responsiva(win, 480, 340, min_ancho=400, min_alto=300)
+        hacer_ventana_responsiva(win, 520, 500, min_ancho=470, min_alto=460)
 
-        # Header
         header = tk.Frame(win, bg=COLORS['primary'], height=50)
         header.pack(fill='x')
         header.pack_propagate(False)
-        tk.Label(header, text="Imprimir Documento", font=('Segoe UI', 14, 'bold'),
-                bg=COLORS['primary'], fg='white').pack(pady=12)
+        tk.Label(header, text=f"Imprimir · {etiqueta_rol}",
+                 font=('Segoe UI', 14, 'bold'),
+                 bg=COLORS['primary'], fg='white').pack(pady=12)
 
         body = tk.Frame(win, bg='white')
         body.pack(fill='both', expand=True, padx=25, pady=15)
 
-        # Archivo
         tk.Label(body, text="Archivo:", font=('Segoe UI', 9, 'bold'),
                 bg='white', anchor='w').pack(fill='x')
         tk.Label(body, text=os.path.basename(pdf_path), font=('Segoe UI', 9),
                 bg='#f5f5f5', fg='#555', relief='solid', bd=1,
                 padx=8, pady=4, anchor='w').pack(fill='x', pady=(2, 12))
 
-        # Selección de impresora
         tk.Label(body, text="Seleccione impresora:", font=('Segoe UI', 9, 'bold'),
                 bg='white', anchor='w').pack(fill='x')
 
@@ -11211,86 +11495,74 @@ Forma de Pago: {self.combo_forma_pago.get()}
                                         state='readonly', height=10)
         combo_impresora.pack(fill='x', pady=(2, 5))
 
-        # Seleccionar impresora por defecto: configurada > predeterminada > primera
+        # Impresora por defecto: la del rol > la del sistema > la primera
         if impresora_configurada and impresora_configurada in impresoras:
             combo_impresora.set(impresora_configurada)
         elif impresora_default and impresora_default in impresoras:
             combo_impresora.set(impresora_default)
-        elif impresoras:
+        else:
             combo_impresora.current(0)
 
-        # Info de impresora
-        lbl_info = tk.Label(body, text="", font=('Segoe UI', 8), bg='white', fg='#888', anchor='w')
+        lbl_info = tk.Label(body, text="", font=('Segoe UI', 8), bg='white',
+                            fg='#888', anchor='w')
         lbl_info.pack(fill='x')
-
-        _rol = normalizar_rol(tipo) if IMPRESORAS_DISPONIBLE else None
-        _rol_etiqueta = ROLES_IMPRESORA[_rol]['etiqueta'].lower() if _rol else tipo
 
         def actualizar_info(event=None):
             sel = combo_impresora.get()
             textos = []
-            if sel == impresora_default:
-                textos.append("Predeterminada del sistema")
             if sel == impresora_configurada:
-                textos.append(f"Asignada a {_rol_etiqueta}")
-            lbl_info.config(text=" | ".join(textos) if textos else "")
+                textos.append(f"Asignada a {etiqueta_rol.lower()}")
+            elif sel == impresora_default:
+                textos.append("Predeterminada del sistema")
+            estado = estado_impresora(sel)
+            textos.append(estado['texto'])
+            lbl_info.config(text=" | ".join(textos),
+                            fg='#b45309' if estado['bloqueada'] else '#888')
 
         combo_impresora.bind('<<ComboboxSelected>>', actualizar_info)
         actualizar_info()
 
-        # Opciones adicionales
         opciones_frame = tk.Frame(body, bg='white')
         opciones_frame.pack(fill='x', pady=(10, 0))
 
-        # Copias
         tk.Label(opciones_frame, text="Copias:", font=('Segoe UI', 9, 'bold'),
                 bg='white').pack(side='left')
-        spin_copias = tk.Spinbox(opciones_frame, from_=1, to=10, width=5,
+        spin_copias = tk.Spinbox(opciones_frame, from_=1, to=20, width=5,
                                   font=('Segoe UI', 10), justify='center')
+        spin_copias.delete(0, 'end')
+        spin_copias.insert(0, str(opciones_rol.get('copias', 1)))
         spin_copias.pack(side='left', padx=10)
 
-        # Calidad
         tk.Label(opciones_frame, text="Calidad:", font=('Segoe UI', 9, 'bold'),
                 bg='white').pack(side='left', padx=(15, 0))
-        combo_calidad = ttk.Combobox(opciones_frame, values=['Alta', 'Media', 'Borrador'],
+        _calidades = {'alta': 'Alta', 'media': 'Media', 'borrador': 'Borrador'}
+        combo_calidad = ttk.Combobox(opciones_frame, values=list(_calidades.values()),
                                       font=('Segoe UI', 9), state='readonly', width=10)
-        combo_calidad.set('Alta')
+        combo_calidad.set(_calidades.get(opciones_rol.get('calidad', 'alta'), 'Alta'))
         combo_calidad.pack(side='left', padx=5)
 
-        # Botones
+        escala_frame = tk.Frame(body, bg='white')
+        escala_frame.pack(fill='x', pady=(8, 0))
+        tk.Label(escala_frame, text="Escala:", font=('Segoe UI', 9, 'bold'),
+                 bg='white').pack(side='left')
+        _escalas = {'ajustar': 'Ajustar a la página',
+                    'real': 'Tamaño real (rollo)',
+                    'llenar': 'Llenar el área imprimible'}
+        combo_escala = ttk.Combobox(escala_frame, values=list(_escalas.values()),
+                                     font=('Segoe UI', 9), state='readonly',
+                                     width=24)
+        combo_escala.set(_escalas.get(opciones_rol.get('escala', 'ajustar'),
+                                      'Ajustar a la página'))
+        combo_escala.pack(side='left', padx=10)
+
+        var_recordar = tk.BooleanVar(value=False)
+        tk.Checkbutton(body, variable=var_recordar, bg='white',
+                       font=('Segoe UI', 9), anchor='w',
+                       text=f"Usar esta impresora y estas opciones siempre "
+                            f"para «{etiqueta_rol}»").pack(fill='x', pady=(10, 0))
+
         btn_frame = tk.Frame(win, bg='white')
         btn_frame.pack(fill='x', padx=25, pady=(0, 20))
-
-        def _configurar_calidad_impresora(impresora_nombre, calidad_texto, copias_num):
-            """Configura la calidad de impresión de la impresora."""
-            try:
-                import win32print
-
-                # Mapear calidad
-                # DMRES_HIGH = -4, DMRES_MEDIUM = -3, DMRES_DRAFT = -1
-                calidad_map = {'Alta': -4, 'Media': -3, 'Borrador': -1}
-                calidad_valor = calidad_map.get(calidad_texto, -4)
-
-                hprinter = win32print.OpenPrinter(impresora_nombre)
-                try:
-                    # Obtener configuración actual (DEVMODE)
-                    devmode = win32print.GetPrinter(hprinter, 2)['pDevMode']
-
-                    # Establecer calidad de impresión
-                    devmode.PrintQuality = calidad_valor
-
-                    # Establecer copias
-                    devmode.Copies = copias_num
-
-                    # Aplicar configuración
-                    win32print.DocumentProperties(0, hprinter, impresora_nombre,
-                                                   devmode, devmode, 0)
-
-                    return devmode
-                finally:
-                    win32print.ClosePrinter(hprinter)
-            except Exception:
-                return None
 
         def ejecutar_impresion():
             impresora_sel = combo_impresora.get()
@@ -11298,44 +11570,47 @@ Forma de Pago: {self.combo_forma_pago.get()}
                 messagebox.showwarning("Aviso", "Seleccione una impresora.", parent=win)
                 return
 
-            copias = int(spin_copias.get())
-            calidad = combo_calidad.get()
+            try:
+                copias = max(1, int(spin_copias.get()))
+            except Exception:
+                copias = 1
+            calidad = next((k for k, v in _calidades.items()
+                            if v == combo_calidad.get()), 'alta')
+            escala = next((k for k, v in _escalas.items()
+                           if v == combo_escala.get()), 'ajustar')
+            recordar = bool(var_recordar.get())
+
+            opciones = dict(opciones_rol)
+            opciones.update({'copias': copias, 'calidad': calidad,
+                             'escala': escala})
             win.destroy()
 
-            try:
-                # Configurar calidad alta en la impresora
-                _configurar_calidad_impresora(impresora_sel, calidad, copias)
+            resultado = enviar_documento(pdf_path, impresora_sel, copias,
+                                         opciones, titulo)
+            resultado_final.update(resultado)
 
-                # Se envía con el verbo 'printto', que no altera la impresora
-                # predeterminada del sistema: así dos roles pueden imprimir a
-                # la vez sin robarse el trabajo.
-                if IMPRESORAS_DISPONIBLE:
-                    from modulos.impresoras import enviar_a_impresora
-                    if not enviar_a_impresora(pdf_path, impresora_sel, copias):
-                        raise RuntimeError(
-                            "El sistema no aceptó el trabajo de impresión.")
-                else:
-                    raise ImportError
-
+            if resultado['ok']:
+                if recordar and gestor:
+                    self._recordar_impresora_rol(rol, impresora_sel, opciones)
+                trabajo = (f"\nTrabajo n° {resultado['trabajo']}"
+                           if resultado.get('trabajo') else '')
+                aviso = (f"\n\nOjo: la impresora reporta «{resultado['aviso']}»."
+                         if resultado.get('aviso') else '')
                 messagebox.showinfo("Imprimir",
                     f"Documento enviado a imprimir.\n\n"
                     f"Impresora: {impresora_sel}\n"
-                    f"Calidad: {calidad}\n"
-                    f"Copias: {copias}")
+                    f"Copias: {copias}{trabajo}{aviso}")
+                return
 
-            except ImportError:
+            if messagebox.askyesno(
+                    "No se pudo imprimir",
+                    f"La impresora «{impresora_sel}» no aceptó el trabajo.\n\n"
+                    f"Motivo: {resultado.get('error') or 'desconocido'}\n\n"
+                    "¿Desea abrir el PDF en pantalla?"):
                 try:
-                    for _ in range(copias):
-                        os.startfile(pdf_path, 'print')
+                    os.startfile(pdf_path)
                 except Exception:
-                    try:
-                        os.startfile(pdf_path)
-                        messagebox.showinfo("Imprimir",
-                            "Se ha abierto el PDF.\n\nUse Ctrl+P para imprimir.")
-                    except Exception:
-                        webbrowser.open(pdf_path)
-            except Exception as e:
-                messagebox.showerror("Error", f"Error al imprimir:\n{str(e)}")
+                    webbrowser.open(pdf_path)
 
         def abrir_pdf():
             """Abre el PDF en el visor para vista previa."""
@@ -11356,10 +11631,35 @@ Forma de Pago: {self.combo_forma_pago.get()}
                  bg=COLORS['danger'], fg='white', relief='flat', width=14, pady=6,
                  cursor='hand2', command=win.destroy).pack(side='right')
 
-        return True
+        # El llamador necesita saber si de verdad se imprimió
+        self.root.wait_window(win)
+        return bool(resultado_final.get('ok'))
+
+    def _recordar_impresora_rol(self, rol, impresora, opciones):
+        """Deja fijada la impresora y las opciones elegidas para ese rol."""
+        gestor = self.gestor_impresoras()
+        if not gestor:
+            return
+        try:
+            asignaciones = {r: dict(datos)
+                            for r, datos in gestor.asignaciones().items()}
+            asignaciones.setdefault(rol, {'impresora': '', 'directo': False})
+            asignaciones[rol]['impresora'] = impresora
+            todas = gestor.todas_las_opciones()
+            todas[rol] = dict(opciones)
+            gestor.guardar(asignaciones, None, todas)
+            gestor.invalidar_cache()
+        except Exception as e:
+            _log.warning("No se pudo recordar la impresora de '%s': %s", rol, e)
 
     def imprimir_resultados(self):
-        """Genera un reporte de resultados para imprimir"""
+        """
+        Muestra el informe de la solicitud y lo manda a la impresora.
+
+        La ventana es una revisión rápida en texto de lo que va a salir; el
+        documento que se imprime es siempre el PDF con el formato oficial del
+        laboratorio, por la impresora asignada a «Resultados e informes».
+        """
         ok, areas_filtro = self._validar_seleccion_areas()
         if not ok:
             return
@@ -11391,7 +11691,7 @@ Forma de Pago: {self.combo_forma_pago.get()}
                 messagebox.showwarning("Aviso", "No hay datos para imprimir")
                 return
 
-            # Generar reporte
+            # Revisión en pantalla de lo que se va a imprimir
             reporte = f"""
 {'='*60}
             LABORATORIO CLÍNICO - ANgesLAB
@@ -11415,6 +11715,7 @@ RESULTADOS:
                                      for p in pruebas})
                 reporte += f"\n(Informe parcial — áreas: {', '.join(_incluidas)})\n"
 
+            _pendientes = 0
             _area_actual = None
             for p in pruebas:
                 _area = (p.get('NombreArea') or 'Sin área').strip()
@@ -11422,7 +11723,10 @@ RESULTADOS:
                     _area_actual = _area
                     reporte += f"\n[ {_area.upper()} ]\n"
 
-                estado = '✓' if p.get('Estado') == 'Validado' else '○'
+                validado = p.get('Estado') == 'Validado'
+                if not validado:
+                    _pendientes += 1
+                estado = '✓' if validado else '○'
                 reporte += f"""
 {estado} {p['NombrePrueba'] or 'N/A'}
    Código: {p['CodigoPrueba'] or 'N/A'}
@@ -11438,39 +11742,117 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
 {'='*60}
 """
 
-            # Mostrar ventana de impresión
             win = tk.Toplevel(self.root)
-            win.title(f"Resultados - {sol['NumeroSolicitud']}")
-            hacer_ventana_responsiva(win, 600, 700, min_ancho=500, min_alto=500)
+            win.title(f"Informe de resultados - {sol['NumeroSolicitud']}")
+            win.configure(bg='white')
+            hacer_ventana_responsiva(win, 640, 720, min_ancho=520, min_alto=520)
+
+            # Destino real del informe: si el rol no tiene impresora hay que
+            # decirlo aquí, no cuando el usuario ya crea que imprimió
+            impresora = self.obtener_impresora_configurada('resultados')
+            barra = tk.Frame(win, bg='#eef2ff')
+            barra.pack(fill='x')
+            if impresora:
+                texto_destino = f"🖨  Saldrá por: {impresora}"
+                color_destino = '#1e3a8a'
+            else:
+                texto_destino = ("⚠  «Resultados e informes» no tiene impresora "
+                                 "asignada — configúrela en Administración")
+                color_destino = '#b45309'
+            tk.Label(barra, text=texto_destino, font=('Segoe UI', 9, 'bold'),
+                     bg='#eef2ff', fg=color_destino, anchor='w',
+                     padx=10, pady=6).pack(fill='x')
+
+            if _pendientes:
+                tk.Label(win, text=f"⚠  {_pendientes} prueba(s) sin validar "
+                                   "aparecerán como pendientes en el informe.",
+                         font=('Segoe UI', 9), bg='#fff7ed', fg='#9a3412',
+                         anchor='w', padx=10, pady=5).pack(fill='x')
 
             txt = tk.Text(win, font=('Courier New', 10), wrap='word')
             txt.pack(fill='both', expand=True, padx=10, pady=10)
             txt.insert('1.0', reporte)
             txt.config(state='disabled')
 
-            def guardar():
+            def _pdf():
+                """PDF oficial con el filtro de áreas ya aplicado."""
+                return self.generar_pdf_resultados(guardar_como=False,
+                                                   areas_filtro=areas_filtro)
+
+            def _imprimir():
+                ruta = _pdf()
+                if not ruta:
+                    messagebox.showerror("Error",
+                                         "No se pudo generar el informe en PDF.",
+                                         parent=win)
+                    return
+                if self.imprimir_pdf_en_impresora(
+                        ruta, tipo='resultados',
+                        titulo=f"Imprimir informe {sol['NumeroSolicitud']}"):
+                    win.destroy()
+
+            def _vista_previa():
+                ruta = _pdf()
+                if ruta:
+                    abrir_documento_impresion(ruta)
+
+            def _guardar_pdf():
+                self.generar_pdf_resultados(guardar_como=True,
+                                            areas_filtro=areas_filtro)
+
+            def _guardar_txt():
                 filename = filedialog.asksaveasfilename(
                     defaultextension=".txt",
                     filetypes=[("Text files", "*.txt")],
-                    initialfile=f"Resultados_{sol['NumeroSolicitud']}.txt"
-                )
+                    initialfile=f"Resultados_{sol['NumeroSolicitud']}.txt",
+                    parent=win)
                 if filename:
                     with open(filename, 'w', encoding='utf-8') as f:
                         f.write(reporte)
-                    messagebox.showinfo("Éxito", f"Guardado en:\n{filename}")
+                    messagebox.showinfo("Éxito", f"Guardado en:\n{filename}",
+                                        parent=win)
 
-            tk.Button(win, text="💾 Guardar como TXT", font=('Segoe UI', 10),
-                     bg=COLORS['primary'], fg='white', relief='flat', command=guardar).pack(pady=10)
+            botones = tk.Frame(win, bg='white')
+            botones.pack(fill='x', padx=10, pady=(0, 12))
+
+            tk.Button(botones, text="🖨  Imprimir informe",
+                      font=('Segoe UI', 10, 'bold'), bg=COLORS['success'],
+                      fg='white', relief='flat', padx=16, pady=7,
+                      cursor='hand2', command=_imprimir).pack(side='left')
+
+            tk.Button(botones, text="👁  Vista previa PDF",
+                      font=('Segoe UI', 10), bg=COLORS['info'], fg='white',
+                      relief='flat', padx=14, pady=7, cursor='hand2',
+                      command=_vista_previa).pack(side='left', padx=6)
+
+            tk.Button(botones, text="📄  Guardar PDF", font=('Segoe UI', 10),
+                      bg=COLORS['primary'], fg='white', relief='flat',
+                      padx=14, pady=7, cursor='hand2',
+                      command=_guardar_pdf).pack(side='left')
+
+            tk.Button(botones, text="Exportar TXT", font=('Segoe UI', 9),
+                      bg='#e2e8f0', fg='#334155', relief='flat',
+                      padx=12, pady=7, cursor='hand2',
+                      command=_guardar_txt).pack(side='right')
 
         except Exception as e:
             messagebox.showerror("Error", str(e))
+            _log.error("Error preparando el informe de resultados: %s", e,
+                       exc_info=True)
 
-    def generar_pdf_resultados(self, guardar_como=False, areas_filtro=None):
+    def generar_pdf_resultados(self, guardar_como=False, areas_filtro=None,
+                               solicitud_id=None):
         """Genera un PDF profesional con los resultados de la solicitud - Formato CMLab
 
         areas_filtro: lista de AreaID a incluir. None imprime el informe
         completo (comportamiento por defecto de envios y llamadas externas).
+        solicitud_id: solicitud a imprimir. None usa la que esta abierta en la
+        pantalla de resultados; se indica al reimprimir desde otra pantalla.
         """
+        sol_id_pdf = solicitud_id or getattr(self, 'sol_id_resultado', None)
+        if not sol_id_pdf:
+            messagebox.showwarning("Aviso", "Seleccione una solicitud primero.")
+            return None
         if not REPORTLAB_AVAILABLE:
             messagebox.showerror("Error", "La librería reportlab no está instalada.\nEjecute: pip install reportlab")
             return None
@@ -11534,7 +11916,7 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                 FROM (Solicitudes s
                 LEFT JOIN Pacientes p ON s.PacienteID = p.PacienteID)
                 LEFT JOIN Medicos m ON s.MedicoID = m.MedicoID
-                WHERE s.SolicitudID = {self.sol_id_resultado}
+                WHERE s.SolicitudID = {sol_id_pdf}
             """)
 
             if not sol:
@@ -11548,7 +11930,7 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                 FROM (DetalleSolicitudes d
                 LEFT JOIN Pruebas p ON d.PruebaID = p.PruebaID)
                 LEFT JOIN Areas a ON p.AreaID = a.AreaID
-                WHERE d.SolicitudID = {self.sol_id_resultado}
+                WHERE d.SolicitudID = {sol_id_pdf}
                 ORDER BY a.NombreArea, p.NombrePrueba
             """)
 
@@ -13949,6 +14331,446 @@ ANgesLAB - Laboratorio Clínico""")
     # HISTORIAL CLINICO
     # ============================================================
 
+    # ══════════════════════════════════════════════════════════════════
+    # REIMPRESIÓN DE DOCUMENTOS YA EMITIDOS
+    # ══════════════════════════════════════════════════════════════════
+    # Cada tipo de documento sale por la impresora de su propio rol y se
+    # regenera a partir de lo que hay en la base de datos, no de un PDF
+    # guardado: así una reimpresión refleja el estado real del documento.
+    TIPOS_REIMPRESION = {
+        'factura': {
+            'etiqueta': '🧾 Facturas',
+            'rol': 'facturacion',
+            'columnas': ('ID', 'N° Factura', 'Control', 'Fecha', 'Paciente',
+                         'Total', 'Estado'),
+            'anchos': {'ID': 45, 'N° Factura': 130, 'Control': 90,
+                       'Fecha': 90, 'Paciente': 220, 'Total': 90,
+                       'Estado': 100},
+            'tabla': 'Facturas',
+        },
+        'recibo': {
+            'etiqueta': '🧾 Recibos',
+            'rol': 'recibos',
+            'columnas': ('ID', 'N° Recibo', 'Fecha', 'Paciente', 'Solicitud',
+                         'Total', 'Estado'),
+            'anchos': {'ID': 45, 'N° Recibo': 130, 'Fecha': 90,
+                       'Paciente': 220, 'Solicitud': 120, 'Total': 90,
+                       'Estado': 90},
+            'tabla': 'Recibos',
+        },
+        'resultado': {
+            'etiqueta': '📝 Resultados',
+            'rol': 'resultados',
+            'columnas': ('ID', 'N° Solicitud', 'Fecha', 'Paciente',
+                         'Documento', 'Pruebas', 'Estado'),
+            'anchos': {'ID': 45, 'N° Solicitud': 130, 'Fecha': 90,
+                       'Paciente': 220, 'Documento': 110, 'Pruebas': 70,
+                       'Estado': 110},
+            'tabla': 'Solicitudes',
+        },
+    }
+
+    RANGOS_REIMPRESION = (('Hoy', 0), ('7 días', 7), ('30 días', 30),
+                          ('90 días', 90), ('Todo', None))
+
+    def show_reimpresion(self):
+        """Busca un documento ya emitido y lo vuelve a imprimir."""
+        self.clear_content()
+        self.set_title("🖨️ Reimprimir Documentos")
+
+        scrollable = self.setup_scrollable_content()
+
+        self._reimp_tipo = tk.StringVar(value='factura')
+        self._reimp_dias = tk.IntVar(value=30)
+        self._reimp_filas = {}
+
+        # ── Tipo de documento ─────────────────────────────────────────────
+        tipo_f = tk.Frame(scrollable, bg=COLORS['bg'])
+        tipo_f.pack(fill='x', padx=20, pady=(15, 5))
+
+        tk.Label(tipo_f, text="Documento:", font=('Segoe UI', 10, 'bold'),
+                 bg=COLORS['bg']).pack(side='left', padx=(0, 10))
+        for clave, info in self.TIPOS_REIMPRESION.items():
+            tk.Radiobutton(tipo_f, text=info['etiqueta'], value=clave,
+                           variable=self._reimp_tipo, bg=COLORS['bg'],
+                           font=('Segoe UI', 10), cursor='hand2',
+                           command=self._cambiar_tipo_reimpresion
+                           ).pack(side='left', padx=6)
+
+        # ── Filtros ───────────────────────────────────────────────────────
+        filtro_f = tk.Frame(scrollable, bg=COLORS['bg'])
+        filtro_f.pack(fill='x', padx=20, pady=5)
+
+        tk.Label(filtro_f, text="Período:", font=('Segoe UI', 10, 'bold'),
+                 bg=COLORS['bg']).pack(side='left', padx=(0, 8))
+        for texto, dias in self.RANGOS_REIMPRESION:
+            tk.Radiobutton(filtro_f, text=texto,
+                           value=-1 if dias is None else dias,
+                           variable=self._reimp_dias, bg=COLORS['bg'],
+                           font=('Segoe UI', 9), cursor='hand2',
+                           command=self._cargar_reimpresion).pack(side='left')
+
+        tk.Label(filtro_f, text="  🔍", font=('Segoe UI', 12),
+                 bg=COLORS['bg']).pack(side='left', padx=(15, 0))
+        self._reimp_busqueda = tk.Entry(filtro_f, font=('Segoe UI', 10), width=26,
+                                        relief='flat', bg='white',
+                                        highlightthickness=1,
+                                        highlightbackground=COLORS['border'])
+        self._reimp_busqueda.pack(side='left', padx=5, ipady=6)
+        self._reimp_busqueda.bind('<Return>', lambda e: self._cargar_reimpresion())
+
+        tk.Button(filtro_f, text="Buscar", font=('Segoe UI', 10),
+                  bg=COLORS['success'], fg='white', relief='flat', padx=12,
+                  cursor='hand2',
+                  command=self._cargar_reimpresion).pack(side='left', padx=5)
+
+        tk.Label(filtro_f, text="Número, paciente o cédula",
+                 font=('Segoe UI', 8), fg=COLORS['text_light'],
+                 bg=COLORS['bg']).pack(side='left', padx=6)
+
+        # ── Destino de la impresión ───────────────────────────────────────
+        self._reimp_destino = tk.Label(scrollable, text="", anchor='w',
+                                       font=('Segoe UI', 9), bg=COLORS['bg'],
+                                       fg=COLORS['text_light'])
+        self._reimp_destino.pack(fill='x', padx=20, pady=(6, 0))
+
+        # ── Listado ───────────────────────────────────────────────────────
+        self._reimp_tree_f = tk.Frame(scrollable, bg='white')
+        self._reimp_tree_f.pack(fill='both', expand=True, padx=20, pady=10)
+        self._reimp_tree = None
+        self._construir_tabla_reimpresion()
+
+        # ── Acciones ──────────────────────────────────────────────────────
+        acc_f = tk.Frame(scrollable, bg=COLORS['bg'])
+        acc_f.pack(fill='x', padx=20, pady=(0, 15))
+
+        tk.Button(acc_f, text="🖨️  Reimprimir", font=('Segoe UI', 10, 'bold'),
+                  bg=COLORS['success'], fg='white', relief='flat',
+                  padx=18, pady=7, cursor='hand2',
+                  command=self._reimprimir_documento).pack(side='left')
+
+        tk.Button(acc_f, text="👁  Vista previa", font=('Segoe UI', 10),
+                  bg=COLORS['info'], fg='white', relief='flat',
+                  padx=14, pady=7, cursor='hand2',
+                  command=lambda: self._reimprimir_documento(accion='previa')
+                  ).pack(side='left', padx=8)
+
+        tk.Button(acc_f, text="📄  Guardar PDF", font=('Segoe UI', 10),
+                  bg=COLORS['primary'], fg='white', relief='flat',
+                  padx=14, pady=7, cursor='hand2',
+                  command=lambda: self._reimprimir_documento(accion='guardar')
+                  ).pack(side='left')
+
+        tk.Label(acc_f, text="Doble clic sobre el documento también lo reimprime.",
+                 font=('Segoe UI', 9), fg=COLORS['text_light'],
+                 bg=COLORS['bg']).pack(side='left', padx=15)
+
+        self._cambiar_tipo_reimpresion()
+
+    def _cambiar_tipo_reimpresion(self):
+        """Reconstruye la tabla al cambiar de tipo de documento."""
+        self._construir_tabla_reimpresion()
+        self._cargar_reimpresion()
+
+    def _construir_tabla_reimpresion(self):
+        """Dibuja el árbol con las columnas del tipo seleccionado."""
+        for hijo in self._reimp_tree_f.winfo_children():
+            hijo.destroy()
+
+        info = self.TIPOS_REIMPRESION[self._reimp_tipo.get()]
+        cols = info['columnas']
+        tree = ttk.Treeview(self._reimp_tree_f, columns=cols, show='headings',
+                            height=17)
+        for c in cols:
+            tree.heading(c, text=c)
+            tree.column(c, width=info['anchos'].get(c, 100), anchor='center')
+        tree.column('Paciente', anchor='w')
+        # Un documento anulado se puede reimprimir para el archivo, pero tiene
+        # que verse que lo está
+        tree.tag_configure('anulado', foreground='#dc2626')
+
+        vsb = ttk.Scrollbar(self._reimp_tree_f, orient='vertical',
+                            command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+        tree.pack(side='left', fill='both', expand=True)
+        vsb.pack(side='right', fill='y')
+        tree.bind('<Double-1>', lambda e: self._reimprimir_documento())
+
+        self._reimp_tree = tree
+
+    def _filtro_fecha_reimpresion(self, campo):
+        """Cláusula de fecha según el período elegido ('' si es «Todo»)."""
+        dias = self._reimp_dias.get()
+        if dias < 0:
+            return ''
+        desde = (datetime.now() - timedelta(days=dias)).strftime('%m/%d/%Y')
+        return f" AND {campo} >= #{desde}#"
+
+    def _cargar_reimpresion(self):
+        """Carga los documentos emitidos que cumplen los filtros."""
+        if not getattr(self, '_reimp_tree', None):
+            return
+        for item in self._reimp_tree.get_children():
+            self._reimp_tree.delete(item)
+        self._reimp_filas = {}
+
+        tipo = self._reimp_tipo.get()
+        info = self.TIPOS_REIMPRESION[tipo]
+        busqueda = (self._reimp_busqueda.get() or '').strip().replace("'", "''")
+
+        # Recordar al usuario por dónde va a salir el documento
+        impresora = self.obtener_impresora_configurada(info['rol'])
+        if impresora:
+            self._reimp_destino.config(
+                text=f"🖨  Estos documentos salen por: {impresora}",
+                fg=COLORS['text_light'])
+        else:
+            self._reimp_destino.config(
+                text=("⚠  Sin impresora asignada para esta función: el "
+                      "documento solo se abrirá en pantalla. "
+                      "Configúrela en Configuración → Impresión."),
+                fg='#b45309')
+
+        try:
+            if tipo == 'factura':
+                filas = self._consultar_facturas_reimpresion(busqueda)
+            elif tipo == 'recibo':
+                filas = self._consultar_recibos_reimpresion(busqueda)
+            else:
+                filas = self._consultar_resultados_reimpresion(busqueda)
+        except Exception as e:
+            _log.error("Error listando documentos para reimprimir: %s", e,
+                       exc_info=True)
+            messagebox.showerror(
+                "Error", f"No se pudieron listar los documentos:\n{e}")
+            return
+
+        for valores, ident, anulado in filas:
+            iid = self._reimp_tree.insert(
+                '', 'end', values=valores,
+                tags=('anulado',) if anulado else ())
+            self._reimp_filas[iid] = ident
+
+        if not filas:
+            self._reimp_tree.insert('', 'end', values=(
+                '', 'Sin documentos en el período', '', '', '', '', ''))
+
+    def _consultar_facturas_reimpresion(self, busqueda):
+        """Facturas emitidas, con su paciente y estado de pago."""
+        where = "WHERE 1=1" + self._filtro_fecha_reimpresion('f.FechaEmision')
+        if busqueda:
+            where += (f" AND (f.NumeroFactura LIKE '%{busqueda}%'"
+                      f" OR p.Nombres LIKE '%{busqueda}%'"
+                      f" OR p.Apellidos LIKE '%{busqueda}%'"
+                      f" OR p.NumeroDocumento LIKE '%{busqueda}%')")
+        filas = db.query(f"""
+            SELECT TOP 300 f.FacturaID, f.NumeroFactura, f.NumeroControl,
+                   f.FechaEmision, f.MontoTotal, f.EstadoPago, f.Anulada,
+                   p.Nombres, p.Apellidos
+            FROM Facturas f LEFT JOIN Pacientes p ON f.PacienteID = p.PacienteID
+            {where}
+            ORDER BY f.FechaEmision DESC, f.FacturaID DESC
+        """)
+        salida = []
+        for f in filas:
+            anulada = bool(f.get('Anulada'))
+            estado = 'ANULADA' if anulada else (f.get('EstadoPago') or 'Emitida')
+            salida.append(((
+                f['FacturaID'], f.get('NumeroFactura') or '—',
+                f.get('NumeroControl') or '—',
+                self._fecha_corta(f.get('FechaEmision')),
+                self._nombre_paciente(f),
+                f"{float(f.get('MontoTotal') or 0):,.2f}", estado),
+                {'factura_id': f['FacturaID'],
+                 'numero': f.get('NumeroFactura') or ''},
+                anulada))
+        return salida
+
+    def _consultar_recibos_reimpresion(self, busqueda):
+        """Recibos de caja emitidos."""
+        where = "WHERE 1=1" + self._filtro_fecha_reimpresion('r.FechaEmision')
+        if busqueda:
+            where += (f" AND (r.NumeroRecibo LIKE '%{busqueda}%'"
+                      f" OR p.Nombres LIKE '%{busqueda}%'"
+                      f" OR p.Apellidos LIKE '%{busqueda}%'"
+                      f" OR p.NumeroDocumento LIKE '%{busqueda}%')")
+        filas = db.query(f"""
+            SELECT TOP 300 r.ReciboID, r.NumeroRecibo, r.FechaEmision, r.Total,
+                   r.SolicitudID, r.Anulado, s.NumeroSolicitud,
+                   p.Nombres, p.Apellidos
+            FROM ((Recibos r LEFT JOIN Pacientes p ON r.PacienteID = p.PacienteID)
+                  LEFT JOIN Solicitudes s ON r.SolicitudID = s.SolicitudID)
+            {where}
+            ORDER BY r.FechaEmision DESC, r.ReciboID DESC
+        """)
+        salida = []
+        for r in filas:
+            anulado = bool(r.get('Anulado'))
+            salida.append(((
+                r['ReciboID'], r.get('NumeroRecibo') or '—',
+                self._fecha_corta(r.get('FechaEmision')),
+                self._nombre_paciente(r),
+                r.get('NumeroSolicitud') or '—',
+                f"{float(r.get('Total') or 0):,.2f}",
+                'ANULADO' if anulado else 'Emitido'),
+                {'numero': r.get('NumeroRecibo') or '',
+                 'solicitud_id': r.get('SolicitudID'),
+                 'total': float(r.get('Total') or 0)},
+                anulado))
+        return salida
+
+    def _consultar_resultados_reimpresion(self, busqueda):
+        """Solicitudes con al menos un resultado cargado."""
+        where = "WHERE 1=1" + self._filtro_fecha_reimpresion('s.FechaSolicitud')
+        if busqueda:
+            where += (f" AND (s.NumeroSolicitud LIKE '%{busqueda}%'"
+                      f" OR p.Nombres LIKE '%{busqueda}%'"
+                      f" OR p.Apellidos LIKE '%{busqueda}%'"
+                      f" OR p.NumeroDocumento LIKE '%{busqueda}%')")
+        filas = db.query(f"""
+            SELECT TOP 300 s.SolicitudID, s.NumeroSolicitud, s.FechaSolicitud,
+                   s.EstadoSolicitud, p.Nombres, p.Apellidos, p.NumeroDocumento
+            FROM Solicitudes s LEFT JOIN Pacientes p ON s.PacienteID = p.PacienteID
+            {where}
+            ORDER BY s.FechaSolicitud DESC, s.SolicitudID DESC
+        """)
+        salida = []
+        for s in filas:
+            # Solo tiene sentido reimprimir lo que ya tiene resultados
+            try:
+                conteo = db.query_one(f"""
+                    SELECT COUNT(*) AS n FROM DetalleSolicitudes
+                    WHERE SolicitudID = {s['SolicitudID']}
+                      AND Resultado IS NOT NULL AND Resultado <> ''
+                """) or {}
+                cargadas = int(conteo.get('n') or 0)
+            except Exception:
+                cargadas = 0
+            if not cargadas:
+                continue
+            salida.append(((
+                s['SolicitudID'], s.get('NumeroSolicitud') or '—',
+                self._fecha_corta(s.get('FechaSolicitud')),
+                self._nombre_paciente(s),
+                s.get('NumeroDocumento') or '—',
+                cargadas, s.get('EstadoSolicitud') or '—'),
+                {'solicitud_id': s['SolicitudID'],
+                 'numero': s.get('NumeroSolicitud') or ''},
+                False))
+        return salida
+
+    @staticmethod
+    def _fecha_corta(valor):
+        """dd/mm/aaaa a partir de lo que devuelva Access."""
+        if hasattr(valor, 'strftime'):
+            return valor.strftime('%d/%m/%Y')
+        return str(valor or '')[:10]
+
+    @staticmethod
+    def _nombre_paciente(fila):
+        """Nombre completo del paciente de una fila consultada."""
+        nombre = f"{fila.get('Nombres') or ''} {fila.get('Apellidos') or ''}".strip()
+        return nombre or 'Sin paciente'
+
+    def _reimprimir_documento(self, accion='imprimir'):
+        """
+        Regenera el documento seleccionado y lo imprime, muestra o guarda.
+
+        accion: 'imprimir' | 'previa' | 'guardar'
+        """
+        tree = getattr(self, '_reimp_tree', None)
+        if tree is None:
+            return
+        sel = tree.selection()
+        if not sel or sel[0] not in self._reimp_filas:
+            messagebox.showwarning("Aviso", "Seleccione un documento de la lista.")
+            return
+
+        tipo = self._reimp_tipo.get()
+        info = self.TIPOS_REIMPRESION[tipo]
+        datos = self._reimp_filas[sel[0]]
+
+        try:
+            ruta = self._generar_pdf_reimpresion(tipo, datos)
+        except Exception as e:
+            _log.error("Error regenerando el documento (%s): %s", tipo, e,
+                       exc_info=True)
+            messagebox.showerror("Error",
+                                 f"No se pudo regenerar el documento:\n{e}")
+            return
+
+        if not ruta or not os.path.exists(ruta):
+            messagebox.showerror(
+                "Error",
+                "No se pudo generar el PDF del documento.\n\n"
+                "Verifique que la solicitud o factura aún tenga sus datos.")
+            return
+
+        if accion == 'previa':
+            abrir_documento_impresion(ruta)
+            return
+
+        if accion == 'guardar':
+            destino = filedialog.asksaveasfilename(
+                defaultextension='.pdf', filetypes=[("PDF", "*.pdf")],
+                initialfile=f"{tipo}_{datos.get('numero') or 'documento'}.pdf")
+            if destino:
+                try:
+                    shutil.copyfile(ruta, destino)
+                    messagebox.showinfo("Guardado", f"Guardado en:\n{destino}")
+                except Exception as e:
+                    messagebox.showerror("Error", f"No se pudo guardar:\n{e}")
+            return
+
+        estado = self.imprimir_por_rol(
+            ruta, info['rol'],
+            titulo=f"Reimpresión {datos.get('numero') or ''}".strip())
+        if estado == 'impreso':
+            impresora = self.obtener_impresora_configurada(info['rol']) or ''
+            self._reimp_destino.config(
+                text=(f"✔  Reimpreso {datos.get('numero') or 'documento'} "
+                      f"en {impresora}"),
+                fg=COLORS['success'])
+            self._auditar_reimpresion(info['tabla'], datos)
+
+    def _generar_pdf_reimpresion(self, tipo, datos):
+        """Vuelve a generar el PDF del documento a partir de la base de datos."""
+        if tipo == 'factura':
+            if not FACTURA_FISCAL_DISPONIBLE:
+                messagebox.showerror(
+                    "Error", "El módulo de factura fiscal no está disponible.")
+                return None
+            return GeneradorFacturaPDF(db).generar(datos['factura_id'])
+
+        if tipo == 'recibo':
+            if not datos.get('solicitud_id'):
+                messagebox.showerror(
+                    "Error",
+                    "Este recibo no tiene solicitud asociada y no se puede "
+                    "regenerar.")
+                return None
+            return self._generar_pdf_recibo(
+                datos['numero'], datos['solicitud_id'],
+                datos.get('total', 0), imprimir=False)
+
+        # Resultados: informe completo, sin filtro de áreas
+        return self.generar_pdf_resultados(guardar_como=False,
+                                           areas_filtro=None,
+                                           solicitud_id=datos['solicitud_id'])
+
+    def _auditar_reimpresion(self, tabla, datos):
+        """Deja constancia de la reimpresión (un duplicado fiscal importa)."""
+        if not getattr(self, 'auditoria', None):
+            return
+        try:
+            registro = (datos.get('factura_id') or datos.get('solicitud_id')
+                        or 0)
+            self.auditoria.registrar_impresion(
+                tabla, registro,
+                f"Reimpresión de {datos.get('numero') or 'documento'}")
+        except Exception as e:
+            _log.debug("No se pudo auditar la reimpresión: %s", e)
+
     def show_historial_clinico(self):
         """Vista principal del historial clinico de pacientes."""
         self.clear_content()
@@ -13978,7 +14800,12 @@ ANgesLAB - Laboratorio Clínico""")
         )
         self.entry_buscar_hist.pack(side='left', fill='x', expand=True, ipady=6)
         self.entry_buscar_hist.bind('<Return>', lambda e: self._buscar_pacientes_historial())
-        self.entry_buscar_hist.bind('<KeyRelease>', lambda e: self._buscar_pacientes_historial())
+        # Cada pulsacion lanzaba su propia consulta a Pacientes: al escribir
+        # «rodriguez» eran nueve barridos de la tabla. Se espera a que el
+        # usuario deje de teclear.
+        self._hist_busqueda_pendiente = None
+        self.entry_buscar_hist.bind('<KeyRelease>',
+                                    lambda e: self._programar_busqueda_historial())
 
         tk.Label(left_frame, text="👥 Pacientes:",
                  font=('Segoe UI', 10, 'bold'),
@@ -14002,6 +14829,13 @@ ANgesLAB - Laboratorio Clínico""")
         vsb.pack(side='right', fill='y')
 
         self.tree_pac_hist.bind('<<TreeviewSelect>>', self._on_paciente_historial_seleccionado)
+
+        # Sin esto, una lista recortada a 100 parece la lista completa y el
+        # usuario concluye que el paciente no esta registrado
+        self.lbl_pac_hist_conteo = tk.Label(
+            left_frame, text="", font=('Segoe UI', 8),
+            bg='white', fg=COLORS['text_light'], anchor='w')
+        self.lbl_pac_hist_conteo.pack(fill='x', padx=15, pady=(0, 10))
 
         self.pac_hist_map = {}
         self._cargar_pacientes_historial()
@@ -14059,20 +14893,41 @@ ANgesLAB - Laboratorio Clínico""")
             fg=COLORS['text_light'], justify='center'
         ).pack(pady=100)
 
+    # Cuántos pacientes se listan a la vez en el historial
+    LIMITE_PACIENTES_HISTORIAL = 100
+
+    def _programar_busqueda_historial(self):
+        """Reprograma la búsqueda: solo consulta cuando el usuario hace pausa."""
+        if getattr(self, '_hist_busqueda_pendiente', None):
+            try:
+                self.root.after_cancel(self._hist_busqueda_pendiente)
+            except Exception:
+                pass
+        self._hist_busqueda_pendiente = self.root.after(
+            280, self._buscar_pacientes_historial)
+
     def _cargar_pacientes_historial(self, filtro=""):
         """Carga la lista de pacientes en el panel izquierdo del historial."""
         for item in self.tree_pac_hist.get_children():
             self.tree_pac_hist.delete(item)
 
-        filtro_safe = filtro.replace("'", "''")
+        filtro_safe = filtro.replace("'", "''").strip()
         where = ""
         if filtro_safe:
-            where = (f"WHERE Nombres LIKE '%{filtro_safe}%' "
-                     f"OR Apellidos LIKE '%{filtro_safe}%' "
-                     f"OR NumeroDocumento LIKE '%{filtro_safe}%'")
+            # Se busca cada palabra por separado contra nombre, apellido y
+            # documento: escribir «maria rodriguez» no encontraba a nadie
+            # porque se comparaba la frase entera contra cada campo suelto.
+            condiciones = []
+            for palabra in filtro_safe.split():
+                condiciones.append(
+                    f"(Nombres LIKE '%{palabra}%' "
+                    f"OR Apellidos LIKE '%{palabra}%' "
+                    f"OR NumeroDocumento LIKE '%{palabra}%')")
+            where = "WHERE " + " AND ".join(condiciones)
         try:
+            limite = self.LIMITE_PACIENTES_HISTORIAL
             data = db.query(
-                f"SELECT TOP 100 PacienteID, NumeroDocumento, "
+                f"SELECT TOP {limite} PacienteID, NumeroDocumento, "
                 f"Nombres & ' ' & Apellidos AS NombreCompleto "
                 f"FROM Pacientes {where} "
                 f"ORDER BY Apellidos, Nombres"
@@ -14084,11 +14939,38 @@ ANgesLAB - Laboratorio Clínico""")
                     (r.get('NombreCompleto') or 'N/A')[:30],
                 ))
                 self.pac_hist_map[iid] = r['PacienteID']
+
+            self._actualizar_conteo_pacientes(len(data or []), where, limite)
         except Exception as e:
             _log.error("Error cargando pacientes historial: %s", e)
 
+    def _actualizar_conteo_pacientes(self, mostrados, where, limite):
+        """Indica si la lista está recortada, para no dar por perdido a nadie."""
+        if not hasattr(self, 'lbl_pac_hist_conteo'):
+            return
+        if mostrados < limite:
+            texto = f"{mostrados} paciente(s)"
+            color = COLORS['text_light']
+        else:
+            total = mostrados
+            try:
+                fila = db.query_one(
+                    f"SELECT COUNT(*) AS Total FROM Pacientes {where}")
+                total = int((fila or {}).get('Total') or mostrados)
+            except Exception:
+                pass
+            if total > mostrados:
+                texto = (f"Mostrando {mostrados} de {total} · "
+                         "afine la búsqueda")
+                color = '#b45309'
+            else:
+                texto = f"{mostrados} paciente(s)"
+                color = COLORS['text_light']
+        self.lbl_pac_hist_conteo.config(text=texto, fg=color)
+
     def _buscar_pacientes_historial(self):
         """Filtra pacientes por texto de busqueda."""
+        self._hist_busqueda_pendiente = None
         filtro = self.entry_buscar_hist.get().strip()
         self._cargar_pacientes_historial(filtro)
 

@@ -13,9 +13,10 @@ Vistas:
 Copyright 2024-2026 ANgesLAB Solutions
 """
 
+import os
 import tkinter as tk
-from tkinter import ttk, messagebox
-from datetime import datetime, date
+from tkinter import ttk, messagebox, filedialog
+from datetime import datetime, date, timedelta
 import logging
 
 _log_admin = logging.getLogger("angeslab.admin")
@@ -124,10 +125,19 @@ class VentanaAdministrativa:
         """
         try:
             from modulos.impresoras import imprimir_documento, GestorImpresoras
-            resultado = imprimir_documento(self.db, ruta, rol)
+            detalle = {}
+            resultado = imprimir_documento(self.db, ruta, rol, detalle=detalle)
             if resultado == 'impreso':
-                impresora = GestorImpresoras(self.db).impresora_de(rol)
+                impresora = detalle.get('impresora') or \
+                    GestorImpresoras(self.db).impresora_de(rol)
                 return f"enviadas a {impresora}"
+            # Abrir el visor no es imprimir: hay que decir por qué no salió
+            if resultado == 'sin_impresora':
+                return ("solo abiertas en pantalla: esa función no tiene "
+                        "impresora asignada")
+            if resultado == 'fallo_impresion':
+                return (f"abiertas en pantalla: la impresora falló "
+                        f"({detalle.get('error') or 'motivo desconocido'})")
             if resultado == 'abierto':
                 return "abiertas en pantalla"
             return "no se pudo abrir el archivo"
@@ -1624,7 +1634,9 @@ class VentanaAdministrativa:
     def show_hojas_trabajo(self, app):
         """Vista de generacion de hojas de trabajo por area."""
         if not self.generador_hojas:
-            messagebox.showinfo("No Disponible", "Modulo de hojas de trabajo no disponible.")
+            messagebox.showinfo("No Disponible",
+                                "Modulo de hojas de trabajo no disponible.\n\n"
+                                "Requiere ReportLab: pip install reportlab")
             return
 
         app.clear_content()
@@ -1633,70 +1645,267 @@ class VentanaAdministrativa:
         main_frame = tk.Frame(scrollable, bg=COLORS['bg'])
         main_frame.pack(fill='both', expand=True, padx=20, pady=10)
 
-        areas_info = [
-            (1, 'Hematologia'), (2, 'Quimica'), (5, 'Coagulacion'),
-            (6, 'Uroanalisis'), (7, 'Parasitologia'), (8, 'Hormonas'),
-            (9, 'Serologia'), (10, 'Microbiologia'),
-            (11, 'Pruebas Especiales'), (12, 'Infecciosas'), (13, 'Inmunologicas'),
-            (14, 'Renal'), (29, 'General'),
-        ]
+        self._hoja_app = app
+        self._hoja_areas = []
 
-        # Selector de area
-        sel_f = tk.Frame(main_frame, bg='white', highlightbackground=COLORS['border'],
+        # ── Filtros ───────────────────────────────────────────────────────
+        sel_f = tk.Frame(main_frame, bg='white',
+                         highlightbackground=COLORS['border'],
                          highlightthickness=1)
-        sel_f.pack(fill='x', pady=(0, 15))
+        sel_f.pack(fill='x', pady=(0, 10))
 
-        tk.Label(sel_f, text="  Area:", font=('Segoe UI', 12), bg='white').pack(
-            side='left', padx=(10, 5), pady=10)
-        area_values = ['Todas las areas'] + [f"{a[0]} - {a[1]}" for a in areas_info]
-        combo_area = ttk.Combobox(sel_f, values=area_values, state='readonly',
-                                   font=('Segoe UI', 11), width=25)
-        combo_area.pack(side='left', padx=5, pady=10)
-        combo_area.set('Todas las areas')
+        fila1 = tk.Frame(sel_f, bg='white')
+        fila1.pack(fill='x', padx=10, pady=(10, 4))
 
-        lbl_status = tk.Label(main_frame, text="", font=('Segoe UI', 11),
-                              bg=COLORS['bg'], fg=COLORS['text_light'])
-        lbl_status.pack(pady=5)
+        # La hoja se genera para un dia concreto: sin este campo solo se podia
+        # sacar la de hoy, y el turno de la manana suele imprimir la del dia
+        # anterior o la de una fecha que quedo pendiente
+        tk.Label(fila1, text="Fecha:", font=('Segoe UI', 11, 'bold'),
+                 bg='white').pack(side='left', padx=(0, 5))
+        self._hoja_fecha = tk.Entry(fila1, font=('Segoe UI', 11), width=12,
+                                    justify='center')
+        self._hoja_fecha.insert(0, date.today().strftime('%d/%m/%Y'))
+        self._hoja_fecha.pack(side='left')
+        self._hoja_fecha.bind('<Return>', lambda e: self._cargar_areas_hojas())
 
-        def generar():
-            sel = combo_area.get()
-            lbl_status.config(text="Generando hoja de trabajo...", fg=COLORS['primary'])
-            app.root.update()
-            try:
-                if sel == 'Todas las areas':
-                    rutas = self.generador_hojas.generar_todas_areas()
-                    if rutas:
-                        for r in rutas:
-                            destino = self._enviar_a_impresora(r, 'resultados')
-                        lbl_status.config(
-                            text=f"Generadas {len(rutas)} hojas de trabajo ({destino}).",
-                            fg=COLORS['success'])
-                    else:
-                        lbl_status.config(text="No hay solicitudes pendientes.", fg=COLORS['warning'])
-                else:
-                    area_id = int(sel.split(' - ')[0])
-                    ruta = self.generador_hojas.generar_hoja_area(area_id)
-                    if ruta:
-                        destino = self._enviar_a_impresora(ruta, 'resultados')
-                        lbl_status.config(text=f"Hoja generada ({destino}).",
-                                          fg=COLORS['success'])
-                    else:
-                        lbl_status.config(text="No hay solicitudes pendientes para esta area.",
-                                          fg=COLORS['warning'])
-            except Exception as ex:
-                lbl_status.config(text=f"Error: {ex}", fg=COLORS['danger'])
+        for texto, delta in (("Hoy", 0), ("◀ Ayer", -1)):
+            tk.Button(fila1, text=texto, font=('Segoe UI', 9),
+                      bg=COLORS['bg'], relief='flat', padx=8, cursor='hand2',
+                      command=lambda d=delta: self._fecha_rapida_hojas(d)
+                      ).pack(side='left', padx=3)
 
-        tk.Button(sel_f, text="Generar Hoja", font=('Segoe UI', 11, 'bold'),
-                  bg=COLORS['primary'], fg='white', relief='flat', padx=20, pady=6,
-                  cursor='hand2', command=generar).pack(side='left', padx=15, pady=10)
+        self._hoja_incluir_completadas = tk.BooleanVar(value=False)
+        tk.Checkbutton(fila1, text="Incluir pruebas ya completadas",
+                       variable=self._hoja_incluir_completadas, bg='white',
+                       font=('Segoe UI', 10), cursor='hand2',
+                       command=self._cargar_areas_hojas).pack(side='left',
+                                                              padx=15)
+
+        tk.Button(fila1, text="🔄 Actualizar", font=('Segoe UI', 10),
+                  bg=COLORS['info'], fg='white', relief='flat', padx=12,
+                  pady=4, cursor='hand2',
+                  command=self._cargar_areas_hojas).pack(side='left', padx=5)
+
+        # ── Áreas con trabajo ese día ─────────────────────────────────────
+        tk.Label(main_frame, text="Áreas con trabajo en esa fecha:",
+                 font=('Segoe UI', 11, 'bold'), bg=COLORS['bg']).pack(
+                     anchor='w', pady=(5, 4))
+
+        tree_f = tk.Frame(main_frame, bg='white')
+        tree_f.pack(fill='both', expand=True)
+
+        cols = ('Área', 'Solicitudes', 'Pruebas')
+        self._hoja_tree = ttk.Treeview(tree_f, columns=cols, show='headings',
+                                       height=10, selectmode='extended')
+        for c, ancho in zip(cols, (300, 110, 100)):
+            self._hoja_tree.heading(c, text=c)
+            self._hoja_tree.column(c, width=ancho,
+                                   anchor='w' if c == 'Área' else 'center')
+        vsb = ttk.Scrollbar(tree_f, orient='vertical',
+                            command=self._hoja_tree.yview)
+        self._hoja_tree.configure(yscrollcommand=vsb.set)
+        self._hoja_tree.pack(side='left', fill='both', expand=True)
+        vsb.pack(side='right', fill='y')
+        self._hoja_tree.bind('<Double-1>',
+                             lambda e: self._generar_hojas('imprimir'))
+
+        self._hoja_status = tk.Label(main_frame, text="",
+                                     font=('Segoe UI', 11), bg=COLORS['bg'],
+                                     fg=COLORS['text_light'], anchor='w',
+                                     justify='left')
+        self._hoja_status.pack(fill='x', pady=8)
+
+        # ── Acciones ──────────────────────────────────────────────────────
+        acc_f = tk.Frame(main_frame, bg=COLORS['bg'])
+        acc_f.pack(fill='x', pady=(0, 10))
+
+        tk.Button(acc_f, text="🖨  Imprimir hoja(s)",
+                  font=('Segoe UI', 11, 'bold'), bg=COLORS['primary'],
+                  fg='white', relief='flat', padx=18, pady=7, cursor='hand2',
+                  command=lambda: self._generar_hojas('imprimir')
+                  ).pack(side='left')
+
+        tk.Button(acc_f, text="👁  Vista previa", font=('Segoe UI', 11),
+                  bg=COLORS['info'], fg='white', relief='flat', padx=14,
+                  pady=7, cursor='hand2',
+                  command=lambda: self._generar_hojas('previa')
+                  ).pack(side='left', padx=8)
+
+        tk.Button(acc_f, text="📄  Guardar PDF", font=('Segoe UI', 11),
+                  bg=COLORS['success'], fg='white', relief='flat', padx=14,
+                  pady=7, cursor='hand2',
+                  command=lambda: self._generar_hojas('guardar')
+                  ).pack(side='left')
 
         # Info
-        info_f = tk.Frame(main_frame, bg='#f0f9ff', highlightbackground=COLORS['info'],
+        info_f = tk.Frame(main_frame, bg='#f0f9ff',
+                          highlightbackground=COLORS['info'],
                           highlightthickness=1)
         info_f.pack(fill='x', pady=10)
-        tk.Label(info_f, text="  Las hojas de trabajo listan los pacientes del dia con sus pruebas por area,\n"
-                 "  con espacios para anotar resultados manualmente. Formato horizontal (landscape).",
-                 font=('Segoe UI', 10), bg='#f0f9ff', fg=COLORS['text'], justify='left').pack(pady=10)
+        tk.Label(info_f,
+                 text="  Las hojas de trabajo listan los pacientes del día con sus pruebas por área y los\n"
+                      "  parámetros de cada prueba, con una línea punteada para anotar el resultado a mano.\n"
+                      "  Formato horizontal (landscape). Sin selección se generan todas las áreas listadas.",
+                 font=('Segoe UI', 10), bg='#f0f9ff', fg=COLORS['text'],
+                 justify='left').pack(pady=10)
+
+        self._cargar_areas_hojas()
+
+    def _fecha_rapida_hojas(self, delta_dias):
+        """Coloca hoy o ayer en el campo de fecha."""
+        nueva = date.today() + timedelta(days=delta_dias)
+        self._hoja_fecha.delete(0, tk.END)
+        self._hoja_fecha.insert(0, nueva.strftime('%d/%m/%Y'))
+        self._cargar_areas_hojas()
+
+    def _fecha_hojas(self):
+        """Fecha escrita en pantalla; None si no es válida."""
+        texto = (self._hoja_fecha.get() or '').strip()
+        for formato in ('%d/%m/%Y', '%d-%m-%Y', '%Y-%m-%d'):
+            try:
+                return datetime.strptime(texto, formato).date()
+            except ValueError:
+                continue
+        return None
+
+    def _cargar_areas_hojas(self):
+        """Muestra qué áreas tienen trabajo pendiente en la fecha elegida."""
+        if not hasattr(self, '_hoja_tree'):
+            return
+        for item in self._hoja_tree.get_children():
+            self._hoja_tree.delete(item)
+        self._hoja_areas = []
+
+        fecha = self._fecha_hojas()
+        if fecha is None:
+            self._hoja_status.config(
+                text="Fecha no válida. Use el formato dd/mm/aaaa.",
+                fg=COLORS['danger'])
+            return
+
+        try:
+            areas = self.generador_hojas.areas_con_trabajo(
+                fecha, self._hoja_incluir_completadas.get())
+        except Exception as e:
+            self._hoja_status.config(text=f"Error consultando: {e}",
+                                     fg=COLORS['danger'])
+            return
+
+        self._hoja_areas = areas
+        for a in areas:
+            self._hoja_tree.insert('', 'end', iid=str(a['area_id']),
+                                   values=(a['nombre'], a['solicitudes'],
+                                           a['pruebas']))
+
+        if areas:
+            total_p = sum(a['pruebas'] for a in areas)
+            self._hoja_status.config(
+                text=(f"{len(areas)} área(s) con trabajo el "
+                      f"{fecha.strftime('%d/%m/%Y')} · {total_p} prueba(s) en total. "
+                      "Seleccione las áreas o genere todas."),
+                fg=COLORS['success'])
+        else:
+            estados = ("pendientes o completadas"
+                       if self._hoja_incluir_completadas.get() else "pendientes")
+            self._hoja_status.config(
+                text=(f"No hay solicitudes {estados} del "
+                      f"{fecha.strftime('%d/%m/%Y')}. Pruebe con otra fecha o "
+                      "marque «Incluir pruebas ya completadas»."),
+                fg=COLORS['warning'])
+
+    def _generar_hojas(self, accion='imprimir'):
+        """
+        Genera las hojas de las áreas seleccionadas (o de todas las listadas).
+
+        accion: 'imprimir' | 'previa' | 'guardar'
+        """
+        fecha = self._fecha_hojas()
+        if fecha is None:
+            messagebox.showwarning("Fecha", "Escriba una fecha válida (dd/mm/aaaa).")
+            return
+        if not self._hoja_areas:
+            messagebox.showinfo(
+                "Hojas de trabajo",
+                "No hay trabajo pendiente en esa fecha, así que no hay nada "
+                "que imprimir.")
+            return
+
+        seleccion = self._hoja_tree.selection()
+        if seleccion:
+            ids = [int(i) for i in seleccion]
+        else:
+            ids = [a['area_id'] for a in self._hoja_areas]
+
+        incluir = self._hoja_incluir_completadas.get()
+        self._hoja_status.config(text="Generando hoja(s) de trabajo...",
+                                 fg=COLORS['primary'])
+        self._hoja_app.root.update()
+
+        rutas = []
+        try:
+            for area_id in ids:
+                ruta = self.generador_hojas.generar_hoja_area(
+                    area_id, fecha, incluir_completadas=incluir)
+                if ruta:
+                    rutas.append(ruta)
+        except Exception as ex:
+            self._hoja_status.config(text=f"Error: {ex}", fg=COLORS['danger'])
+            return
+
+        if not rutas:
+            self._hoja_status.config(text="No se generó ninguna hoja.",
+                                     fg=COLORS['warning'])
+            return
+
+        if accion == 'previa':
+            for r in rutas[:3]:      # no inundar la pantalla de visores
+                self._abrir_documento(r)
+            extra = (f" (se abrieron 3 de {len(rutas)})"
+                     if len(rutas) > 3 else "")
+            self._hoja_status.config(text=f"Vista previa generada{extra}.",
+                                     fg=COLORS['success'])
+            return
+
+        if accion == 'guardar':
+            carpeta = filedialog.askdirectory(
+                title="Carpeta donde guardar las hojas de trabajo")
+            if not carpeta:
+                self._hoja_status.config(text="", fg=COLORS['text_light'])
+                return
+            import shutil
+            guardadas = 0
+            for r in rutas:
+                try:
+                    shutil.copyfile(r, os.path.join(carpeta,
+                                                    os.path.basename(r)))
+                    guardadas += 1
+                except Exception as e:
+                    _log_admin.warning("No se pudo guardar %s: %s", r, e)
+            self._hoja_status.config(
+                text=f"{guardadas} hoja(s) guardadas en {carpeta}",
+                fg=COLORS['success'])
+            return
+
+        destinos = set()
+        for r in rutas:
+            destinos.add(self._enviar_a_impresora(r, 'resultados'))
+        self._hoja_status.config(
+            text=(f"{len(rutas)} hoja(s) de trabajo generadas "
+                  f"({', '.join(sorted(destinos))})."),
+            fg=COLORS['success'])
+
+    @staticmethod
+    def _abrir_documento(ruta):
+        """Abre un PDF en el visor del sistema."""
+        try:
+            from modulos.impresoras import abrir_documento
+            abrir_documento(ruta)
+        except Exception:
+            try:
+                import os as _os
+                _os.startfile(ruta)
+            except Exception:
+                pass
 
 
 # ======================================================================

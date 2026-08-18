@@ -19,12 +19,6 @@ class VentanaConfigAdministrativa:
     Ventana para configurar todos los aspectos administrativos del laboratorio.
     """
 
-    # Destinos posibles para las cotizaciones (ver modulos/impresoras.py)
-    _ETIQUETAS_ROL_COTIZACION = {
-        'facturacion': 'Impresora de facturación',
-        'resultados': 'Impresora de resultados',
-    }
-
     def __init__(self, parent, db, callback_guardar=None):
         """
         Inicializa la ventana de configuración administrativa.
@@ -379,190 +373,14 @@ class VentanaConfigAdministrativa:
         row += 1
 
         # ── Asignación de impresoras por rol ──────────────────────────────
-        ttk.Label(scrollable_frame, text="Impresoras por Función:",
-                  font=('Segoe UI', 11, 'bold')).grid(row=row, column=0,
-                                                      sticky='w', pady=(10, 2))
-        row += 1
-        ttk.Label(scrollable_frame,
-                  text="Asigne una impresora a cada función. Puede repetir la "
-                       "misma impresora en varias:\ncada documento se envía por "
-                       "separado a la que le corresponda.",
-                  foreground='#64748b', justify='left').grid(
-                      row=row, column=0, columnspan=2, sticky='w', padx=20)
-        row += 1
-
-        self._impresoras_frame = ttk.Frame(scrollable_frame)
-        self._impresoras_frame.grid(row=row, column=0, columnspan=2,
-                                    sticky='w', padx=20, pady=(8, 4))
-        row += 1
-
-        self.combos_impresora = {}
-        self.vars_impresora_directo = {}
-        self._construir_filas_impresoras()
-
-        acciones_imp = ttk.Frame(scrollable_frame)
-        acciones_imp.grid(row=row, column=0, columnspan=2, sticky='w', padx=20)
-        ttk.Button(acciones_imp, text="🔄 Actualizar lista",
-                   command=self._refrescar_impresoras).pack(side='left')
-        self.lbl_impresoras_estado = ttk.Label(acciones_imp, text="",
-                                               foreground='#64748b')
-        self.lbl_impresoras_estado.pack(side='left', padx=10)
-        row += 1
-
-        # ── Destino de las cotizaciones ───────────────────────────────────
-        from modulos.impresoras import ROL_COTIZACIONES_DEFECTO
-
-        cot_frame = ttk.Frame(scrollable_frame)
-        cot_frame.grid(row=row, column=0, columnspan=2, sticky='w',
-                       padx=20, pady=(12, 0))
-        ttk.Label(cot_frame, text="Las cotizaciones salen por:").pack(side='left')
-        self.var_rol_cotizaciones = tk.StringVar(
-            value=self._ETIQUETAS_ROL_COTIZACION[ROL_COTIZACIONES_DEFECTO])
-        self.combo_rol_cotizaciones = ttk.Combobox(
-            cot_frame, textvariable=self.var_rol_cotizaciones,
-            values=list(self._ETIQUETAS_ROL_COTIZACION.values()),
-            state='readonly', width=34)
-        self.combo_rol_cotizaciones.pack(side='left', padx=8)
-        row += 1
-
-        ttk.Label(scrollable_frame,
-                  text="La cotización se imprime en hoja completa, así que "
-                       "puede salir por la impresora de resultados\nsi la de "
-                       "facturación está reservada para papel fiscal o matriz "
-                       "de puntos.",
-                  foreground='#94a3b8', justify='left').grid(
-                      row=row, column=0, columnspan=2, sticky='w',
-                      padx=20, pady=(2, 0))
-        row += 1
-
-        ttk.Label(scrollable_frame,
-                  text="«Directo» envía el documento sin mostrar el diálogo de "
-                       "impresión: recomendado para recibos y etiquetas.\n"
-                       "Si una función no tiene impresora asignada, el "
-                       "documento se abre en pantalla.",
-                  foreground='#94a3b8', justify='left').grid(
-                      row=row, column=0, columnspan=2, sticky='w',
-                      padx=20, pady=(8, 0))
-
-    def _construir_filas_impresoras(self):
-        """Dibuja una fila por rol: nombre, combo de impresora y «directo»."""
-        from modulos.impresoras import ROLES, ORDEN_ROLES, listar_impresoras
-
-        for hijo in self._impresoras_frame.winfo_children():
-            hijo.destroy()
-        self.combos_impresora.clear()
-        self.vars_impresora_directo.clear()
-
-        nombres, predeterminada = listar_impresoras()
-        self._impresoras_disponibles = nombres
-        # La opción vacía permite dejar una función sin impresora asignada
-        valores = ['(sin asignar)'] + nombres
-
-        ttk.Label(self._impresoras_frame, text="Función",
-                  font=('Segoe UI', 9, 'bold')).grid(row=0, column=0, sticky='w')
-        ttk.Label(self._impresoras_frame, text="Impresora",
-                  font=('Segoe UI', 9, 'bold')).grid(row=0, column=1,
-                                                     sticky='w', padx=8)
-        ttk.Label(self._impresoras_frame, text="Directo",
-                  font=('Segoe UI', 9, 'bold')).grid(row=0, column=2, sticky='w')
-
-        for i, rol in enumerate(ORDEN_ROLES, start=1):
-            info = ROLES[rol]
-            ttk.Label(self._impresoras_frame,
-                      text=info['etiqueta']).grid(row=i, column=0, sticky='w',
-                                                  pady=3)
-            combo = ttk.Combobox(self._impresoras_frame, values=valores,
-                                 state='readonly', width=38)
-            combo.set('(sin asignar)')
-            combo.grid(row=i, column=1, sticky='w', padx=8, pady=3)
-            self.combos_impresora[rol] = combo
-
-            var = tk.BooleanVar(value=info['directo_defecto'])
-            ttk.Checkbutton(self._impresoras_frame, variable=var).grid(
-                row=i, column=2, sticky='w')
-            self.vars_impresora_directo[rol] = var
-
-            ttk.Label(self._impresoras_frame, text=info['ayuda'],
-                      foreground='#94a3b8').grid(row=i, column=3, sticky='w',
-                                                 padx=(10, 0))
-
-        if hasattr(self, 'lbl_impresoras_estado'):
-            self.lbl_impresoras_estado.config(
-                text=(f"{len(nombres)} impresora(s) detectada(s)"
-                      + (f" · predeterminada: {predeterminada}"
-                         if predeterminada else ''))
-                if nombres else "No se detectaron impresoras instaladas.")
-
-    def _refrescar_impresoras(self):
-        """Vuelve a leer las impresoras del sistema conservando la selección."""
-        seleccion = {rol: c.get() for rol, c in self.combos_impresora.items()}
-        directos = {rol: v.get() for rol, v in self.vars_impresora_directo.items()}
-        self._construir_filas_impresoras()
-        for rol, combo in self.combos_impresora.items():
-            valor = seleccion.get(rol, '(sin asignar)')
-            if valor in combo['values']:
-                combo.set(valor)
-            self.vars_impresora_directo[rol].set(directos.get(rol, False))
-
-    def _cargar_impresoras_en_interfaz(self, config):
-        """Refleja en la interfaz las impresoras guardadas en la BD."""
-        from modulos.impresoras import (ROLES, ORDEN_ROLES, ROLES_COTIZACION,
-                                        ROL_COTIZACIONES_DEFECTO,
-                                        COLUMNA_ROL_COTIZACIONES)
-
-        guardado = (config.get(COLUMNA_ROL_COTIZACIONES) or '').strip().lower()
-        if guardado not in ROLES_COTIZACION:
-            guardado = ROL_COTIZACIONES_DEFECTO
-        if hasattr(self, 'var_rol_cotizaciones'):
-            self.var_rol_cotizaciones.set(
-                self._ETIQUETAS_ROL_COTIZACION[guardado])
-
-        for rol in ORDEN_ROLES:
-            info = ROLES[rol]
-            combo = self.combos_impresora.get(rol)
-            if combo is None:
-                continue
-            guardada = (config.get(info['columna']) or '').strip()
-            if guardada:
-                # Una impresora guardada que ya no existe se sigue mostrando
-                # para no perder la configuración al desconectarla
-                if guardada not in combo['values']:
-                    combo['values'] = list(combo['values']) + [guardada]
-                combo.set(guardada)
-            else:
-                combo.set('(sin asignar)')
-
-            directo = config.get(info['columna_directo'])
-            self.vars_impresora_directo[rol].set(
-                info['directo_defecto'] if directo is None else bool(directo))
-
-    def _recolectar_impresoras(self):
-        """Lee la interfaz y arma el dict que espera el gestor."""
-        from modulos.impresoras import ORDEN_ROLES
-
-        asignaciones = {}
-        for rol in ORDEN_ROLES:
-            combo = self.combos_impresora.get(rol)
-            if combo is None:
-                continue
-            valor = combo.get()
-            asignaciones[rol] = {
-                'impresora': '' if valor == '(sin asignar)' else valor,
-                'directo': bool(self.vars_impresora_directo[rol].get()),
-            }
-        return asignaciones
-
-    def _rol_cotizaciones_seleccionado(self):
-        """Rol elegido para las cotizaciones, o None si no está en pantalla."""
-        from modulos.impresoras import ROL_COTIZACIONES_DEFECTO
-
-        if not hasattr(self, 'var_rol_cotizaciones'):
-            return None
-        etiqueta = self.var_rol_cotizaciones.get()
-        for rol, texto in self._ETIQUETAS_ROL_COTIZACION.items():
-            if texto == etiqueta:
-                return rol
-        return ROL_COTIZACIONES_DEFECTO
+        # Panel compartido con la ventana de Configuración Completa
+        # (modulos/panel_impresoras.py). El guardado global de esta ventana lo
+        # persiste, por eso no lleva su propio botón.
+        from modulos.panel_impresoras import PanelImpresoras
+        self.panel_impresoras = PanelImpresoras(
+            scrollable_frame, self.db, con_boton_guardar=False)
+        self.panel_impresoras.grid(row=row, column=0, columnspan=2,
+                                   sticky='ew', padx=20, pady=(10, 0))
 
     def _crear_tab_resultados(self):
         """Crea la pestaña de configuración de visualización de resultados."""
@@ -1156,8 +974,8 @@ class VentanaConfigAdministrativa:
             self.spin_margen_der.delete(0, tk.END)
             self.spin_margen_der.insert(0, self._safe_float(config.get('MargenDerecho'), 2.5))
 
-            # Impresoras por rol
-            self._cargar_impresoras_en_interfaz(config)
+            # Impresoras por rol (el panel compartido lee la BD por su cuenta)
+            self.panel_impresoras.cargar()
 
             # Resultados
             self.var_valores_ref.set(config.get('MostrarValoresReferencia', True))
@@ -1293,9 +1111,7 @@ class VentanaConfigAdministrativa:
             self.configurador.actualizar_configuracion_impresion(datos_imp)
 
             # Impresoras por rol (se permite repetir una misma impresora)
-            self.configurador.actualizar_configuracion_impresoras(
-                self._recolectar_impresoras(),
-                self._rol_cotizaciones_seleccionado())
+            self.panel_impresoras.guardar()
 
             # Resultados
             datos_res = {
