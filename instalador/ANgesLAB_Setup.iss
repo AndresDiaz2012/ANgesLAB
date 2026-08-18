@@ -107,7 +107,7 @@ Name: "custom"; Description: "Instalacion Personalizada"; Flags: iscustom
 ; ============================================================================
 [Components]
 Name: "main"; Description: "Aplicacion Principal ANgesLAB"; Types: full custom; Flags: fixed
-Name: "database"; Description: "Base de Datos (solo primera instalacion)"; Types: full custom
+Name: "database"; Description: "Base de Datos (no sobrescribe la existente)"; Types: full custom; Flags: fixed
 Name: "resources"; Description: "Recursos Graficos (imagenes y logos)"; Types: full custom
 Name: "modules"; Description: "Modulos del Sistema (39 modulos)"; Types: full custom; Flags: fixed
 Name: "ia"; Description: "IA Clinica - Interpretacion inteligente de resultados (matplotlib, graficas, Ollama/Claude)"; Types: full custom
@@ -323,6 +323,9 @@ var
   PythonPath: String;
   PythonFound: Boolean;
   OLEDBFound: Boolean;
+  ArchStatusLabel: TNewStaticText;
+  ACEBits: Integer;
+  PythonBits: Integer;
 
 // -----------------------------------------------------------------------
 // Funcion auxiliar: Mostrar mensaje de progreso durante la instalacion
@@ -435,14 +438,43 @@ end;
 // Detectar Microsoft Access OLEDB Provider
 // -----------------------------------------------------------------------
 function DetectOLEDB(): Boolean;
-var
-  SubKey: String;
 begin
-  Result := False;
-  SubKey := 'SOFTWARE\Classes\Microsoft.ACE.OLEDB.12.0';
-  if RegKeyExists(HKLM, SubKey) then begin Result := True; Exit; end;
-  SubKey := 'SOFTWARE\Classes\Microsoft.ACE.OLEDB.16.0';
-  if RegKeyExists(HKLM, SubKey) then begin Result := True; Exit; end;
+  // Cada arquitectura registra el proveedor en su propia vista del registro:
+  // la de 64 bits en Classes, la de 32 bits en WOW6432Node. Saber CUAL esta
+  // presente importa tanto como saber si lo esta: Python y ACE tienen que
+  // coincidir o la base no abre, aunque todo lo demas instale bien.
+  ACEBits := 0;
+  if RegKeyExists(HKLM, 'SOFTWARE\Classes\Microsoft.ACE.OLEDB.12.0') or
+     RegKeyExists(HKLM, 'SOFTWARE\Classes\Microsoft.ACE.OLEDB.16.0') then
+    ACEBits := 64
+  else if RegKeyExists(HKLM, 'SOFTWARE\WOW6432Node\Classes\Microsoft.ACE.OLEDB.12.0') or
+          RegKeyExists(HKLM, 'SOFTWARE\WOW6432Node\Classes\Microsoft.ACE.OLEDB.16.0') then
+    ACEBits := 32;
+  Result := (ACEBits <> 0);
+end;
+
+// -----------------------------------------------------------------------
+// Bits del interprete de Python detectado (0 si no se pudo averiguar)
+// -----------------------------------------------------------------------
+function DetectPythonBits(): Integer;
+var
+  ResultCode: Integer;
+  Salida: AnsiString;
+  Texto: String;
+begin
+  Result := 0;
+  if PythonPath = '' then Exit;
+  if Exec('cmd.exe',
+          '/c ""' + PythonPath + '" -c "import struct;print(struct.calcsize(chr(80))*8)"" > "%TEMP%\ang_bits.txt" 2>&1',
+          '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    if LoadStringFromFile(ExpandConstant('{tmp}\ang_bits.txt'), Salida) then
+    begin
+      Texto := Trim(String(Salida));
+      if Pos('64', Texto) > 0 then Result := 64
+      else if Pos('32', Texto) > 0 then Result := 32;
+    end;
+  end;
 end;
 
 // -----------------------------------------------------------------------
@@ -529,6 +561,38 @@ begin
   end;
   YPos := YPos + 26;
 
+  // --- Compatibilidad de arquitecturas (Python vs ACE) ---
+  // Es la causa numero uno de que ANgesLAB instale sin un solo error y
+  // luego no consiga abrir la base de datos. Comprobarlo aqui evita una
+  // visita al laboratorio.
+  ArchStatusLabel := TNewStaticText.Create(RequirementsPage);
+  ArchStatusLabel.Parent := RequirementsPage.Surface;
+  ArchStatusLabel.Left := 0;
+  ArchStatusLabel.Top := YPos;
+  ArchStatusLabel.Font.Size := 9;
+  ArchStatusLabel.AutoSize := True;
+  if (PythonBits <> 0) and (ACEBits <> 0) then
+  begin
+    if PythonBits = ACEBits then
+    begin
+      ArchStatusLabel.Caption := '  [OK]  Python y Access Database Engine son ambos de ' +
+                                 IntToStr(PythonBits) + ' bits';
+      ArchStatusLabel.Font.Color := clGreen;
+    end
+    else
+    begin
+      ArchStatusLabel.Caption := '  [X]  INCOMPATIBLES: Python es de ' + IntToStr(PythonBits) +
+                                 ' bits y Access Database Engine de ' + IntToStr(ACEBits) + ' bits';
+      ArchStatusLabel.Font.Color := clRed;
+    end;
+  end
+  else
+  begin
+    ArchStatusLabel.Caption := '  [!]  No se pudo comparar la arquitectura de Python y Access';
+    ArchStatusLabel.Font.Color := $000080FF; // Naranja
+  end;
+  YPos := YPos + 26;
+
   // --- Separador 2 ---
   SeparatorLabel := TNewStaticText.Create(RequirementsPage);
   SeparatorLabel.Parent := RequirementsPage.Surface;
@@ -593,6 +657,7 @@ begin
   // Detectar requisitos del sistema
   PythonFound := DetectPython();
   OLEDBFound := DetectOLEDB();
+  PythonBits := DetectPythonBits();
 
   // Si Python no esta instalado, mostrar advertencia pero permitir continuar
   if not PythonFound then
@@ -661,6 +726,25 @@ begin
         'https://www.microsoft.com/en-us/download/details.aspx?id=54920' + #13#10 + #13#10 +
         'Puede continuar la instalacion y configurar este componente despues.',
         mbInformation, MB_OK);
+    end;
+
+    // Arquitecturas cruzadas: la instalacion terminaria sin un solo error y
+    // ANgesLAB no podria abrir la base. Mejor decirlo ahora, con el remedio.
+    if (PythonBits <> 0) and (ACEBits <> 0) and (PythonBits <> ACEBits) then
+    begin
+      if MsgBox(
+        'Python es de ' + IntToStr(PythonBits) + ' bits y Microsoft Access' + #13#10 +
+        'Database Engine es de ' + IntToStr(ACEBits) + ' bits.' + #13#10 + #13#10 +
+        'Con esa combinacion la instalacion terminara sin errores, pero' + #13#10 +
+        'ANgesLAB no podra abrir la base de datos.' + #13#10 + #13#10 +
+        'Solucion: reinstale uno de los dos para que ambos sean de la' + #13#10 +
+        'misma arquitectura (se recomienda 64 bits en los dos).' + #13#10 + #13#10 +
+        'Desea continuar de todas formas?',
+        mbError, MB_YESNO) = IDNO then
+      begin
+        Result := False;
+        Exit;
+      end;
     end;
   end;
 end;

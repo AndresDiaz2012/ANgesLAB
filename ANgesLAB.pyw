@@ -265,6 +265,13 @@ class Database:
         import json as _json
         _cfg_path = Path(__file__).parent / "db_config.json"
         _default  = str(Path(__file__).parent / "ANgesLAB.accdb")
+        # Si la ruta configurada (normalmente un recurso de red) no responde,
+        # se cae a la local; hay que recordar cual era para poder decirlo. Antes
+        # el cambio era mudo y el usuario recibia un "no se encontro
+        # C:\ANgesLAB\ANgesLAB.accdb" cuando el problema real era que el
+        # servidor estaba apagado.
+        self.ruta_configurada = ''
+        self.uso_respaldo_local = False
         if _cfg_path.exists():
             try:
                 with open(_cfg_path, 'r', encoding='utf-8') as _f:
@@ -274,7 +281,12 @@ class Database:
                     _db_resolved = Path(_db)
                     if not _db_resolved.is_absolute():
                         _db_resolved = Path(__file__).parent / _db
-                    self.db_path = str(_db_resolved) if _db_resolved.exists() else _default
+                    self.ruta_configurada = str(_db_resolved)
+                    if _db_resolved.exists():
+                        self.db_path = str(_db_resolved)
+                    else:
+                        self.db_path = _default
+                        self.uso_respaldo_local = True
                 else:
                     self.db_path = _default
             except Exception:
@@ -291,14 +303,34 @@ class Database:
         with open(cfg_path, 'w', encoding='utf-8') as f:
             _json.dump({'db_path': nueva_ruta}, f, ensure_ascii=False, indent=2)
 
+    def mensaje_base_no_encontrada(self):
+        """
+        Explica por que no hay base de datos, con el remedio concreto.
+
+        Distingue los dos casos, que exigen acciones distintas: una ruta de red
+        inalcanzable no se arregla buscando el archivo en el disco local.
+        """
+        if self.uso_respaldo_local and self.ruta_configurada:
+            return (
+                "No se pudo alcanzar la base de datos configurada en red:\n"
+                f"{self.ruta_configurada}\n\n"
+                "Y tampoco existe una copia local en:\n"
+                f"{self.db_path}\n\n"
+                "Verifique que el servidor este encendido, que la carpeta "
+                "compartida sea accesible desde este equipo y que tenga "
+                "permisos de lectura y escritura sobre ella."
+            )
+        return (
+            f"No se encontro la base de datos:\n{self.db_path}\n\n"
+            "Puede ocurrir si la instalacion no incluyo la base de datos, si "
+            "el archivo se movio o si esta en otro equipo de la red."
+        )
+
     def connect(self):
         import win32com.client
         if self.conn is None:
             if not Path(self.db_path).exists():
-                raise FileNotFoundError(
-                    f"No se encontro la base de datos:\n{self.db_path}\n\n"
-                    "Verifique que ANgesLAB.accdb este en la carpeta de instalacion."
-                )
+                raise FileNotFoundError(self.mensaje_base_no_encontrada())
             try:
                 conn_str = f"Provider=Microsoft.ACE.OLEDB.12.0;Data Source={self.db_path};"
                 self.conn = win32com.client.Dispatch("ADODB.Connection")
@@ -705,7 +737,12 @@ class LoginWindow:
                 if LOGGING_DISPONIBLE:
                     log_auditoria(result.get('UsuarioID'), 'LOGIN_FALLIDO',
                                   f"Login fallido para '{user}'", modulo='login')
-        except (FileNotFoundError, ConnectionError) as e:
+        except FileNotFoundError as e:
+            # Un error sin salida obliga a llamar a soporte. Si el archivo
+            # existe en otro sitio (otra carpeta, un servidor de la red), el
+            # propio usuario puede indicarlo y seguir trabajando.
+            self._ofrecer_localizar_base(str(e))
+        except ConnectionError as e:
             messagebox.showerror("Error de configuracion", str(e))
         except Exception as e:
             messagebox.showerror("Error de conexion",
@@ -715,6 +752,55 @@ class LoginWindow:
                 f"1. ANgesLAB.accdb este en la carpeta de instalacion\n"
                 f"2. Microsoft Access Database Engine este instalado\n"
                 f"3. La base de datos no este abierta en otro programa")
+
+    def _ofrecer_localizar_base(self, mensaje):
+        """
+        Explica que no hay base de datos y deja indicarle donde esta.
+
+        Sin esto el arranque termina en un mensaje sin salida y el laboratorio
+        tiene que llamar a soporte para algo que se resuelve senalando un
+        archivo: una instalacion en otra carpeta, una base en el servidor o un
+        equipo que se cambio de sitio.
+        """
+        from tkinter import filedialog as _fd
+
+        quiere_buscar = messagebox.askyesno(
+            "Base de datos no encontrada",
+            mensaje + "\n\n¿Desea indicar dónde está el archivo ANgesLAB.accdb?")
+        if not quiere_buscar:
+            return
+
+        ruta = _fd.askopenfilename(
+            title="Seleccione la base de datos ANgesLAB.accdb",
+            filetypes=[("Base de datos de Access", "*.accdb"),
+                       ("Todos los archivos", "*.*")])
+        if not ruta:
+            return
+
+        if not os.path.exists(ruta):
+            messagebox.showerror("Base de datos",
+                                 "El archivo seleccionado ya no existe.")
+            return
+
+        try:
+            Database.guardar_ruta_db(ruta)
+        except Exception as e:
+            messagebox.showerror(
+                "Base de datos",
+                f"No se pudo guardar la ruta:\n{e}\n\n"
+                "Compruebe que tiene permisos de escritura en la carpeta de "
+                "instalacion.")
+            return
+
+        messagebox.showinfo(
+            "Base de datos configurada",
+            f"Se usara la base de datos:\n{ruta}\n\n"
+            "ANgesLAB se cerrara. Vuelva a abrirlo para entrar con la nueva "
+            "configuracion.")
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
 
     def run(self):
         self.root.mainloop()
