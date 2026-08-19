@@ -1,5 +1,5 @@
 ================================================================================
-   ANgesLAB v2.1  -  USB de instalacion y actualizacion
+   ANgesLAB v2.5.1  -  USB de instalacion y actualizacion
    Sistema de Gestion de Laboratorio Clinico
 ================================================================================
 
@@ -27,14 +27,14 @@ Esta USB sirve para dos cosas. Elija UNA segun el equipo:
 --------------------------------------------------------------------------------
   B) EQUIPO NUEVO, SIN ANgesLAB  ->  INSTALAR
 --------------------------------------------------------------------------------
-  1. Doble clic en:  ANgesLAB_Setup_v2.1.exe
+  1. Doble clic en:  ANgesLAB_Setup_v2.5.1.exe
   2. Acepte el aviso de Windows (requiere permisos de administrador).
   3. Siga el asistente. Se instala en  C:\ANgesLAB
   4. Al terminar quedan los accesos directos en el Escritorio y el
      Menu Inicio.
 
   NO hace falta ejecutar el actualizador despues: la instalacion nueva ya
-  viene con todo al dia (codigo v2.1 y catalogo completo de areas,
+  viene con todo al dia (codigo v2.5.1 y catalogo completo de areas,
   pruebas, parametros y valores de referencia).
 
   ENTRAR LA PRIMERA VEZ:
@@ -53,36 +53,58 @@ Esta USB sirve para dos cosas. Elija UNA segun el equipo:
 
 
 --------------------------------------------------------------------------------
-  QUE TRAE LA VERSION 2.1
+  QUE TRAE LA VERSION 2.5.1
 --------------------------------------------------------------------------------
-  - IMPRESION POR AREA
-    Al imprimir o guardar el informe se puede elegir que areas incluir
-    (solo Hematologia, solo Quimica, ...) o marcar todas para el informe
-    completo. Util cuando un area termina antes que las otras y hay que
-    entregar su parte. El envio por WhatsApp/Email siempre manda el
-    informe completo.
+  Esta version arregla la impresion y el guardado de la pestana Financiera.
+  Si venia de la 2.5, es la actualizacion que corrige lo que fallaba.
 
-  - ANTIBIOGRAMA POR GERMEN
-    Cuando el cultivo aisla DOS germenes, cada antibiotico se captura con
-    una casilla S/I/R por germen, y el informe imprime una tabla por
-    germen rotulada con su nombre. Ya no hay que adivinar a cual de los
-    dos corresponde la sensibilidad.
+  - CADA DOCUMENTO SALE POR SU IMPRESORA, SIN PREGUNTAR
+    En Configuracion -> Impresion se asigna una impresora a cada funcion.
+    Antes el boton de guardar de esa pestana NO guardaba las impresoras:
+    se asignaban, decia "Exito", y los documentos seguian saliendo por el
+    visor de PDF. Ahora se guardan de verdad y cada documento sale solo,
+    sin dialogo de margenes ni de seleccion de impresora.
 
-  - Catalogo de areas al dia: Hormonas, Infecciosas, Inmunologicas, Renal.
-  - Indice TyG, VSG por horas con Indice de Katz, Lipidos Totales.
-  - Imagen profesional de la interfaz y correcciones en los informes.
+  - NUNCA SE PROPONE "Microsoft Print to PDF"
+    Esa suele ser la impresora predeterminada de Windows, y por eso al dar
+    Imprimir salia un cuadro de guardar PDF en vez de papel. El sistema ya
+    la reconoce como impresora virtual, no la propone y avisa en naranja si
+    se asigna a alguna funcion.
+
+  - HOJAS DE TRABAJO CON IMPRESORA PROPIA
+    Es una funcion mas del panel, con su impresora y en horizontal. Antes
+    heredaban la orientacion vertical de los informes y la hoja salia
+    encogida y de lado. Mientras no se le asigne una, sigue saliendo por la
+    de resultados, como hasta ahora.
+
+  - ACCESO DIRECTO A HOJAS DE TRABAJO EN EL INICIO
+    Junto a Nueva Solicitud, Caja, Cotizaciones y Resultados.
+
+  - PESTANA FINANCIERA: SE ACABO EL ERROR AL GUARDAR
+    Cambiar la tasa COP/USD daba "could not convert string to float" y la
+    tasa no se guardaba. Ya no. Ademas, si escribe una tasa que no se
+    entiende, el sistema lo dice en vez de descartarla en silencio, y le
+    muestra la tasa tal como quedo guardada.
+
+  - IMPORTES ESCRITOS COMO SE ESCRIBEN AQUI
+    Un abono de  1.500,50  se tomaba como CERO y una tasa de  3.600,00
+    como 1, sin error ni aviso, lo que descuadraba totales y facturas.
+    Ahora se entienden tanto  1.500,50  como  1500.50  en el ingreso del
+    paciente y en la configuracion.
 
 
 --------------------------------------------------------------------------------
   CONTENIDO DE ESTA USB
 --------------------------------------------------------------------------------
-  ANgesLAB_Setup_v2.1.exe   Instalador completo (equipos nuevos)
-  actualizador\             Actualizador para instalaciones existentes
-  ANgesLAB.pyw              Programa principal
-  modulos\                  Modulos del sistema (39)
-  assets\                   Iconos e imagenes
-  migracion_*.py            Ajustes de catalogo que aplica el actualizador
+  ANgesLAB_Setup_v2.5.1.exe  Instalador completo (equipos nuevos)
+  actualizador\              Actualizador para instalaciones existentes
+  ANgesLAB.pyw               Programa principal
+  modulos\                   Modulos del sistema (39)
+  assets\  logos\  docs\     Iconos, imagenes y documentacion
+  scripts\                   Ajustes de catalogo que aplica el actualizador
+  catalogo_preanalitico.csv  Tubo y ayuno por prueba
   VERSION, LICENSE, requirements.txt
+  DIAGNOSTICO_EQUIPO.bat     Revisa si el equipo cumple los requisitos
 
   NOTA: esta USB no trae ninguna base de datos suelta, para que nadie
   sobrescriba por accidente la del laboratorio. El instalador crea la
