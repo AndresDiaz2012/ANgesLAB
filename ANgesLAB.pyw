@@ -17568,6 +17568,14 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
         self.search_prueba_param.pack(side='left', fill='x', expand=True, ipady=5)
         self.search_prueba_param.bind('<KeyRelease>', lambda e: self.filtrar_pruebas_param())
 
+        # Aviso: esta lista solo tiene pruebas. Los perfiles que agrupan varias
+        # (Preoperatorio, Prenatal, Perfil 20...) no estan aqui porque no son
+        # pruebas, y buscarlos sin encontrarlos hace pensar que falta cargarlos.
+        self.lbl_aviso_param = tk.Label(
+            left_panel, text=self._AVISO_PARAM_BASE, font=('Segoe UI', 8),
+            bg='white', fg='#78909c', justify='left', wraplength=320, anchor='w')
+        self.lbl_aviso_param.pack(fill='x', padx=12, pady=(2, 4))
+
         # Lista de pruebas
         tree_frame = tk.Frame(left_panel, bg='white')
         tree_frame.pack(fill='both', expand=True, padx=10, pady=5)
@@ -17663,8 +17671,13 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
         # Cargar pruebas
         self.cargar_lista_pruebas_param()
 
+    # Texto fijo del aviso de la lista de pruebas en Parametros
+    _AVISO_PARAM_BASE = ("Solo pruebas. Los perfiles que agrupan varias "
+                         "(Preoperatorio, Perfil 20...) se gestionan en "
+                         "📦 GESTIONAR PERFILES.")
+
     def cargar_lista_pruebas_param(self, filtro=""):
-        """Carga la lista de pruebas"""
+        """Carga la lista de pruebas y avisa si lo buscado es un perfil."""
         for item in self.tree_pruebas_param.get_children():
             self.tree_pruebas_param.delete(item)
 
@@ -17684,6 +17697,65 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
                 p['CodigoPrueba'] or '',
                 p['NombrePrueba'] or ''
             ))
+
+        self._avisar_si_es_perfil(filtro, len(pruebas or []))
+
+    def _avisar_si_es_perfil(self, filtro, encontradas):
+        """
+        Explica en el sitio por que lo buscado no esta en la lista.
+
+        Buscar «preoperatorio» aqui no devuelve nada y la pantalla se queda
+        muda: parece que el perfil esta sin cargar cuando en realidad no es una
+        prueba, sino un paquete cuyos parametros viven en las pruebas que lo
+        forman. Decirlo en el momento ahorra el rato de buscarlo.
+        """
+        lbl = getattr(self, 'lbl_aviso_param', None)
+        if lbl is None:
+            return
+
+        texto, color = self._AVISO_PARAM_BASE, '#78909c'
+        filtro = (filtro or '').strip()
+        if filtro:
+            safe = filtro.replace("'", "''")
+            try:
+                # Solo pruebas activas, igual que _buscar_perfiles: si aqui
+                # se contaran todas, el aviso diria un numero y el buscador de
+                # la solicitud otro para el mismo perfil
+                perfiles = db.query(f"""
+                    SELECT TOP 3 pf.NombrePerfil, COUNT(pr.PruebaID) AS n
+                    FROM (Perfiles pf
+                    INNER JOIN PruebasEnPerfil pp ON pf.PerfilID = pp.PerfilID)
+                    INNER JOIN Pruebas pr ON pp.PruebaID = pr.PruebaID
+                    WHERE pf.Activo=True AND pr.Activo=True
+                      AND (pf.NombrePerfil LIKE '%{safe}%'
+                           OR pf.CodigoPerfil LIKE '%{safe}%')
+                    GROUP BY pf.NombrePerfil
+                    ORDER BY pf.NombrePerfil
+                """) or []
+            except Exception as e:
+                _log.debug("No se pudo avisar de perfiles en Parametros: %s", e)
+                perfiles = []
+
+            if perfiles:
+                nombres = ', '.join(
+                    f"«{x['NombrePerfil']}» ({int(x['n'] or 0)} pruebas)"
+                    for x in perfiles)
+                if encontradas:
+                    texto = (f"Además hay {'un perfil' if len(perfiles) == 1 else 'perfiles'} "
+                             f"con ese nombre: {nombres}. No son pruebas: sus "
+                             f"parámetros están en las pruebas que agrupan. "
+                             f"Se editan en 📦 GESTIONAR PERFILES.")
+                else:
+                    texto = (f"{nombres} no es una prueba, es un paquete. Sus "
+                             f"parámetros están en las pruebas que agrupa. "
+                             f"Para pedirlo, búsquelo en Nueva Solicitud; para "
+                             f"cambiar qué lleva, 📦 GESTIONAR PERFILES.")
+                color = '#e65100'
+
+        try:
+            lbl.config(text=texto, fg=color)
+        except Exception:
+            pass
 
     def filtrar_pruebas_param(self):
         """Filtra la lista de pruebas"""

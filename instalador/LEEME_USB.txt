@@ -1,5 +1,5 @@
 ================================================================================
-   ANgesLAB v2.5.2  -  USB de instalacion y actualizacion
+   ANgesLAB v2.5.3  -  USB de instalacion y actualizacion
    Sistema de Gestion de Laboratorio Clinico
 ================================================================================
 
@@ -27,14 +27,14 @@ Esta USB sirve para dos cosas. Elija UNA segun el equipo:
 --------------------------------------------------------------------------------
   B) EQUIPO NUEVO, SIN ANgesLAB  ->  INSTALAR
 --------------------------------------------------------------------------------
-  1. Doble clic en:  ANgesLAB_Setup_v2.5.2.exe
+  1. Doble clic en:  ANgesLAB_Setup_v2.5.3.exe
   2. Acepte el aviso de Windows (requiere permisos de administrador).
   3. Siga el asistente. Se instala en  C:\ANgesLAB
   4. Al terminar quedan los accesos directos en el Escritorio y el
      Menu Inicio.
 
   NO hace falta ejecutar el actualizador despues: la instalacion nueva ya
-  viene con todo al dia (codigo v2.5.2 y catalogo completo de areas,
+  viene con todo al dia (codigo v2.5.3 y catalogo completo de areas,
   pruebas, parametros y valores de referencia).
 
   ENTRAR LA PRIMERA VEZ:
@@ -53,8 +53,15 @@ Esta USB sirve para dos cosas. Elija UNA segun el equipo:
 
 
 --------------------------------------------------------------------------------
-  QUE TRAE LA VERSION 2.5.2
+  QUE TRAE LA VERSION 2.5.3
 --------------------------------------------------------------------------------
+  - PARAMETROS EXPLICA DONDE ESTAN LOS PERFILES
+    La lista de Parametros solo contiene pruebas, asi que buscar ahi
+    "Preoperatorio" no devolvia nada y la pantalla se quedaba muda: parecia
+    que faltaba cargar el perfil. Ahora, al buscarlo, un aviso en naranja
+    dice que es un paquete, cuantas pruebas lleva, y donde se pide y donde
+    se edita.
+
   - LOS PERFILES SE PUEDEN PEDIR DESDE EL BUSCADOR
     Los perfiles que se gestionan en Parametros -> Gestionar Perfiles (Perfil
     20, Preoperatorio, Prenatal, Cardiometabolico...) solo se podian pedir
@@ -116,7 +123,7 @@ Esta USB sirve para dos cosas. Elija UNA segun el equipo:
 --------------------------------------------------------------------------------
   CONTENIDO DE ESTA USB
 --------------------------------------------------------------------------------
-  ANgesLAB_Setup_v2.5.2.exe  Instalador completo (equipos nuevos)
+  ANgesLAB_Setup_v2.5.3.exe  Instalador completo (equipos nuevos)
   actualizador\              Actualizador para instalaciones existentes
   ANgesLAB.pyw               Programa principal
   modulos\                   Modulos del sistema (39)
