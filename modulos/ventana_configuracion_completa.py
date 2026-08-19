@@ -539,32 +539,63 @@ class VentanaConfiguracionCompleta:
             messagebox.showerror("Error", f"Error al actualizar tasas BCV:\n{e}",
                                 parent=self.win)
 
+    @staticmethod
+    def _safe_float(valor, defecto=0.0):
+        """Convierte a float sin lanzar; `defecto` si el valor no sirve."""
+        try:
+            if valor is None or str(valor).strip() == '':
+                return defecto
+            return float(valor)
+        except (ValueError, TypeError):
+            return defecto
+
+    @staticmethod
+    def _safe_int(valor, defecto=0):
+        """Convierte a int sin lanzar; `defecto` si el valor no sirve."""
+        try:
+            if valor is None or str(valor).strip() == '':
+                return defecto
+            return int(float(valor))
+        except (ValueError, TypeError):
+            return defecto
+
     def _cargar_config_financiera(self):
         """Carga la configuracion financiera desde la BD."""
         try:
-            config = self.db.query_one("SELECT * FROM ConfiguracionLaboratorio")
-            if config:
-                # Moneda
-                self.combo_moneda_fin.set(config.get('MonedaPrincipal', 'USD') or 'USD')
-                self.entry_simbolo_fin.delete(0, tk.END)
-                self.entry_simbolo_fin.insert(0, config.get('SimboloMoneda', '$') or '$')
-                self.spin_decimales_fin.delete(0, tk.END)
-                self.spin_decimales_fin.insert(0, config.get('DecimalesPrecios', 2))
-
-                # IVA
-                self.spin_iva_fin.delete(0, tk.END)
-                self.spin_iva_fin.insert(0, config.get('IVAPorDefecto', 16.0))
-                self.spin_desc_max_fin.delete(0, tk.END)
-                self.spin_desc_max_fin.insert(0, config.get('DescuentoMaximo', 50.0))
-
-                # IGTF
-                self.var_igtf_activo.set(config.get('IGTFActivo', True))
-                self.spin_igtf.delete(0, tk.END)
-                self.spin_igtf.insert(0, config.get('TasaIGTF', 3.0))
-                self.combo_tipo_contrib.set(config.get('TipoContribuyente', 'Ordinario') or 'Ordinario')
-
+            config = self.db.query_one(
+                "SELECT * FROM ConfiguracionLaboratorio") or {}
         except Exception as e:
-            logging.getLogger("angeslab.ventana_configuracion_completa").warning("[CONFIG-FIN] Error cargando config financiera: %s", e)
+            logging.getLogger("angeslab.ventana_configuracion_completa").warning(
+                "[CONFIG-FIN] Error cargando config financiera: %s", e)
+            config = {}
+
+        def _poner(widget, valor):
+            """Escribe un valor en el campo. Nunca recibe None (ver abajo)."""
+            widget.delete(0, tk.END)
+            widget.insert(0, str(valor))
+
+        # Una columna añadida con ALTER TABLE existe pero está en NULL, no
+        # ausente: config.get(col, defecto) devuelve None, no el defecto. Ese
+        # None dejaba el campo vacío y al guardar reventaba con
+        # «could not convert string to float». Por eso aquí se usa siempre
+        # `or defecto` / _safe_*, y cada campo va por separado para que un
+        # NULL no aborte la carga de los que vienen detrás.
+        self.combo_moneda_fin.set(config.get('MonedaPrincipal') or 'USD')
+        _poner(self.entry_simbolo_fin, config.get('SimboloMoneda') or '$')
+        _poner(self.spin_decimales_fin,
+               self._safe_int(config.get('DecimalesPrecios'), 2))
+
+        _poner(self.spin_iva_fin,
+               self._safe_float(config.get('IVAPorDefecto'), 16.0))
+        _poner(self.spin_desc_max_fin,
+               self._safe_float(config.get('DescuentoMaximo'), 50.0))
+
+        igtf_activo = config.get('IGTFActivo')
+        self.var_igtf_activo.set(True if igtf_activo is None
+                                 else bool(igtf_activo))
+        _poner(self.spin_igtf, self._safe_float(config.get('TasaIGTF'), 3.0))
+        self.combo_tipo_contrib.set(
+            config.get('TipoContribuyente') or 'Ordinario')
 
         # Tasas de cambio
         try:
@@ -595,10 +626,10 @@ class VentanaConfiguracionCompleta:
             config_admin = self.db.query_one(
                 "SELECT TasaCOP_USD FROM ConfiguracionAdministrativa")
             if config_admin and config_admin.get('TasaCOP_USD'):
-                cop_val = config_admin['TasaCOP_USD']
-                if cop_val and float(cop_val) > 0:
+                cop_val = self._safe_float(config_admin['TasaCOP_USD'], 0.0)
+                if cop_val > 0:
                     self.entry_tasa_cop.delete(0, tk.END)
-                    self.entry_tasa_cop.insert(0, str(cop_val))
+                    self.entry_tasa_cop.insert(0, f"{cop_val:,.2f}")
         except Exception:
             pass
 
@@ -621,16 +652,43 @@ class VentanaConfiguracionCompleta:
                     except Exception:
                         pass
 
-            # Leer valores de la interfaz
+            # ── Leer la interfaz ────────────────────────────────────────
+            # Ningún campo puede tumbar el guardado: un valor vacío o
+            # ilegible cae al de fábrica en vez de lanzar una excepción que
+            # deja el resto de la pestaña sin guardar (incluida la tasa
+            # COP/USD, que se escribe al final).
             moneda = self.combo_moneda_fin.get() or 'USD'
             simbolo = (self.entry_simbolo_fin.get() or '$').replace("'", "''")
-            decimales = int(self.spin_decimales_fin.get())
-            iva = float(self.spin_iva_fin.get())
-            desc_max = float(self.spin_desc_max_fin.get())
-            igtf_activo = self.var_igtf_activo.get()
-            tasa_igtf = float(self.spin_igtf.get())
+            decimales = max(0, min(4, self._safe_int(
+                self.spin_decimales_fin.get(), 2)))
+            iva = self._safe_float(self.spin_iva_fin.get(), 16.0)
+            desc_max = self._safe_float(self.spin_desc_max_fin.get(), 50.0)
+            igtf_activo = bool(self.var_igtf_activo.get())
+            tasa_igtf = self._safe_float(self.spin_igtf.get(), 3.0)
             tipo_contrib = (self.combo_tipo_contrib.get() or 'Ordinario').replace("'", "''")
 
+            # ── Tasa COP/USD: se valida ANTES de tocar la base ──────────
+            # Antes un texto ilegible se descartaba en silencio y la ventana
+            # igual decía «guardada correctamente»: el usuario cambiaba la
+            # tasa, veía el mensaje de éxito y seguía facturando en pesos con
+            # la tasa vieja sin enterarse.
+            from modulos.tasas_cambio import parsear_tasa
+            tasa_cop_str = self.entry_tasa_cop.get().strip()
+            tasa_cop_val = None
+            if tasa_cop_str:
+                tasa_cop_val = parsear_tasa(tasa_cop_str)
+                if tasa_cop_val is None or tasa_cop_val <= 0:
+                    messagebox.showerror(
+                        "Tasa COP/USD",
+                        f"«{tasa_cop_str}» no es una tasa válida.\n\n"
+                        "Escriba cuántos pesos vale 1 dólar, por ejemplo "
+                        "3600 o 3.600,50.\n\n"
+                        "No se guardó nada; corrija el campo y vuelva a "
+                        "intentarlo.",
+                        parent=self.win)
+                    return
+
+            # ── Escritura ───────────────────────────────────────────────
             self.db.execute(f"""
                 UPDATE ConfiguracionLaboratorio
                 SET MonedaPrincipal = '{moneda}',
@@ -643,38 +701,53 @@ class VentanaConfiguracionCompleta:
                     TipoContribuyente = '{tipo_contrib}'
             """)
 
-            # Guardar tasa COP/USD manual
-            tasa_cop_str = self.entry_tasa_cop.get().strip()
-            if tasa_cop_str:
+            if tasa_cop_val is not None:
                 try:
-                    tasa_cop_val = float(tasa_cop_str)
-                    # Guardar en ConfiguracionAdministrativa
+                    self.db.query("SELECT TOP 1 [TasaCOP_USD] FROM ConfiguracionAdministrativa")
+                except Exception:
                     try:
-                        self.db.query("SELECT TOP 1 [TasaCOP_USD] FROM ConfiguracionAdministrativa")
-                    except Exception:
-                        try:
-                            self.db.execute(
-                                "ALTER TABLE ConfiguracionAdministrativa "
-                                "ADD COLUMN [TasaCOP_USD] DOUBLE DEFAULT 0")
-                        except Exception:
-                            pass
-                    self.db.execute(
-                        f"UPDATE ConfiguracionAdministrativa SET TasaCOP_USD = {tasa_cop_val}")
-
-                    # Tambien guardar en TasasCambio para historial
-                    try:
-                        from modulos.tasas_cambio import GestorTasasCambio
-                        gestor = GestorTasasCambio(self.db)
-                        gestor.guardar_tasa_manual('COP_USD', tasa_cop_val)
+                        self.db.execute(
+                            "ALTER TABLE ConfiguracionAdministrativa "
+                            "ADD COLUMN [TasaCOP_USD] DOUBLE DEFAULT 0")
                     except Exception:
                         pass
-                except (ValueError, TypeError):
-                    pass
+                self.db.execute(
+                    f"UPDATE ConfiguracionAdministrativa SET TasaCOP_USD = {tasa_cop_val}")
+
+                # Historial de tasas: de aquí la lee el formulario de ingreso
+                # del paciente al calcular el total en pesos
+                try:
+                    from modulos.tasas_cambio import GestorTasasCambio
+                    GestorTasasCambio(self.db).guardar_tasa_manual(
+                        'COP_USD', tasa_cop_val)
+                except Exception as e_tasa:
+                    logging.getLogger(
+                        "angeslab.ventana_configuracion_completa").warning(
+                        "[CONFIG-FIN] No se pudo historiar la tasa COP: %s",
+                        e_tasa)
+
+                # El campo se reescribe con lo entendido: si el usuario quiso
+                # decir otra cosa, lo ve aquí y no en una factura
+                self.entry_tasa_cop.delete(0, tk.END)
+                self.entry_tasa_cop.insert(0, f"{tasa_cop_val:,.2f}")
+
+            # ── Confirmación con lo que quedó guardado ──────────────────
+            resumen = [
+                f"Moneda: {moneda}  ({self.entry_simbolo_fin.get() or '$'})"
+                f"   ·   {decimales} decimales",
+                f"IVA: {iva:g}%   ·   Descuento máximo: {desc_max:g}%",
+                f"IGTF: {'activo' if igtf_activo else 'inactivo'} "
+                f"({tasa_igtf:g}%)   ·   Contribuyente "
+                f"{self.combo_tipo_contrib.get() or 'Ordinario'}",
+            ]
+            if tasa_cop_val is not None:
+                resumen.append(
+                    f"Tasa COP/USD: {tasa_cop_val:,.2f} pesos por 1 dólar")
 
             messagebox.showinfo("Exito",
-                              "Configuracion financiera guardada correctamente.\n\n"
-                              "Los cambios se aplicaran inmediatamente.",
-                              parent=self.win)
+                                "Configuracion financiera guardada.\n\n"
+                                + "\n".join(resumen),
+                                parent=self.win)
 
             if self.callback_actualizar:
                 try:
@@ -1249,7 +1322,7 @@ class VentanaConfiguracionCompleta:
         btn_frame = ttk.Frame(frame)
         btn_frame.pack(fill='x', pady=15)
 
-        ttk.Button(btn_frame, text="💾 Guardar Configuración de Impresión",
+        ttk.Button(btn_frame, text="💾 Guardar Impresoras y Formato",
                   command=self._guardar_config_impresion, width=35).pack(side='left', padx=5)
 
         ttk.Button(btn_frame, text="🖨️ Imprimir Página de Prueba",
@@ -2176,21 +2249,46 @@ class VentanaConfiguracionCompleta:
             pass
 
     def _guardar_config_impresion(self):
-        """Guarda el formato de página. Las impresoras se asignan por rol."""
+        """
+        Guarda toda la pestaña: formato de página y asignación de impresoras.
+
+        Antes este botón solo guardaba el formato y aun así avisaba «Éxito»,
+        así que quien asignaba las impresoras en el panel de arriba y pulsaba
+        aquí se quedaba sin guardarlas: los documentos seguían saliendo por
+        donde no era o se abrían en el visor de PDF. El botón que dice guardar
+        la configuración de impresión tiene que guardarla entera.
+        """
         formato = self.var_formato_impresion.get()
         try:
             self.db.execute(f"""
                 UPDATE ConfiguracionLaboratorio
                 SET FormatoImpresion = '{formato}'
             """)
-            messagebox.showinfo("Éxito",
-                                f"Formato de impresión guardado: Hoja {formato}")
-            if self.callback_actualizar:
-                self.callback_actualizar()
         except Exception as e:
             messagebox.showerror(
                 "Error",
                 f"Error al guardar configuración de impresión:\n{e}")
+            return
+
+        if not self.panel_impresoras.guardar():
+            messagebox.showerror(
+                "Error",
+                "Se guardó el formato de página, pero no se pudieron guardar "
+                "las impresoras por función.\n\nRevise la carpeta logs/ e "
+                "inténtelo de nuevo.")
+            return
+
+        from modulos.impresoras import ORDEN_ROLES
+        asignaciones = self.panel_impresoras.recolectar()
+        asignadas = sum(1 for d in asignaciones.values() if d['impresora'])
+        messagebox.showinfo(
+            "Éxito",
+            f"Configuración de impresión guardada.\n\n"
+            f"Formato: Hoja {formato}\n"
+            f"Funciones con impresora asignada: {asignadas} de "
+            f"{len(ORDEN_ROLES)}")
+        if self.callback_actualizar:
+            self.callback_actualizar()
 
     def _imprimir_pagina_prueba(self):
         """Imprime una página de prueba por la impresora de resultados."""

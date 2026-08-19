@@ -1110,8 +1110,24 @@ class VentanaConfigAdministrativa:
 
             self.configurador.actualizar_configuracion_impresion(datos_imp)
 
-            # Impresoras por rol (se permite repetir una misma impresora)
-            self.panel_impresoras.guardar()
+            # Impresoras por rol (se permite repetir una misma impresora).
+            # Va en su propio try para que un fallo en cualquier otro campo de
+            # la ventana no se lleve por delante la asignación de impresoras:
+            # perderla sin avisar es lo que hacía que los documentos salieran
+            # por la impresora equivocada o solo se abrieran en pantalla.
+            try:
+                if not self.panel_impresoras.guardar():
+                    messagebox.showwarning(
+                        "Impresoras",
+                        "No se pudo guardar la asignación de impresoras por "
+                        "función. El resto de la configuración sí se guardó.",
+                        parent=self.win)
+            except Exception as e_imp:
+                messagebox.showwarning(
+                    "Impresoras",
+                    f"No se pudo guardar la asignación de impresoras por "
+                    f"función:\n{e_imp}",
+                    parent=self.win)
 
             # Resultados
             datos_res = {
@@ -1162,23 +1178,38 @@ class VentanaConfigAdministrativa:
                 datos_fiscal['ImprentaFechaProvidencia'] = None
             self.configurador.actualizar_configuracion_fiscal(datos_fiscal)
 
-            # Tasa COP/USD manual
-            try:
-                tasa_cop_str = self.entry_tasa_cop.get().strip()
-                if tasa_cop_str:
-                    tasa_cop_val = float(tasa_cop_str)
+            # Tasa COP/USD manual. Se lee con parsear_tasa para entender
+            # «3.600,50» igual que «3600.5»; si no hay número utilizable se
+            # avisa en vez de descartarla en silencio, que es lo que hacía
+            # creer que la tasa se había guardado cuando no.
+            tasa_cop_str = self.entry_tasa_cop.get().strip()
+            if tasa_cop_str:
+                from modulos.tasas_cambio import parsear_tasa
+                tasa_cop_val = parsear_tasa(tasa_cop_str)
+                if tasa_cop_val is None or tasa_cop_val <= 0:
+                    messagebox.showwarning(
+                        "Tasa COP/USD",
+                        f"«{tasa_cop_str}» no es una tasa válida, así que no "
+                        "se guardó.\n\nEscriba cuántos pesos vale 1 dólar, "
+                        "por ejemplo 3600 o 3.600,50.\n\n"
+                        "El resto de la configuración sí se guardó.",
+                        parent=self.win)
+                else:
                     self.configurador.actualizar_configuracion_tasas({
                         'TasaCOP_USD': tasa_cop_val
                     })
-                    # Tambien guardar en TasasCambio para historial
+                    # Historial de tasas: de aquí la toma el formulario de
+                    # ingreso del paciente para el total en pesos
                     try:
                         from modulos.tasas_cambio import GestorTasasCambio
-                        gestor = GestorTasasCambio(self.db)
-                        gestor.guardar_tasa_manual('COP_USD', tasa_cop_val)
-                    except Exception:
-                        pass
-            except (ValueError, TypeError):
-                pass
+                        GestorTasasCambio(self.db).guardar_tasa_manual(
+                            'COP_USD', tasa_cop_val)
+                    except Exception as e_tasa:
+                        logging.getLogger(
+                            "angeslab.ventana_config_administrativa").warning(
+                            "No se pudo historiar la tasa COP: %s", e_tasa)
+                    self.entry_tasa_cop.delete(0, tk.END)
+                    self.entry_tasa_cop.insert(0, f"{tasa_cop_val:,.2f}")
 
             # Firma
             datos_firma = {

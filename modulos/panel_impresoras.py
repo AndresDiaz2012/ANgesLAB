@@ -33,7 +33,7 @@ from modulos.impresoras import (
     COLUMNA_ROL_COTIZACIONES, GestorImpresoras, listar_impresoras,
     estado_impresora, normalizar_opciones, opciones_defecto,
     generar_pagina_prueba, enviar_documento, motor_disponible,
-    diagnostico_motor,
+    diagnostico_motor, es_impresora_virtual,
 )
 
 _log = logging.getLogger('angeslab.panel_impresoras')
@@ -146,12 +146,14 @@ class PanelImpresoras(ttk.Frame):
                      state='readonly', width=30).pack(side='left', padx=8)
 
         ttk.Label(self,
-                  text="«Directo» envía el documento sin mostrar el diálogo de "
-                       "impresión: recomendado para recibos y etiquetas.\n"
-                       "«Opciones» define papel, orientación, calidad y copias "
-                       "de esa función. Si una función no tiene impresora "
-                       "asignada,\nel documento solo se abre en pantalla y el "
-                       "sistema lo avisa.",
+                  text="«Directo» (activado de fábrica) envía el documento a "
+                       "esa impresora sin preguntar nada: ni margenes, ni "
+                       "selección de impresora.\nDesmárquelo solo si prefiere "
+                       "que esa función muestre el diálogo de impresión cada "
+                       "vez.\n«Opciones» define papel, orientación, calidad, "
+                       "escala y copias de esa función. Si una función se deja "
+                       "sin impresora,\nel sistema la pedirá en el momento de "
+                       "imprimir.",
                   foreground='#94a3b8', justify='left').pack(anchor='w',
                                                              pady=(10, 0))
 
@@ -230,6 +232,11 @@ class PanelImpresoras(ttk.Frame):
         nombre = combo.get()
         if not nombre or nombre == SIN_ASIGNAR:
             lbl.config(text='Sin asignar', foreground='#94a3b8')
+            return
+        if es_impresora_virtual(nombre):
+            # Asignar aquí «Microsoft Print to PDF» equivale a no imprimir:
+            # el documento se queda en un archivo y nunca sale en papel
+            lbl.config(text='No imprime: genera PDF', foreground='#d97706')
             return
         info = estado_impresora(nombre)
         if not info['existe']:

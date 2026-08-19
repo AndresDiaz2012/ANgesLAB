@@ -69,7 +69,15 @@ ROLES = {
         'ayuda': 'Informes de resultados, hojas de trabajo e interpretaciones',
         'columna': 'ImpresoraResultados',
         'columna_directo': 'ImpresoraResultadosDirecto',
-        'directo_defecto': False,
+        'directo_defecto': True,
+        'papel': 'hoja',
+    },
+    'hojas_trabajo': {
+        'etiqueta': 'Hojas de trabajo',
+        'ayuda': 'Hojas de bancada del día, en horizontal, para anotar a mano',
+        'columna': 'ImpresoraHojasTrabajo',
+        'columna_directo': 'ImpresoraHojasTrabajoDirecto',
+        'directo_defecto': True,
         'papel': 'hoja',
     },
     'cotizaciones': {
@@ -77,7 +85,7 @@ ROLES = {
         'ayuda': 'Cotizaciones y presupuestos para el paciente',
         'columna': 'ImpresoraCotizaciones',
         'columna_directo': 'ImpresoraCotizacionesDirecto',
-        'directo_defecto': False,
+        'directo_defecto': True,
         'papel': 'hoja',
     },
     'facturacion': {
@@ -85,7 +93,7 @@ ROLES = {
         'ayuda': 'Facturas y notas de crédito/débito',
         'columna': 'ImpresoraFacturacion',
         'columna_directo': 'ImpresoraFacturacionDirecto',
-        'directo_defecto': False,
+        'directo_defecto': True,
         'papel': 'hoja',
     },
     'recibos': {
@@ -107,16 +115,14 @@ ROLES = {
 }
 
 # Orden estable para la interfaz de configuración
-ORDEN_ROLES = ('resultados', 'cotizaciones', 'facturacion', 'recibos',
-               'etiquetas')
+ORDEN_ROLES = ('resultados', 'hojas_trabajo', 'cotizaciones',
+               'facturacion', 'recibos', 'etiquetas')
 
 # Nombres alternativos que usan las llamadas existentes del sistema
 ALIAS_ROLES = {
     'informes': 'resultados',
     'resultado': 'resultados',
     'informe': 'resultados',
-    'hoja_trabajo': 'resultados',
-    'hojas_trabajo': 'resultados',
     'ia': 'resultados',
     'interpretacion': 'resultados',
     'cotizacion': 'cotizaciones',
@@ -128,6 +134,13 @@ ALIAS_ROLES = {
     'nota_debito': 'facturacion',
     'recibo': 'recibos',
     'etiqueta': 'etiquetas',
+    'hoja_trabajo': 'hojas_trabajo',
+    'hoja de trabajo': 'hojas_trabajo',
+    'hojas de trabajo': 'hojas_trabajo',
+    'hoja': 'hojas_trabajo',
+    'hojas': 'hojas_trabajo',
+    'bancada': 'hojas_trabajo',
+    'trabajo': 'hojas_trabajo',
 }
 
 # Columna donde se guardan las opciones de papel/calidad de cada rol (JSON)
@@ -142,6 +155,17 @@ ALIAS_COTIZACION = ('cotizacion', 'cotizaciones', 'presupuesto', 'presupuestos')
 ROLES_COTIZACION = ('facturacion', 'resultados')
 ROL_COTIZACIONES_DEFECTO = 'facturacion'
 COLUMNA_ROL_COTIZACIONES = 'RolCotizaciones'
+
+# ── Respaldo entre roles ───────────────────────────────────────────────────
+# Un rol añadido después de instalar no tiene impresora propia en los
+# laboratorios que ya venían trabajando. Antes de dejar el documento sin
+# destino (que acaba en el visor de PDF, o sea sin imprimir), se recurre al
+# rol indicado aquí. En cuanto el rol tiene su impresora asignada, manda la
+# suya. Las hojas de trabajo salían por la de resultados desde siempre, así
+# que ese es su respaldo natural.
+ROLES_RESPALDO = {
+    'hojas_trabajo': ('resultados',),
+}
 
 
 def es_alias_cotizacion(rol):
@@ -188,6 +212,11 @@ OPCIONES_DEFECTO = {
 OPCIONES_DEFECTO_ROL = {
     'recibos': {'escala': 'real'},
     'etiquetas': {'escala': 'real'},
+    # La hoja de trabajo se genera en landscape (modulos/hojas_trabajo.py).
+    # Si se imprime con la orientación vertical de los informes, el driver
+    # pone la hoja de pie y la página horizontal se encoge para caber: sale
+    # una franja diminuta e ilegible en medio del papel.
+    'hojas_trabajo': {'orientacion': 'horizontal'},
 }
 
 
@@ -254,6 +283,44 @@ def listar_impresoras():
         except Exception:
             pass
     return nombres, predeterminada
+
+
+# ── Impresoras que no sacan papel ──────────────────────────────────────────
+# «Microsoft Print to PDF» suele ser la predeterminada de Windows, así que en
+# cuanto una función se quedaba sin impresora propia el documento acababa ahí:
+# el usuario veía abrirse un cuadro de «guardar PDF» y creía que el programa se
+# negaba a imprimir. Estas nunca se ofrecen como opción por defecto.
+_VIRTUALES = (
+    'print to pdf', 'xps document writer', 'onenote', 'fax',
+    'adobe pdf', 'pdfcreator', 'cutepdf', 'dopdf', 'bullzip', 'foxit',
+    'pdf24', 'nitro pdf', 'clipboard', 'sendtokindle', 'send to kindle',
+    'microsoft print to', 'guardar como pdf', 'save as pdf',
+)
+
+
+def es_impresora_virtual(nombre):
+    """True si la impresora genera un archivo en vez de imprimir en papel."""
+    n = str(nombre or '').strip().lower()
+    if not n:
+        return False
+    return any(marca in n for marca in _VIRTUALES)
+
+
+def elegir_impresora_sugerida(nombres, predeterminada=''):
+    """
+    Impresora que conviene proponer cuando no hay ninguna asignada.
+
+    Prefiere la predeterminada de Windows, pero solo si imprime de verdad;
+    si no, la primera física de la lista. Devuelve '' si no hay ninguna.
+    """
+    nombres = list(nombres or [])
+    if predeterminada and predeterminada in nombres \
+            and not es_impresora_virtual(predeterminada):
+        return predeterminada
+    for n in nombres:
+        if not es_impresora_virtual(n):
+            return n
+    return nombres[0] if nombres else ''
 
 
 # Banderas de estado del spooler que impiden o entorpecen la impresión
@@ -792,6 +859,42 @@ class GestorImpresoras:
         self._cache = None
         self._opciones = {}
         self._rol_cotizaciones = ROL_COTIZACIONES_DEFECTO
+        self._columnas_ok = False
+
+    def _asegurar_columnas(self):
+        """
+        Crea en ConfiguracionLaboratorio las columnas de impresoras que falten.
+
+        El guardado manda un solo UPDATE con todas las columnas a la vez, así
+        que si falta una sola (la de un rol añadido en una versión posterior,
+        por ejemplo) Access rechaza la sentencia entera y no se guarda NINGUNA
+        impresora. El usuario solo veía que sus asignaciones no aguantaban, sin
+        pista de por qué.
+        """
+        if self._columnas_ok:
+            return
+        columnas = []
+        for rol in ORDEN_ROLES:
+            columnas.append((ROLES[rol]['columna'], 'TEXT(255)'))
+            columnas.append((ROLES[rol]['columna_directo'], 'BIT'))
+        columnas.append((COLUMNA_OPCIONES, 'MEMO'))
+        columnas.append((COLUMNA_ROL_COTIZACIONES, 'TEXT(20)'))
+
+        for col, tipo in columnas:
+            try:
+                self.db.query_one(
+                    f"SELECT TOP 1 [{col}] FROM ConfiguracionLaboratorio")
+                continue
+            except Exception:
+                pass
+            try:
+                self.db.execute(
+                    f"ALTER TABLE ConfiguracionLaboratorio "
+                    f"ADD COLUMN [{col}] {tipo}")
+                _log.info("Columna de impresoras creada: %s", col)
+            except Exception as e:
+                _log.warning("No se pudo crear la columna '%s': %s", col, e)
+        self._columnas_ok = True
 
     def invalidar_cache(self):
         self._cache = None
@@ -858,9 +961,17 @@ class GestorImpresoras:
                 for rol in ORDEN_ROLES}
 
     def opciones_de(self, rol):
-        """Opciones de papel/calidad/copias del rol."""
+        """
+        Opciones de papel/orientación/calidad/copias del rol.
+
+        Se toman siempre del rol pedido, nunca del rol de respaldo: el
+        respaldo solo decide POR QUÉ IMPRESORA sale el papel, mientras que
+        estas opciones describen el documento. Una hoja de trabajo que salga
+        por la impresora de resultados sigue siendo horizontal; heredar el
+        vertical de los informes la imprimía encogida y de lado.
+        """
         self.asignaciones()
-        r = self._resolver_rol(rol) or normalizar_rol(rol)
+        r = normalizar_rol(rol)
         if not r:
             return dict(OPCIONES_DEFECTO)
         return dict(self._opciones.get(r) or opciones_defecto(r))
@@ -876,32 +987,38 @@ class GestorImpresoras:
         self.asignaciones()          # asegura que la configuración esté leída
         return self._rol_cotizaciones
 
+    def _candidatos_respaldo(self, rol):
+        """Roles a los que recurre `rol` mientras no tenga impresora propia."""
+        if rol == 'cotizaciones':
+            # El respaldo de las cotizaciones lo elige el laboratorio
+            preferido = self._rol_cotizaciones
+            alterno = ('resultados' if preferido == 'facturacion'
+                       else 'facturacion')
+            return (preferido, alterno)
+        return ROLES_RESPALDO.get(rol, ())
+
     def _resolver_rol(self, rol):
         """
         Nombre canónico del rol al que sale realmente el documento.
 
-        Las cotizaciones salen por su propia impresora. Si todavía no tiene
-        ninguna asignada se recurre al rol de respaldo configurado y, si ese
-        tampoco tiene, al otro, para que el documento salga igual en vez de
-        quedarse sin destino.
+        Cada función sale por su propia impresora. Si todavía no tiene
+        ninguna asignada se recurre a su rol de respaldo (ver ROLES_RESPALDO
+        y RolCotizaciones), para que el documento salga igual en vez de
+        quedarse sin destino y acabar en el visor de PDF.
         """
         r = normalizar_rol(rol)
-        if r != 'cotizaciones':
-            return r
+        if not r:
+            return None
 
         asig = self.asignaciones()
-        if asig.get('cotizaciones', {}).get('impresora'):
-            return 'cotizaciones'
+        if asig.get(r, {}).get('impresora'):
+            return r
 
-        preferido = self._rol_cotizaciones
-        if asig.get(preferido, {}).get('impresora'):
-            _log.info("Cotización enviada al rol de respaldo '%s'", preferido)
-            return preferido
-        alterno = ('resultados' if preferido == 'facturacion' else 'facturacion')
-        if asig.get(alterno, {}).get('impresora'):
-            _log.info("Cotización enviada al rol de respaldo '%s'", alterno)
-            return alterno
-        return 'cotizaciones'
+        for candidato in self._candidatos_respaldo(r):
+            if asig.get(candidato, {}).get('impresora'):
+                _log.info("«%s» sale por el rol de respaldo '%s'", r, candidato)
+                return candidato
+        return r
 
     def impresora_de(self, rol):
         """Nombre de la impresora asignada al rol, o '' si no hay."""
@@ -959,6 +1076,7 @@ class GestorImpresoras:
         Se permite repetir la misma impresora en varios roles.
         rol_cotizaciones: rol de respaldo; None deja el actual.
         """
+        self._asegurar_columnas()
         campos = []
         for rol, datos in (asignaciones or {}).items():
             r = normalizar_rol(rol)

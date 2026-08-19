@@ -55,6 +55,8 @@ class ConfiguradorAdministrativo:
         # Impresoras por rol (ver modulos/impresoras.py)
         'ImpresoraResultados': 'TEXT(255)',
         'ImpresoraResultadosDirecto': 'BIT',
+        'ImpresoraHojasTrabajo': 'TEXT(255)',
+        'ImpresoraHojasTrabajoDirecto': 'BIT',
         'ImpresoraCotizaciones': 'TEXT(255)',
         'ImpresoraCotizacionesDirecto': 'BIT',
         'ImpresoraFacturacion': 'TEXT(255)',

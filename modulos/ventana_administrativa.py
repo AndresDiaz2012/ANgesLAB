@@ -1888,7 +1888,7 @@ class VentanaAdministrativa:
 
         destinos = set()
         for r in rutas:
-            destinos.add(self._enviar_a_impresora(r, 'resultados'))
+            destinos.add(self._enviar_a_impresora(r, 'hojas_trabajo'))
         self._hoja_status.config(
             text=(f"{len(rutas)} hoja(s) de trabajo generadas "
                   f"({', '.join(sorted(destinos))})."),

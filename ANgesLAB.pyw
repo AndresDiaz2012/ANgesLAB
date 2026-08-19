@@ -129,6 +129,33 @@ try:
 except ImportError:
     CONFIG_ADMINISTRATIVA_DISPONIBLE = False
 
+# Lector de los importes y tasas que se escriben a mano
+try:
+    from modulos.tasas_cambio import parsear_monto as _parsear_monto
+except ImportError:
+    _parsear_monto = None
+
+
+def _numero_usuario(texto, defecto=0):
+    """
+    Lee un número escrito a mano en un campo de dinero o de tasa.
+
+    Los formularios usaban float() con un `except` que devolvía 0 (o 1 para
+    las tasas). Con eso, escribir un abono de «1.500,50» o una tasa de
+    «3.600,00» —el formato normal aquí— no daba ningún error: el importe se
+    tomaba como 0 y el total salía mal sin que nadie lo notara. El lector
+    común entiende las dos convenciones de separadores.
+    """
+    if _parsear_monto is not None:
+        valor = _parsear_monto(texto, None)
+        return defecto if valor is None else valor
+    # Respaldo mínimo si el módulo de tasas no está disponible
+    try:
+        return float(str(texto).strip().replace(',', '.'))
+    except (ValueError, TypeError, AttributeError):
+        return defecto
+
+
 # Importar módulo de valores de referencia por edad/sexo
 try:
     from modulos.valores_referencia import obtener_gestor as obtener_gestor_ref
@@ -1904,10 +1931,14 @@ class MainApplication:
         shortcuts_frame = tk.Frame(scrollable, bg=COLORS['bg'])
         shortcuts_frame.pack(fill='x', pady=(0, 20))
 
+        # El orden sigue el recorrido del día: se recibe al paciente, se
+        # cobra, se cotiza si hace falta, se saca la hoja de bancada y se
+        # cargan los resultados.
         shortcuts = [
             ("📋", "Nueva Solicitud", COLORS['primary'], self.form_solicitud),
             ("💰", "Caja", COLORS['success'], self.show_caja),
             ("🧾", "Cotizaciones", COLORS['warning'], self.show_cotizaciones),
+            ("📄", "Hojas de Trabajo", COLORS['accent'], self.show_hojas_trabajo),
             ("📝", "Resultados", COLORS['info'], self.show_resultados),
         ]
 
@@ -5926,10 +5957,10 @@ class MainApplication:
         self.lbl_subtotal.config(text=f"${subtotal:,.2f}")
 
         # Descuento
-        try:
-            desc_pct = float(self.entry_descuento.get() or 0)
-        except Exception:
-            desc_pct = 0
+        # Los importes se leen con parsear_monto y no con float(): escrito
+        # «1.500,50», float() lanza, el except lo dejaba en 0 y el total salía
+        # mal sin que nada lo advirtiera. Ver modulos/tasas_cambio.py.
+        desc_pct = _numero_usuario(self.entry_descuento.get(), 0)
         desc_monto = subtotal * (desc_pct / 100)
         self.lbl_descuento.config(text=f"-${desc_monto:,.2f}")
 
@@ -5937,10 +5968,7 @@ class MainApplication:
         base = subtotal - desc_monto
 
         # IVA
-        try:
-            iva_pct = float(self.entry_iva.get() or 0)
-        except Exception:
-            iva_pct = 0
+        iva_pct = _numero_usuario(self.entry_iva.get(), 0)
         iva_monto = base * (iva_pct / 100)
         self.lbl_iva.config(text=f"+${iva_monto:,.2f}")
 
@@ -5948,14 +5976,8 @@ class MainApplication:
         total_usd = base + iva_monto
 
         # Obtener tasas de cambio
-        try:
-            tasa_bs = float(self.entry_tasa_bs.get() or 1)
-        except Exception:
-            tasa_bs = 1
-        try:
-            tasa_cop = float(self.entry_tasa_cop.get() or 1)
-        except Exception:
-            tasa_cop = 1
+        tasa_bs = _numero_usuario(self.entry_tasa_bs.get(), 1) or 1
+        tasa_cop = _numero_usuario(self.entry_tasa_cop.get(), 1) or 1
 
         # Calcular totales en cada moneda
         total_bs = total_usd * tasa_bs
@@ -5974,10 +5996,7 @@ class MainApplication:
         self.lbl_total_cop.config(text=f"${total_cop:,.0f} COP")
 
         # Abonado y Saldo (en USD)
-        try:
-            abonado = float(self.entry_abonado.get() or 0)
-        except Exception:
-            abonado = 0
+        abonado = _numero_usuario(self.entry_abonado.get(), 0)
         saldo = total_usd - abonado
         self.lbl_saldo.config(text=f"${saldo:,.2f}")
 
@@ -7073,13 +7092,15 @@ class MainApplication:
 
             # Calcular totales para mostrar en diálogo
             subtotal = sum(p['precio'] for p in self.sol_pruebas_seleccionadas)
-            desc_pct = float(self.entry_descuento.get() or 0)
+            # Mismo lector que en pantalla: si aquí se usa float() a secas, un
+            # abono escrito «1.500,50» tumba el guardado de la solicitud
+            desc_pct = _numero_usuario(self.entry_descuento.get(), 0)
             desc_monto = subtotal * (desc_pct / 100)
             base = subtotal - desc_monto
-            iva_pct = float(self.entry_iva.get() or 0)
+            iva_pct = _numero_usuario(self.entry_iva.get(), 0)
             iva_monto = base * (iva_pct / 100)
             total = base + iva_monto
-            abonado = float(self.entry_abonado.get() or 0)
+            abonado = _numero_usuario(self.entry_abonado.get(), 0)
 
             # Preparar lista de pruebas para el gestor
             pruebas_para_guardar = [
@@ -7293,7 +7314,8 @@ class MainApplication:
                 print(f"Advertencia: No se pudo registrar en caja: {_e_caja}")
 
         # Mostrar mensaje de éxito con opcion de imprimir etiquetas
-        abonado = float(self.entry_abonado.get() or 0) if hasattr(self, 'entry_abonado') else 0
+        abonado = (_numero_usuario(self.entry_abonado.get(), 0)
+                   if hasattr(self, 'entry_abonado') else 0)
         self._mostrar_exito_solicitud(win, sol_id, numero, total, abonado, doc_mensaje)
         self.cargar_solicitudes()
         return True
@@ -7954,13 +7976,13 @@ class MainApplication:
 
         # Calcular totales
         subtotal = sum(p['precio'] for p in self.sol_pruebas_seleccionadas)
-        desc_pct = float(self.entry_descuento.get() or 0)
+        desc_pct = _numero_usuario(self.entry_descuento.get(), 0)
         desc_monto = subtotal * (desc_pct / 100)
         base = subtotal - desc_monto
-        iva_pct = float(self.entry_iva.get() or 0)
+        iva_pct = _numero_usuario(self.entry_iva.get(), 0)
         iva_monto = base * (iva_pct / 100)
         total = base + iva_monto
-        abonado = float(self.entry_abonado.get() or 0)
+        abonado = _numero_usuario(self.entry_abonado.get(), 0)
 
         # Generar texto del comprobante
         comprobante = f"""
@@ -11385,14 +11407,17 @@ Forma de Pago: {self.combo_forma_pago.get()}
         return self._gestor_impresoras
 
     def imprimir_por_rol(self, pdf_path, rol, abrir_si_falla=True,
-                         avisar=True, copias=None):
+                         avisar=True, copias=None, titulo=None):
         """
         Envía un documento a la impresora asignada a su rol.
 
-        Si el rol no tiene impresora configurada, o la impresora rechaza el
-        trabajo, el PDF se abre en pantalla como respaldo Y se avisa: abrir el
-        visor no es imprimir, y dar eso por bueno es justo lo que hacía que el
-        usuario creyera que el sistema imprimía cuando no lo hacía.
+        Si el rol todavía no tiene impresora se pregunta a cuál va y se ofrece
+        recordarla, en vez de volcar el PDF al visor: abrir Edge o Acrobat no
+        imprime nada, y era justo eso lo que hacía creer que el sistema
+        imprimía cuando en realidad no salía ningún papel.
+
+        Si hay impresora asignada pero rechaza el trabajo, el PDF sí se abre
+        en pantalla como último recurso y se avisa del motivo.
 
         Returns 'impreso', 'sin_impresora', 'fallo_impresion', 'abierto' o
         'error'.
@@ -11406,13 +11431,37 @@ Forma de Pago: {self.combo_forma_pago.get()}
             except Exception:
                 return 'error'
 
+        # Sin impresora asignada: se pide una en vez de abrir el visor. El
+        # diálogo trae la casilla «usar siempre», así que basta marcarla una
+        # vez para que esa función no vuelva a preguntar nunca más.
+        gestor = self.gestor_impresoras()
+        if gestor is not None:
+            try:
+                sin_asignar = not gestor.impresora_de(rol)
+            except Exception:
+                sin_asignar = False
+            if sin_asignar:
+                etiqueta = self._etiqueta_rol(rol)
+                ok = self.imprimir_pdf_en_impresora(
+                    pdf_path, tipo=rol,
+                    titulo=titulo or f"Imprimir {etiqueta.lower()}")
+                return 'impreso' if ok else 'sin_impresora'
+
         detalle = {}
         estado = imprimir_documento(db, pdf_path, rol, copias=copias,
                                     abrir_si_falla=abrir_si_falla,
-                                    detalle=detalle)
+                                    titulo=titulo, detalle=detalle)
         if avisar and estado != 'impreso':
             self._avisar_impresion_fallida(rol, estado, detalle)
         return estado
+
+    @staticmethod
+    def _etiqueta_rol(rol):
+        """Nombre legible de la función de impresión ('Etiquetas de muestras')."""
+        try:
+            return ROLES_IMPRESORA[normalizar_rol(rol) or 'resultados']['etiqueta']
+        except Exception:
+            return str(rol)
 
     # Un rol solo avisa una vez por sesión de que no tiene impresora: el aviso
     # sirve para que el usuario lo configure, no para estorbarle en cada recibo
@@ -11420,10 +11469,7 @@ Forma de Pago: {self.combo_forma_pago.get()}
 
     def _avisar_impresion_fallida(self, rol, estado, detalle=None):
         """Explica por qué no salió el papel, sin repetirse en cada documento."""
-        try:
-            nombre_rol = ROLES_IMPRESORA[normalizar_rol(rol) or 'resultados']['etiqueta']
-        except Exception:
-            nombre_rol = str(rol)
+        nombre_rol = self._etiqueta_rol(rol)
 
         if estado == 'sin_impresora':
             if rol in self._roles_ya_avisados:
@@ -11498,7 +11544,9 @@ Forma de Pago: {self.combo_forma_pago.get()}
             return False
 
         from modulos.impresoras import (enviar_documento, estado_impresora,
-                                        normalizar_opciones, diagnostico_motor)
+                                        normalizar_opciones, diagnostico_motor,
+                                        es_impresora_virtual,
+                                        elegir_impresora_sugerida)
 
         rol = normalizar_rol(tipo) or 'resultados'
         gestor = self.gestor_impresoras()
@@ -11581,13 +11629,18 @@ Forma de Pago: {self.combo_forma_pago.get()}
                                         state='readonly', height=10)
         combo_impresora.pack(fill='x', pady=(2, 5))
 
-        # Impresora por defecto: la del rol > la del sistema > la primera
+        # Impresora por defecto: la del rol > la predeterminada del sistema
+        # si imprime en papel > la primera física. Nunca se propone una
+        # impresora virtual: proponer «Microsoft Print to PDF» es lo que hacía
+        # que al dar Imprimir saliera un cuadro de guardar PDF en vez de papel.
         if impresora_configurada and impresora_configurada in impresoras:
             combo_impresora.set(impresora_configurada)
-        elif impresora_default and impresora_default in impresoras:
-            combo_impresora.set(impresora_default)
         else:
-            combo_impresora.current(0)
+            sugerida = elegir_impresora_sugerida(impresoras, impresora_default)
+            if sugerida:
+                combo_impresora.set(sugerida)
+            else:
+                combo_impresora.current(0)
 
         lbl_info = tk.Label(body, text="", font=('Segoe UI', 8), bg='white',
                             fg='#888', anchor='w')
@@ -11600,10 +11653,15 @@ Forma de Pago: {self.combo_forma_pago.get()}
                 textos.append(f"Asignada a {etiqueta_rol.lower()}")
             elif sel == impresora_default:
                 textos.append("Predeterminada del sistema")
+            virtual = es_impresora_virtual(sel)
+            if virtual:
+                # Avisar antes, no después de perder el documento en un archivo
+                textos.append("NO imprime en papel: genera un archivo")
             estado = estado_impresora(sel)
             textos.append(estado['texto'])
             lbl_info.config(text=" | ".join(textos),
-                            fg='#b45309' if estado['bloqueada'] else '#888')
+                            fg='#b45309' if (virtual or estado['bloqueada'])
+                            else '#888')
 
         combo_impresora.bind('<<ComboboxSelected>>', actualizar_info)
         actualizar_info()
@@ -11722,15 +11780,23 @@ Forma de Pago: {self.combo_forma_pago.get()}
         return bool(resultado_final.get('ok'))
 
     def _recordar_impresora_rol(self, rol, impresora, opciones):
-        """Deja fijada la impresora y las opciones elegidas para ese rol."""
+        """
+        Deja fijada la impresora y las opciones elegidas para ese rol.
+
+        La casilla del diálogo dice «usar esta impresora SIEMPRE», así que
+        además de guardar el nombre se marca el rol como directo: si no, el
+        diálogo volvía a aparecer en cada documento y el usuario tenía que
+        elegir impresora una y otra vez pese a haber pedido lo contrario.
+        """
         gestor = self.gestor_impresoras()
         if not gestor:
             return
         try:
             asignaciones = {r: dict(datos)
                             for r, datos in gestor.asignaciones().items()}
-            asignaciones.setdefault(rol, {'impresora': '', 'directo': False})
+            asignaciones.setdefault(rol, {'impresora': '', 'directo': True})
             asignaciones[rol]['impresora'] = impresora
+            asignaciones[rol]['directo'] = True
             todas = gestor.todas_las_opciones()
             todas[rol] = dict(opciones)
             gestor.guardar(asignaciones, None, todas)

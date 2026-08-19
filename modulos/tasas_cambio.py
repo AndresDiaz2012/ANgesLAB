@@ -434,6 +434,90 @@ class GestorTasasCambio:
 # FUNCION DE CONVENIENCIA
 # ============================================================================
 
+# ══════════════════════════════════════════════════════════════════════════
+#  Lectura de lo que el usuario escribe en un campo de tasa
+# ══════════════════════════════════════════════════════════════════════════
+def _resolver_separador_unico(texto):
+    """
+    Decide si el único separador de `texto` es de miles o decimal.
+
+    Sigue la misma regla que el resto del sistema (ver _calcular_alerta en
+    ANgesLAB.pyw): parte entera distinta de cero y exactamente tres dígitos
+    detrás => es separador de miles.
+        '3.600' -> '3600'      '3.6' -> '3.6'
+        '474.0598' -> '474.0598'   '0.800' -> '0.800'
+    """
+    partes = texto.split('.')
+    if len(partes) > 2:
+        # Varios separadores iguales solo pueden ser de miles: 1.234.567
+        return ''.join(partes)
+    izquierda, derecha = partes
+    if (izquierda.lstrip('-') not in ('', '0')
+            and len(derecha) == 3 and derecha.isdigit()):
+        return izquierda + derecha
+    return texto
+
+
+def parsear_tasa(texto, defecto=None):
+    """
+    Convierte a float lo que el usuario escribió en un campo de tasa.
+
+    Acepta las dos convenciones que conviven a diario en el laboratorio: la
+    de aquí («3.600,50» o «3.600») y la anglosajona («3,600.50»). No es un
+    capricho de formato: leer «3.600» como 3,6 en vez de 3600 equivoca por
+    mil el total en pesos de una factura, y el error se arrastra hasta el
+    cobro. También tolera símbolos de moneda y espacios pegados al número.
+
+    Devuelve `defecto` si el texto no contiene un número utilizable.
+
+    Ojo con la ambigüedad de fondo: «474.059» se lee como 474059, porque tres
+    dígitos detrás del separador se interpretan como grupo de miles. Las
+    pantallas que usan esta función muestran de vuelta el valor entendido
+    para que un caso así se vea antes de guardarlo.
+    """
+    import re as _re
+    s = str(texto if texto is not None else '').strip()
+    if not s:
+        return defecto
+    # Fuera símbolos de moneda, letras y espacios: 'Bs. 3.600,50' -> '3.600,50'
+    s = _re.sub(r'[^\d.,\-]', '', s)
+    if not s or s.strip('-') == '':
+        return defecto
+
+    negativo = s.startswith('-')
+    s = s.lstrip('-')
+
+    hay_punto, hay_coma = '.' in s, ',' in s
+    if hay_punto and hay_coma:
+        # Con los dos presentes no hay ambigüedad: el último es el decimal
+        if s.rfind(',') > s.rfind('.'):
+            s = s.replace('.', '').replace(',', '.')     # 3.600,50
+        else:
+            s = s.replace(',', '')                       # 3,600.50
+    elif hay_coma:
+        s = _resolver_separador_unico(s.replace(',', '.'))
+    elif hay_punto:
+        s = _resolver_separador_unico(s)
+
+    try:
+        valor = float(s)
+    except (ValueError, TypeError):
+        return defecto
+    return -valor if negativo else valor
+
+
+def parsear_monto(texto, defecto=None):
+    """
+    Lee un importe escrito a mano (abono, descuento, precio).
+
+    Es el mismo lector que `parsear_tasa`: los campos de dinero del sistema
+    sufren exactamente la misma ambigüedad de separadores, y un abono de
+    «1.500,50» leído como 0 descuadra la caja igual de rápido que una tasa
+    mal leída descuadra una factura.
+    """
+    return parsear_tasa(texto, defecto)
+
+
 def crear_gestor_tasas(db):
     """Crea una instancia de GestorTasasCambio."""
     return GestorTasasCambio(db)
