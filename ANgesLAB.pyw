@@ -6404,15 +6404,25 @@ class MainApplication:
             pass
 
     def _agregar_perfil(self):
-        """Agrega todas las pruebas de un perfil al listado de seleccionadas."""
+        """Agrega al listado las pruebas del perfil elegido en el desplegable."""
         perfil_sel = self.combo_perfil.get()
         if not perfil_sel or perfil_sel not in self._perfil_map:
             messagebox.showwarning("Perfil", "Seleccione un perfil de la lista")
             return
+        self._agregar_pruebas_de_perfil(self._perfil_map[perfil_sel],
+                                        perfil_sel.split(' - ', 1)[-1])
 
-        perfil_id = self._perfil_map[perfil_sel]
+    def _agregar_pruebas_de_perfil(self, perfil_id, nombre_perfil=''):
+        """
+        Mete en la solicitud todas las pruebas activas de un perfil.
+
+        La usan el desplegable «＋ Perfil» y el buscador. Estaba solo dentro del
+        desplegable, y como el buscador no miraba la tabla Perfiles, la unica
+        via para pedir un perfil era un control que casi nadie encontraba.
+
+        Returns el numero de pruebas realmente anadidas.
+        """
         ids_ya = {p['id'] for p in self.sol_pruebas_seleccionadas}
-
         try:
             pruebas = db.query(f"""
                 SELECT p.PruebaID, p.CodigoPrueba, p.NombrePrueba, p.Precio
@@ -6421,34 +6431,95 @@ class MainApplication:
                 WHERE pp.PerfilID = {perfil_id} AND p.Activo = True
                 ORDER BY p.NombrePrueba
             """)
-            if not pruebas:
-                messagebox.showinfo("Perfil", "Este perfil no tiene pruebas asignadas")
-                return
-
-            agregadas = 0
-            for p in pruebas:
-                if p['PruebaID'] in ids_ya:
-                    continue
-                precio = float(p.get('Precio') or 0)
-                self.sol_pruebas_seleccionadas.append({
-                    'id': p['PruebaID'], 'codigo': p['CodigoPrueba'],
-                    'nombre': p['NombrePrueba'], 'precio': precio
-                })
-                ids_ya.add(p['PruebaID'])
-                agregadas += 1
-
-            self._refrescar_lista_seleccionadas()
-            self.calcular_totales()
-            if agregadas > 0:
-                self._set_pac_status(f"Perfil agregado: {agregadas} pruebas anadidas", '#e8f5e9', '#2e7d32')
-            else:
-                self._set_pac_status("Todas las pruebas del perfil ya estaban seleccionadas", '#fff3e0', '#e65100')
         except Exception as e:
-            _log.error("Error agregando perfil: %s", e)
+            _log.error("Error agregando perfil %s: %s", perfil_id, e)
             messagebox.showerror("Error", f"No se pudo cargar el perfil: {e}")
+            return 0
+
+        if not pruebas:
+            messagebox.showinfo("Perfil", "Este perfil no tiene pruebas asignadas")
+            return 0
+
+        agregadas = 0
+        for p in pruebas:
+            if p['PruebaID'] in ids_ya:
+                continue
+            self.sol_pruebas_seleccionadas.append({
+                'id': p['PruebaID'], 'codigo': p['CodigoPrueba'],
+                'nombre': p['NombrePrueba'],
+                'precio': float(p.get('Precio') or 0),
+            })
+            ids_ya.add(p['PruebaID'])
+            agregadas += 1
+
+        self._refrescar_lista_seleccionadas()
+        self.calcular_totales()
+
+        etiqueta = f" «{nombre_perfil}»" if nombre_perfil else ""
+        if agregadas == len(pruebas):
+            self._set_pac_status(f"Perfil{etiqueta}: {agregadas} pruebas anadidas",
+                                 '#e8f5e9', '#2e7d32')
+        elif agregadas > 0:
+            # Aviso util: el operador ve por que salieron menos de las que
+            # esperaba en vez de pensar que el perfil esta incompleto
+            self._set_pac_status(
+                f"Perfil{etiqueta}: {agregadas} anadidas, "
+                f"{len(pruebas) - agregadas} ya estaban", '#e8f5e9', '#2e7d32')
+        else:
+            self._set_pac_status(
+                f"Todas las pruebas del perfil{etiqueta} ya estaban seleccionadas",
+                '#fff3e0', '#e65100')
+        return agregadas
+
+    def _buscar_perfiles(self, texto, limite=5):
+        """
+        Perfiles cuyo codigo o nombre contiene el texto.
+
+        Se devuelven con las mismas claves que una prueba para que el popup de
+        sugerencias los pinte sin un camino aparte; lo que los distingue es
+        `_es_perfil`. El precio es la suma de sus pruebas, que es lo que se le
+        va a cobrar al paciente.
+        """
+        safe = texto.replace("'", "''")
+        try:
+            filas = db.query(f"""
+                SELECT TOP {int(limite)} pf.PerfilID, pf.CodigoPerfil,
+                       pf.NombrePerfil, COUNT(pr.PruebaID) AS NumPruebas,
+                       SUM(pr.Precio) AS Total
+                FROM (Perfiles pf
+                INNER JOIN PruebasEnPerfil pp ON pf.PerfilID = pp.PerfilID)
+                INNER JOIN Pruebas pr ON pp.PruebaID = pr.PruebaID
+                WHERE pf.Activo=True AND pr.Activo=True
+                  AND (pf.NombrePerfil LIKE '%{safe}%'
+                       OR pf.CodigoPerfil LIKE '%{safe}%')
+                GROUP BY pf.PerfilID, pf.CodigoPerfil, pf.NombrePerfil
+                ORDER BY pf.NombrePerfil
+            """) or []
+        except Exception as e:
+            _log.error("Error buscando perfiles: %s", e)
+            return []
+
+        salida = []
+        for f in filas:
+            n = int(f.get('NumPruebas') or 0)
+            salida.append({
+                'PruebaID': None,
+                'CodigoPrueba': f.get('CodigoPerfil') or '',
+                'NombrePrueba': f"{f.get('NombrePerfil') or ''} ({n} pruebas)",
+                'Precio': float(f.get('Total') or 0),
+                'CodigoArea': 'PERF',
+                '_es_perfil': True,
+                '_perfil_id': f['PerfilID'],
+                '_perfil_nombre': f.get('NombrePerfil') or '',
+            })
+        return salida
 
     def _agregar_primera_coincidencia(self):
-        """Busca pruebas por nombre/codigo y agrega la primera coincidencia (o popup si hay varias)."""
+        """
+        Agrega lo que coincida con el texto: prueba o perfil.
+
+        Con una sola coincidencia la mete directamente; con varias pregunta.
+        """
         texto = self.entry_buscar_prueba.get().strip()
         if not texto:
             return
@@ -6466,31 +6537,44 @@ class MainApplication:
                        OR p.CodigoPrueba LIKE '%{safe}%')
                 ORDER BY p.NombrePrueba
             """)
-            if not pruebas:
-                self._set_pac_status(f"No se encontro prueba: '{texto}'", '#ffebee', '#c62828')
-                return
 
-            # Filtrar las ya seleccionadas
-            disponibles = [p for p in pruebas if p['PruebaID'] not in ids_ya]
+            # Los perfiles compiten como una opcion mas. Deliberadamente NO se
+            # les da prioridad automatica: «lipid» coincide a la vez con el
+            # perfil LIPID y con LIPIDOGRAMA, y elegir por el usuario sin
+            # preguntar mete en la solicitud algo que el no pidio. Si hay dudas
+            # decide el operador en el popup, como con dos pruebas parecidas.
+            disponibles = self._buscar_perfiles(texto, limite=10)
+            disponibles += [p for p in (pruebas or [])
+                            if p['PruebaID'] not in ids_ya]
+
             if not disponibles:
-                self._set_pac_status("Todas las coincidencias ya estan seleccionadas", '#fff3e0', '#e65100')
+                if pruebas:
+                    self._set_pac_status("Todas las coincidencias ya estan seleccionadas",
+                                         '#fff3e0', '#e65100')
+                else:
+                    self._set_pac_status(f"No se encontro prueba ni perfil: '{texto}'",
+                                         '#ffebee', '#c62828')
                 return
 
             if len(disponibles) == 1:
                 elegida = disponibles[0]
             else:
-                # Popup de seleccion
                 elegida = self._popup_seleccion_prueba(disponibles)
                 if not elegida:
                     return
 
-            precio = float(elegida.get('Precio') or 0)
-            self.sol_pruebas_seleccionadas.append({
-                'id': elegida['PruebaID'], 'codigo': elegida['CodigoPrueba'],
-                'nombre': elegida['NombrePrueba'], 'precio': precio
-            })
-            self._refrescar_lista_seleccionadas()
-            self.calcular_totales()
+            if elegida.get('_es_perfil'):
+                self._agregar_pruebas_de_perfil(elegida['_perfil_id'],
+                                                elegida.get('_perfil_nombre') or '')
+            else:
+                self.sol_pruebas_seleccionadas.append({
+                    'id': elegida['PruebaID'], 'codigo': elegida['CodigoPrueba'],
+                    'nombre': elegida['NombrePrueba'],
+                    'precio': float(elegida.get('Precio') or 0),
+                })
+                self._refrescar_lista_seleccionadas()
+                self.calcular_totales()
+
             self.entry_buscar_prueba.delete(0, 'end')
             self._autocomplete_cerrar()
             self.entry_buscar_prueba.focus_set()
@@ -6529,6 +6613,10 @@ class MainApplication:
             _log.error("Error autocompletado pruebas: %s", e)
             pruebas = []
         disponibles = [p for p in pruebas if p['PruebaID'] not in ids_ya]
+        # Los perfiles van primero: quien escribe «perfil» casi siempre quiere
+        # el paquete, y si no lo ve arriba da por hecho que no existe. Antes no
+        # aparecian en absoluto porque la busqueda solo miraba la tabla Pruebas.
+        disponibles = self._buscar_perfiles(texto) + disponibles
         if not disponibles:
             self._autocomplete_cerrar()
             return
@@ -6579,6 +6667,10 @@ class MainApplication:
                 # el prefijo del codigo no siempre coincide con ella
                 etiqueta = (f" {codigo[:9]:<9} {area[:4]:<4} {nombre[:44]}"
                             + (f"   ${precio:,.2f}" if precio else "   s/precio"))
+                if p.get('_es_perfil'):
+                    # El icono es lo que distingue de un vistazo el paquete de
+                    # la prueba suelta; ambos pueden llamarse «Perfil Lipidico»
+                    etiqueta = '📦' + etiqueta[1:]
                 self._autocomplete_listbox.insert('end', etiqueta)
                 self._autocomplete_data.append({
                     'id': p['PruebaID'],
@@ -6586,6 +6678,9 @@ class MainApplication:
                     'nombre': nombre,
                     'precio': precio,
                     'area': area,
+                    'es_perfil': bool(p.get('_es_perfil')),
+                    'perfil_id': p.get('_perfil_id'),
+                    'perfil_nombre': p.get('_perfil_nombre') or '',
                 })
 
             try:
@@ -6638,13 +6733,22 @@ class MainApplication:
         if idx >= len(self._autocomplete_data):
             return
         data = self._autocomplete_data[idx]
-        ids_ya = {p['id'] for p in getattr(self, 'sol_pruebas_seleccionadas', [])}
-        if data['id'] in ids_ya:
-            self._set_pac_status("La prueba ya esta seleccionada", '#fff3e0', '#e65100')
+        if data.get('es_perfil'):
+            self._agregar_pruebas_de_perfil(data['perfil_id'],
+                                            data.get('perfil_nombre') or '')
         else:
-            self.sol_pruebas_seleccionadas.append(data)
-            self._refrescar_lista_seleccionadas()
-            self.calcular_totales()
+            ids_ya = {p['id'] for p in getattr(self, 'sol_pruebas_seleccionadas', [])}
+            if data['id'] in ids_ya:
+                self._set_pac_status("La prueba ya esta seleccionada", '#fff3e0', '#e65100')
+            else:
+                # Solo las claves que espera el resto del formulario: las de
+                # control del popup no tienen que viajar a la solicitud
+                self.sol_pruebas_seleccionadas.append({
+                    'id': data['id'], 'codigo': data['codigo'],
+                    'nombre': data['nombre'], 'precio': data['precio'],
+                })
+                self._refrescar_lista_seleccionadas()
+                self.calcular_totales()
         try:
             self.entry_buscar_prueba.delete(0, 'end')
         except Exception:
@@ -6664,7 +6768,7 @@ class MainApplication:
         popup.transient(self.sol_win)
         hacer_ventana_responsiva(popup, 500, 350, min_ancho=400, min_alto=250)
 
-        tk.Label(popup, text=f"{len(pruebas)} coincidencias — seleccione una:",
+        tk.Label(popup, text=f"{len(pruebas)} coincidencias (📦 = perfil completo) — seleccione una:",
                  font=('Segoe UI', 9, 'bold'), bg='#f0f0f0', fg='#333').pack(padx=10, pady=(10, 5), anchor='w')
 
         frame_tree = tk.Frame(popup, bg='#f0f0f0')
@@ -6687,7 +6791,12 @@ class MainApplication:
         data_map = {}
         for p in pruebas:
             precio = float(p.get('Precio') or 0)
-            iid = tree.insert('', 'end', values=(p['CodigoPrueba'] or '', p['NombrePrueba'] or '', f"${precio:,.2f}"))
+            # El icono evita el error mas facil de cometer aqui: el perfil y la
+            # prueba pueden llamarse igual y costar distinto
+            nombre = p['NombrePrueba'] or ''
+            if p.get('_es_perfil'):
+                nombre = f"📦 {nombre}"
+            iid = tree.insert('', 'end', values=(p['CodigoPrueba'] or '', nombre, f"${precio:,.2f}"))
             data_map[iid] = p
 
         resultado = [None]

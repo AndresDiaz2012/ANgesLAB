@@ -1,5 +1,5 @@
 ================================================================================
-   ANgesLAB v2.5.1  -  USB de instalacion y actualizacion
+   ANgesLAB v2.5.2  -  USB de instalacion y actualizacion
    Sistema de Gestion de Laboratorio Clinico
 ================================================================================
 
@@ -27,14 +27,14 @@ Esta USB sirve para dos cosas. Elija UNA segun el equipo:
 --------------------------------------------------------------------------------
   B) EQUIPO NUEVO, SIN ANgesLAB  ->  INSTALAR
 --------------------------------------------------------------------------------
-  1. Doble clic en:  ANgesLAB_Setup_v2.5.1.exe
+  1. Doble clic en:  ANgesLAB_Setup_v2.5.2.exe
   2. Acepte el aviso de Windows (requiere permisos de administrador).
   3. Siga el asistente. Se instala en  C:\ANgesLAB
   4. Al terminar quedan los accesos directos en el Escritorio y el
      Menu Inicio.
 
   NO hace falta ejecutar el actualizador despues: la instalacion nueva ya
-  viene con todo al dia (codigo v2.5.1 y catalogo completo de areas,
+  viene con todo al dia (codigo v2.5.2 y catalogo completo de areas,
   pruebas, parametros y valores de referencia).
 
   ENTRAR LA PRIMERA VEZ:
@@ -53,10 +53,30 @@ Esta USB sirve para dos cosas. Elija UNA segun el equipo:
 
 
 --------------------------------------------------------------------------------
-  QUE TRAE LA VERSION 2.5.1
+  QUE TRAE LA VERSION 2.5.2
 --------------------------------------------------------------------------------
-  Esta version arregla la impresion y el guardado de la pestana Financiera.
-  Si venia de la 2.5, es la actualizacion que corrige lo que fallaba.
+  - LOS PERFILES SE PUEDEN PEDIR DESDE EL BUSCADOR
+    Los perfiles que se gestionan en Parametros -> Gestionar Perfiles (Perfil
+    20, Preoperatorio, Prenatal, Cardiometabolico...) solo se podian pedir
+    desde un desplegable que casi nadie encontraba: al escribir su nombre en
+    el buscador de Nueva Solicitud no aparecian, porque la busqueda solo
+    miraba las pruebas.
+
+    Ahora salen los primeros, marcados con un icono de paquete y con el numero
+    de pruebas y el precio total del paquete:
+
+        [paquete] P20   Perfil 20 (14 pruebas)      35,54
+                  QUI024  PERFIL 20                  2,22
+
+    Eso importa: hay pruebas sueltas que se llaman casi igual que un perfil y
+    cuestan otra cosa. El icono y el precio los distinguen de un vistazo, y si
+    el texto coincide con varias opciones el sistema pregunta en vez de elegir
+    por usted.
+
+    El desplegable de siempre sigue donde estaba; no se quito nada.
+
+
+  Lo que trajo la 2.5.1, por si actualiza desde la 2.5:
 
   - CADA DOCUMENTO SALE POR SU IMPRESORA, SIN PREGUNTAR
     En Configuracion -> Impresion se asigna una impresora a cada funcion.
@@ -96,7 +116,7 @@ Esta USB sirve para dos cosas. Elija UNA segun el equipo:
 --------------------------------------------------------------------------------
   CONTENIDO DE ESTA USB
 --------------------------------------------------------------------------------
-  ANgesLAB_Setup_v2.5.1.exe  Instalador completo (equipos nuevos)
+  ANgesLAB_Setup_v2.5.2.exe  Instalador completo (equipos nuevos)
   actualizador\              Actualizador para instalaciones existentes
   ANgesLAB.pyw               Programa principal
   modulos\                   Modulos del sistema (39)
