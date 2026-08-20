@@ -11913,6 +11913,179 @@ Forma de Pago: {self.combo_forma_pago.get()}
         except Exception as e:
             _log.warning("No se pudo recordar la impresora de '%s': %s", rol, e)
 
+    def enviar_informe_a_sede(self, pdf_path, numero_solicitud, paciente, parent=None):
+        """
+        Deja el informe en la carpeta de una sede remota para que lo imprima.
+
+        Si no hay ninguna sede configurada se ofrece configurarla en el momento:
+        el operador esta intentando enviar algo, es cuando tiene sentido
+        preguntarle a donde.
+        """
+        try:
+            from modulos import envio_sede
+        except Exception as e:
+            messagebox.showerror("Enviar a sede",
+                                 f"No se pudo cargar el modulo de envio:\n{e}",
+                                 parent=parent)
+            return
+
+        ventana = parent or self.root
+        sedes = envio_sede.listar_sedes(db)
+
+        if not sedes:
+            if not messagebox.askyesno(
+                    "Enviar a sede",
+                    "Todavia no hay ninguna sede configurada.\n\n"
+                    "Una sede es una carpeta sincronizada (Drive, OneDrive o red) "
+                    "donde se dejan los informes para que el equipo de esa sede "
+                    "los imprima.\n\n"
+                    "¿Desea configurarla ahora?", parent=ventana):
+                return
+            self.configurar_sedes(parent=ventana)
+            sedes = envio_sede.listar_sedes(db)
+            if not sedes:
+                return
+
+        sede = sedes[0] if len(sedes) == 1 else self._elegir_sede(sedes, ventana)
+        if not sede:
+            return
+
+        resultado = envio_sede.enviar_a_sede(pdf_path, sede, numero_solicitud, paciente)
+        if resultado['ok']:
+            messagebox.showinfo(
+                "Enviar a sede",
+                f"Informe enviado a «{sede['nombre']}».\n\n"
+                f"Archivo: {os.path.basename(resultado['destino'])}\n\n"
+                "Saldra impreso alli en cuanto la carpeta se sincronice.",
+                parent=ventana)
+        else:
+            messagebox.showerror("Enviar a sede", resultado['error'], parent=ventana)
+
+    def _elegir_sede(self, sedes, parent):
+        """Pregunta a que sede va el informe cuando hay varias."""
+        win = tk.Toplevel(parent)
+        win.title("Elegir sede")
+        win.configure(bg='white')
+        win.transient(parent)
+        win.grab_set()
+        win.resizable(False, False)
+
+        tk.Label(win, text="¿A que sede se envia el informe?",
+                 font=('Segoe UI', 11, 'bold'), bg='white').pack(padx=20, pady=(16, 10))
+
+        elegida = {'sede': None}
+        for sede in sedes:
+            def _tomar(s=sede):
+                elegida['sede'] = s
+                win.destroy()
+            tk.Button(win, text=f"  {sede['nombre']}  ", font=('Segoe UI', 10),
+                      bg=COLORS['primary'], fg='white', relief='flat',
+                      padx=14, pady=8, cursor='hand2', anchor='w',
+                      command=_tomar).pack(fill='x', padx=20, pady=3)
+
+        tk.Button(win, text="Cancelar", font=('Segoe UI', 9), bg='#e2e8f0',
+                  relief='flat', padx=12, pady=5, cursor='hand2',
+                  command=win.destroy).pack(pady=(10, 16))
+
+        win.update_idletasks()
+        x = parent.winfo_rootx() + (parent.winfo_width() - win.winfo_width()) // 2
+        y = parent.winfo_rooty() + 120
+        win.geometry(f"+{max(0, x)}+{max(0, y)}")
+        win.wait_window()
+        return elegida['sede']
+
+    def configurar_sedes(self, parent=None):
+        """Alta, baja y modificacion de las sedes remotas."""
+        from tkinter import simpledialog
+        from modulos import envio_sede
+
+        ventana = parent or self.root
+        win = tk.Toplevel(ventana)
+        win.title("📤 Sedes remotas")
+        win.configure(bg='white')
+        win.transient(ventana)
+        win.grab_set()
+        hacer_ventana_responsiva(win, 720, 440, min_ancho=620, min_alto=380)
+
+        tk.Label(win, text="Sedes que reciben informes",
+                 font=('Segoe UI', 12, 'bold'), bg='white',
+                 fg=COLORS['text']).pack(anchor='w', padx=16, pady=(14, 2))
+        tk.Label(win,
+                 text="Cada sede es una carpeta sincronizada. Al enviar un informe, el PDF "
+                      "se deja ahi y\nel programa ANgesLAB Receptor de esa sede lo imprime "
+                      "en papel automaticamente.",
+                 font=('Segoe UI', 9), bg='white', fg=COLORS['text_light'],
+                 justify='left').pack(anchor='w', padx=16, pady=(0, 10))
+
+        marco = tk.Frame(win, bg='white')
+        marco.pack(fill='both', expand=True, padx=16)
+        tree = ttk.Treeview(marco, columns=('Nombre', 'Carpeta'), show='headings', height=8)
+        tree.heading('Nombre', text='Sede')
+        tree.heading('Carpeta', text='Carpeta sincronizada')
+        tree.column('Nombre', width=180)
+        tree.column('Carpeta', width=460)
+        vsb = ttk.Scrollbar(marco, orient='vertical', command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+        tree.pack(side='left', fill='both', expand=True)
+        vsb.pack(side='right', fill='y')
+
+        sedes = envio_sede.listar_sedes(db)
+
+        def _pintar():
+            for i in tree.get_children():
+                tree.delete(i)
+            for s in sedes:
+                disponible = '' if os.path.isdir(s['carpeta']) else '   (no disponible)'
+                tree.insert('', 'end', values=(s['nombre'], s['carpeta'] + disponible))
+
+        def _agregar():
+            nombre = simpledialog.askstring("Nueva sede",
+                                            "Nombre de la sede\n(por ejemplo: Sede Los Teques)",
+                                            parent=win)
+            if not nombre or not nombre.strip():
+                return
+            carpeta = filedialog.askdirectory(
+                title=f"Carpeta sincronizada de {nombre.strip()}", parent=win)
+            if not carpeta:
+                return
+            sedes.append({'nombre': nombre.strip(), 'carpeta': carpeta})
+            _pintar()
+
+        def _quitar():
+            sel = tree.selection()
+            if not sel:
+                messagebox.showinfo("Sedes", "Seleccione una sede.", parent=win)
+                return
+            idx = tree.index(sel[0])
+            if messagebox.askyesno("Sedes",
+                                   f"¿Quitar «{sedes[idx]['nombre']}»?\n\n"
+                                   "Los informes ya enviados no se tocan.",
+                                   parent=win):
+                sedes.pop(idx)
+                _pintar()
+
+        def _guardar():
+            if envio_sede.guardar_sedes(db, sedes):
+                messagebox.showinfo("Sedes", "Configuracion guardada.", parent=win)
+                win.destroy()
+            else:
+                messagebox.showerror("Sedes", "No se pudo guardar.", parent=win)
+
+        barra = tk.Frame(win, bg='white')
+        barra.pack(fill='x', padx=16, pady=12)
+        tk.Button(barra, text="➕  Agregar sede", font=('Segoe UI', 9, 'bold'),
+                  bg=COLORS['success'], fg='white', relief='flat', padx=12, pady=6,
+                  cursor='hand2', command=_agregar).pack(side='left')
+        tk.Button(barra, text="🗑  Quitar", font=('Segoe UI', 9), bg=COLORS['danger'],
+                  fg='white', relief='flat', padx=12, pady=6, cursor='hand2',
+                  command=_quitar).pack(side='left', padx=6)
+        tk.Button(barra, text="💾  Guardar", font=('Segoe UI', 9, 'bold'),
+                  bg=COLORS['primary'], fg='white', relief='flat', padx=14, pady=6,
+                  cursor='hand2', command=_guardar).pack(side='right')
+
+        _pintar()
+        win.wait_window()
+
     def imprimir_resultados(self):
         """
         Muestra el informe de la solicitud y lo manda a la impresora.
@@ -12090,6 +12263,21 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                       bg=COLORS['primary'], fg='white', relief='flat',
                       padx=14, pady=7, cursor='hand2',
                       command=_guardar_pdf).pack(side='left')
+
+            def _enviar_sede():
+                ruta = _pdf()
+                if not ruta:
+                    messagebox.showerror("Error",
+                                         "No se pudo generar el informe en PDF.",
+                                         parent=win)
+                    return
+                self.enviar_informe_a_sede(ruta, sol.get('NumeroSolicitud') or '',
+                                           sol.get('Paciente') or '', parent=win)
+
+            tk.Button(botones, text="📤  Enviar a sede", font=('Segoe UI', 10),
+                      bg=COLORS['accent'], fg='white', relief='flat',
+                      padx=14, pady=7, cursor='hand2',
+                      command=_enviar_sede).pack(side='left', padx=6)
 
             tk.Button(botones, text="Exportar TXT", font=('Segoe UI', 9),
                       bg='#e2e8f0', fg='#334155', relief='flat',

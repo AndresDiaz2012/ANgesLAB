@@ -6,7 +6,7 @@
 
 #define MyAppName "ANgesLAB"
 #define MyAppFullName "ANgesLAB - Sistema de Gestion de Laboratorio Clinico"
-#define MyAppVersion "2.5.3"
+#define MyAppVersion "2.5.4"
 #define MyAppPublisher "ANgesLAB Solutions"
 #define MyAppURL "https://angeslab.com"
 #define MyAppSupportURL "https://angeslab.com/soporte"
@@ -34,7 +34,7 @@ AllowNoIcons=yes
 LicenseFile=licencia.txt
 InfoBeforeFile=info_antes.txt
 OutputDir=output
-OutputBaseFilename=ANgesLAB_Setup_v2.5.3
+OutputBaseFilename=ANgesLAB_Setup_v2.5.4
 SetupIconFile=..\assets\angeslab_icon.ico
 UninstallDisplayIcon={app}\assets\angeslab_icon.ico
 UninstallDisplayName={#MyAppFullName}
@@ -181,6 +181,7 @@ Source: "..\modulos\config_administrativa.py"; DestDir: "{app}\modulos"; Compone
 Source: "..\modulos\config_numeracion.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\cotizaciones.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\envio_resultados.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
+Source: "..\modulos\envio_sede.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\factura_pdf.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\facturacion_fiscal.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
 Source: "..\modulos\formato_pdf.py"; DestDir: "{app}\modulos"; Components: modules; Flags: ignoreversion
