@@ -3,7 +3,29 @@
    Sistema de Gestion de Laboratorio Clinico
 ================================================================================
 
-Esta USB sirve para dos cosas. Elija UNA segun el equipo:
+  ATENCION: esta USB trae DOS programas distintos.
+  Instale el que corresponda segun lo que haga esa sede.
+
+--------------------------------------------------------------------------------
+  ?QUE SE INSTALA EN CADA SEDE?
+--------------------------------------------------------------------------------
+
+  LA SEDE QUE PROCESA LAS MUESTRAS
+  (registra pacientes, transcribe y valida resultados)
+
+      ->  ANgesLAB completo.  Siga el apartado A o el B de mas abajo.
+
+
+  LA SEDE QUE SOLO TOMA MUESTRAS Y ENTREGA RESULTADOS
+  (no transcribe nada, solo necesita el informe en papel)
+
+      ->  Solo ANgesLAB Receptor, en la carpeta  Receptor\
+          Siga el apartado C.
+
+          NO instale ANgesLAB completo en esa sede. No es un capricho:
+          el receptor solo sabe imprimir, y por eso alli nadie puede
+          modificar un resultado ya emitido, ni por error ni a proposito.
+          Si instala el programa completo, esa garantia se pierde.
 
 
 --------------------------------------------------------------------------------
@@ -50,6 +72,31 @@ Esta USB sirve para dos cosas. Elija UNA segun el equipo:
      - Windows 10 o superior, 64 bits
      - Python 3 instalado
      - Microsoft Access Database Engine 2016 (64 bits)
+
+
+--------------------------------------------------------------------------------
+  C) SEDE QUE SOLO RECIBE RESULTADOS  ->  INSTALAR EL RECEPTOR
+--------------------------------------------------------------------------------
+  El receptor vigila una carpeta compartida e imprime en papel cada resultado
+  que llega de la sede que procesa. Nadie tiene que abrir nada.
+
+  1. Abra la carpeta  Receptor
+  2. Doble clic en:   ANgesLAB_Receptor_Setup_v1.0.0.exe
+  3. Deje marcada la opcion "Iniciar automaticamente al encender el equipo".
+     Es la importante: si el programa no esta abierto, no se imprime nada.
+  4. Al terminar se instalan solas las librerias de impresion.
+
+  Despues, la primera vez:
+     - Elija la carpeta compartida (la de Google Drive u OneDrive que
+       comparte la otra sede).
+     - Elija la impresora donde deben salir los resultados.
+     - Pulse "Probar": debe salir una hoja.
+     - Pulse "Guardar configuracion" y luego "Iniciar".
+
+  Requisitos: Windows 10 o superior y Python 3.
+  NO necesita Microsoft Access: el receptor no tiene base de datos.
+
+  Instrucciones completas en:  Receptor\LEEME.txt
 
 
 --------------------------------------------------------------------------------
@@ -135,7 +182,8 @@ Esta USB sirve para dos cosas. Elija UNA segun el equipo:
 --------------------------------------------------------------------------------
   CONTENIDO DE ESTA USB
 --------------------------------------------------------------------------------
-  ANgesLAB_Setup_v2.5.4.exe  Instalador completo (equipos nuevos)
+  ANgesLAB_Setup_v2.5.4.exe  Instalador completo (sede que procesa)
+  Receptor\                  Instalador de la sede que solo recibe
   actualizador\              Actualizador para instalaciones existentes
   ANgesLAB.pyw               Programa principal
   modulos\                   Modulos del sistema (39)
