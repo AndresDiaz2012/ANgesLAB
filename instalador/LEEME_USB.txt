@@ -1,5 +1,5 @@
 ================================================================================
-   ANgesLAB v2.5.4  -  USB de instalacion y actualizacion
+   ANgesLAB v2.5.5  -  USB de instalacion y actualizacion
    Sistema de Gestion de Laboratorio Clinico
 ================================================================================
 
@@ -49,14 +49,14 @@
 --------------------------------------------------------------------------------
   B) EQUIPO NUEVO, SIN ANgesLAB  ->  INSTALAR
 --------------------------------------------------------------------------------
-  1. Doble clic en:  ANgesLAB_Setup_v2.5.4.exe
+  1. Doble clic en:  ANgesLAB_Setup_v2.5.5.exe
   2. Acepte el aviso de Windows (requiere permisos de administrador).
   3. Siga el asistente. Se instala en  C:\ANgesLAB
   4. Al terminar quedan los accesos directos en el Escritorio y el
      Menu Inicio.
 
   NO hace falta ejecutar el actualizador despues: la instalacion nueva ya
-  viene con todo al dia (codigo v2.5.4 y catalogo completo de areas,
+  viene con todo al dia (codigo v2.5.5 y catalogo completo de areas,
   pruebas, parametros y valores de referencia).
 
   ENTRAR LA PRIMERA VEZ:
@@ -100,8 +100,30 @@
 
 
 --------------------------------------------------------------------------------
-  QUE TRAE LA VERSION 2.5.4
+  QUE TRAE LA VERSION 2.5.5
 --------------------------------------------------------------------------------
+  - EL CATALOGO INCORPORA LAS CORRECCIONES DEL LABORATORIO
+    Los valores de referencia, las secciones del informe y las unidades que se
+    fueron corrigiendo en el laboratorio durante meses de uso real ya vienen
+    de fabrica. Entre otras cosas:
+
+        CALCIO IONICO      antes en blanco   ahora 1,15 - 1,35
+        TOXOPLASMA IgG     antes "Variable"  ahora Menor a 1,0 UI/mL
+        TOXOPLASMA IgM     antes "No Reactivo"  ahora Menor a 1,0 UI/mL
+
+    Se anaden 12 parametros que faltaban, ya colocados en su prueba: el panel
+    de Widal completo (los 8 sueros de Salmonella) dentro de ANTIGENOS
+    FEBRILES, TSH ULTRA, HEMATIES en el coproanalisis, INSULINA POST PRANDIAL
+    y HEMOGLOBINA GLICADA A1C.
+
+    Y 31 parametros que no tenian seccion asignada ya salen agrupados donde
+    corresponde en el informe.
+
+    IMPORTANTE si actualiza un equipo que ya venia trabajando: el actualizador
+    copia el programa, NO el catalogo. Su catalogo actual se respeta tal como
+    esta. Estas correcciones las trae la INSTALACION NUEVA; si quiere pasarlas
+    a un equipo en produccion, hable con soporte.
+
   - ENVIAR RESULTADOS A OTRA SEDE, QUE SALEN IMPRESOS ALLA
     En la ventana del informe hay un boton nuevo: "Enviar a sede". Deja el PDF
     en una carpeta sincronizada (Google Drive, OneDrive o una carpeta de red).
@@ -182,7 +204,7 @@
 --------------------------------------------------------------------------------
   CONTENIDO DE ESTA USB
 --------------------------------------------------------------------------------
-  ANgesLAB_Setup_v2.5.4.exe  Instalador completo (sede que procesa)
+  ANgesLAB_Setup_v2.5.5.exe  Instalador completo (sede que procesa)
   Receptor\                  Instalador de la sede que solo recibe
   actualizador\              Actualizador para instalaciones existentes
   ANgesLAB.pyw               Programa principal

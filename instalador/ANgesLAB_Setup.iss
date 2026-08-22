@@ -6,7 +6,7 @@
 
 #define MyAppName "ANgesLAB"
 #define MyAppFullName "ANgesLAB - Sistema de Gestion de Laboratorio Clinico"
-#define MyAppVersion "2.5.4"
+#define MyAppVersion "2.5.5"
 #define MyAppPublisher "ANgesLAB Solutions"
 #define MyAppURL "https://angeslab.com"
 #define MyAppSupportURL "https://angeslab.com/soporte"
@@ -34,7 +34,7 @@ AllowNoIcons=yes
 LicenseFile=licencia.txt
 InfoBeforeFile=info_antes.txt
 OutputDir=output
-OutputBaseFilename=ANgesLAB_Setup_v2.5.4
+OutputBaseFilename=ANgesLAB_Setup_v2.5.5
 SetupIconFile=..\assets\angeslab_icon.ico
 UninstallDisplayIcon={app}\assets\angeslab_icon.ico
 UninstallDisplayName={#MyAppFullName}
