@@ -18,7 +18,8 @@ Copyright 2024-2026 ANgesLAB Solutions
 """
 
 import re
-from datetime import datetime
+import logging
+from datetime import datetime, date, timedelta
 
 
 class GestorHistorialClinico:
@@ -42,6 +43,14 @@ class GestorHistorialClinico:
             texto = (unidad.get('Simbolo') or '') if unidad else ''
         except Exception:
             texto = ''
+        # Convertir notación ^N a superíndices Unicode
+        _super = {'0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
+                  '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹'}
+        import re
+        def _repl(m):
+            return ''.join(_super.get(c, c) for c in m.group(1))
+        texto = re.sub(r'\^(\d+)', _repl, texto)
+        texto = texto.replace('mm3', 'mm³').replace('uL', 'µL')
         self._cache_unidades[unidad_id] = texto
         return texto
 
@@ -200,7 +209,7 @@ class GestorHistorialClinico:
 
             return alertas
         except Exception as e:
-            print(f"Error obteniendo alertas: {e}")
+            logging.getLogger("angeslab.historial_clinico").warning("Error obteniendo alertas: %s", e)
             return []
 
     def _verificar_fuera_de_rango(self, valor, valor_ref):
@@ -263,6 +272,194 @@ class GestorHistorialClinico:
         return None
 
     # ================================================================
+    # EVALUACION DE RANGO: UNICA FUENTE DE VERDAD
+    # ================================================================
+    def evaluar_alerta(self, valor, valor_ref, fuera_guardado=None,
+                       tipo_guardado=''):
+        """
+        Decide si un resultado esta fuera de rango, y de que lado.
+
+        Es el unico sitio donde se toma esa decision. Antes cada vista la
+        resolvia por su cuenta: el Resumen calculaba la alerta a partir del
+        texto de referencia, mientras que Comparativa, Evolucion y el detalle
+        de una solicitud se limitaban a leer la columna FueraDeRango. Como las
+        columnas BIT que Access agrega con ALTER TABLE nacen en False y no en
+        NULL, todo resultado capturado antes de que existiera esa columna se
+        mostraba como normal en esas tres vistas. El mismo paciente aparecia
+        con el colesterol "alto" en una pestana y "dentro de rango" en la de al
+        lado; en un informe clinico eso no es un detalle cosmetico.
+
+        Args:
+            valor: valor capturado (texto o numero)
+            valor_ref: texto del valor de referencia
+            fuera_guardado: columna FueraDeRango, si existe
+            tipo_guardado: columna TipoAlerta, si existe
+
+        Returns:
+            (fuera_de_rango: bool, tipo: 'alto' | 'bajo' | '')
+        """
+        # La bandera guardada manda: la calculo el modulo de captura, que
+        # conoce reglas por sexo y edad que aqui no estan disponibles
+        if fuera_guardado:
+            tipo_lower = str(tipo_guardado or '').lower()
+            if 'bajo' in tipo_lower:
+                return True, 'bajo'
+            return True, 'alto'
+
+        if valor in (None, '') or not valor_ref:
+            return False, ''
+        try:
+            valor_num = float(str(valor).replace(',', '.').strip())
+        except (ValueError, TypeError):
+            return False, ''      # resultados cualitativos: no aplica
+
+        tipo = self._verificar_fuera_de_rango(valor_num, valor_ref)
+        return (True, tipo) if tipo else (False, '')
+
+    def _resultados_por_detalle(self, detalle_ids):
+        """
+        Trae de una sola vez los resultados de varios detalles.
+
+        Devuelve {(DetalleID, ParametroID): fila}. Evita el patron N+1 que
+        hacia una consulta por parametro y por medicion: la pestana de
+        Evolucion de una hematologia completa con diez visitas llegaba a
+        doscientas consultas para pintar una tabla, y sobre una base Access
+        compartida por red eso se siente.
+        """
+        indice = {}
+        ids = [int(d) for d in (detalle_ids or []) if d]
+        if not ids:
+            return indice
+        try:
+            filas = self.db.query(
+                f"SELECT DetalleID, ParametroID, Valor, ValorReferencia, "
+                f"Estado, FechaCaptura, FueraDeRango, TipoAlerta "
+                f"FROM ResultadosParametros "
+                f"WHERE DetalleID IN ({', '.join(str(i) for i in ids)})"
+            ) or []
+        except Exception as e:
+            logging.getLogger("angeslab.historial_clinico").warning(
+                "Error leyendo resultados en bloque: %s", e)
+            return indice
+        for f in filas:
+            indice[(f.get('DetalleID'), f.get('ParametroID'))] = f
+        return indice
+
+    # ================================================================
+    # CONTEXTO PARA EL REGISTRO DE UNA NUEVA SOLICITUD
+    # ================================================================
+    def contexto_para_ingreso(self, paciente_id, dias_ventana=90):
+        """
+        Lo que el laboratorio ya sabe del paciente, para mostrarlo al
+        registrarlo.
+
+        Hasta ahora el historial solo se consultaba en su propia pantalla: al
+        recibir de nuevo a un paciente conocido, el mostrador no veia nada de
+        lo anterior. Se repetian pruebas hechas dias antes y se perdia de vista
+        que la ultima visita habia salido alterada.
+
+        Args:
+            paciente_id: paciente que se esta registrando
+            dias_ventana: cuantos dias atras se considera «reciente» una
+                prueba, para avisar de repeticiones
+
+        Returns dict:
+            es_conocido        - tiene visitas anteriores
+            total_visitas      - solicitudes no anuladas
+            ultima_visita      - fecha de la ultima
+            dias_desde_ultima  - int o None
+            alertas_ultima     - parametros fuera de rango en la ultima visita
+            ultima_orden       - pruebas de la ultima solicitud (repetir orden)
+            recientes          - {PruebaID: dias} de lo hecho dentro de la ventana
+        """
+        vacio = {
+            'es_conocido': False, 'total_visitas': 0, 'ultima_visita': None,
+            'dias_desde_ultima': None, 'alertas_ultima': [],
+            'ultima_orden': [], 'recientes': {},
+        }
+        if not paciente_id:
+            return vacio
+
+        try:
+            stats = self.db.query_one(
+                f"SELECT COUNT(*) AS Total, MAX(FechaSolicitud) AS Ultima "
+                f"FROM Solicitudes "
+                f"WHERE PacienteID = {paciente_id} "
+                f"AND EstadoSolicitud <> 'Anulada'"
+            ) or {}
+            total = int(stats.get('Total') or 0)
+            if not total:
+                return vacio
+
+            ultima_fecha = stats.get('Ultima')
+            dias = None
+            if ultima_fecha is not None:
+                try:
+                    f = (ultima_fecha.date()
+                         if hasattr(ultima_fecha, 'date') else ultima_fecha)
+                    dias = (date.today() - f).days
+                except Exception:
+                    dias = None
+
+            # Ultima solicitud completa, para poder repetir la orden
+            ultima_sol = self.db.query_one(
+                f"SELECT TOP 1 SolicitudID FROM Solicitudes "
+                f"WHERE PacienteID = {paciente_id} "
+                f"AND EstadoSolicitud <> 'Anulada' "
+                f"ORDER BY FechaSolicitud DESC, SolicitudID DESC"
+            ) or {}
+            ultima_orden = []
+            if ultima_sol.get('SolicitudID'):
+                ultima_orden = self.db.query(
+                    f"SELECT d.PruebaID, p.CodigoPrueba, p.NombrePrueba, "
+                    f"p.Precio "
+                    f"FROM DetalleSolicitudes d "
+                    f"INNER JOIN Pruebas p ON d.PruebaID = p.PruebaID "
+                    f"WHERE d.SolicitudID = {ultima_sol['SolicitudID']} "
+                    f"ORDER BY p.NombrePrueba"
+                ) or []
+
+            # Pruebas hechas dentro de la ventana, con cuantos dias tienen
+            recientes = {}
+            try:
+                desde = (date.today() - timedelta(days=int(dias_ventana)))
+                filas = self.db.query(
+                    f"SELECT d.PruebaID, MAX(s.FechaSolicitud) AS Ultima "
+                    f"FROM DetalleSolicitudes d "
+                    f"INNER JOIN Solicitudes s ON d.SolicitudID = s.SolicitudID "
+                    f"WHERE s.PacienteID = {paciente_id} "
+                    f"AND s.EstadoSolicitud <> 'Anulada' "
+                    f"AND s.FechaSolicitud >= #{desde.strftime('%m/%d/%Y')}# "
+                    f"GROUP BY d.PruebaID"
+                ) or []
+                for f in filas:
+                    fecha = f.get('Ultima')
+                    if fecha is None:
+                        continue
+                    try:
+                        fd = fecha.date() if hasattr(fecha, 'date') else fecha
+                        recientes[f.get('PruebaID')] = (date.today() - fd).days
+                    except Exception:
+                        continue
+            except Exception as e:
+                logging.getLogger("angeslab.historial_clinico").debug(
+                    "No se pudieron leer las pruebas recientes: %s", e)
+
+            return {
+                'es_conocido': True,
+                'total_visitas': total,
+                'ultima_visita': ultima_fecha,
+                'dias_desde_ultima': dias,
+                'alertas_ultima': self._obtener_alertas_ultima_solicitud(paciente_id),
+                'ultima_orden': ultima_orden,
+                'recientes': recientes,
+            }
+        except Exception as e:
+            logging.getLogger("angeslab.historial_clinico").warning(
+                "Error obteniendo contexto de ingreso: %s", e)
+            return vacio
+
+    # ================================================================
     # HISTORIAL CRONOLOGICO CON FILTROS
     # ================================================================
 
@@ -291,7 +488,8 @@ class GestorHistorialClinico:
             if fecha_desde:
                 where += f" AND s.FechaSolicitud >= #{fecha_desde.strftime('%m/%d/%Y')}#"
             if fecha_hasta:
-                where += f" AND s.FechaSolicitud <= #{fecha_hasta.strftime('%m/%d/%Y')}#"
+                where += (f" AND s.FechaSolicitud <= "
+                          f"#{fecha_hasta.strftime('%m/%d/%Y')} 23:59:59#")
 
             if area_id:
                 where += (f" AND s.SolicitudID IN ("
@@ -308,19 +506,26 @@ class GestorHistorialClinico:
                 f"ORDER BY s.FechaSolicitud DESC, s.SolicitudID DESC"
             )
 
-            for sol in (solicitudes or []):
-                prueba_where = f"d.SolicitudID = {sol['SolicitudID']}"
+            # Las pruebas de todas las solicitudes se traen de una vez: una
+            # consulta por solicitud convertia el historial de un paciente
+            # cronico en cuarenta viajes a la base de datos
+            ids = [str(int(s['SolicitudID'])) for s in (solicitudes or [])]
+            por_solicitud = {}
+            if ids:
+                prueba_where = f"d.SolicitudID IN ({', '.join(ids)})"
                 if area_id:
                     prueba_where += f" AND p.AreaID = {area_id}"
-                pruebas = self.db.query(
-                    f"SELECT d.DetalleID, d.PruebaID, d.Estado, "
-                    f"p.CodigoPrueba, p.NombrePrueba "
-                    f"FROM DetalleSolicitudes d "
-                    f"LEFT JOIN Pruebas p ON d.PruebaID = p.PruebaID "
-                    f"WHERE {prueba_where} "
-                    f"ORDER BY p.NombrePrueba"
-                )
-                sol['pruebas'] = pruebas or []
+                for pr in (self.db.query(
+                        f"SELECT d.SolicitudID, d.DetalleID, d.PruebaID, d.Estado, "
+                        f"p.CodigoPrueba, p.NombrePrueba "
+                        f"FROM DetalleSolicitudes d "
+                        f"LEFT JOIN Pruebas p ON d.PruebaID = p.PruebaID "
+                        f"WHERE {prueba_where} "
+                        f"ORDER BY p.NombrePrueba") or []):
+                    por_solicitud.setdefault(pr.get('SolicitudID'), []).append(pr)
+
+            for sol in (solicitudes or []):
+                sol['pruebas'] = por_solicitud.get(sol['SolicitudID'], [])
 
             return {'exito': True, 'solicitudes': solicitudes or []}
         except Exception as e:
@@ -341,7 +546,7 @@ class GestorHistorialClinico:
                 f"AND s.EstadoSolicitud <> 'Anulada' "
                 f"ORDER BY a.NombreArea"
             ) or []
-        except:
+        except Exception:
             return []
 
     # ================================================================
@@ -375,16 +580,17 @@ class GestorHistorialClinico:
                 f"ORDER BY pp.Secuencia"
             ) or []
 
+            # Todos los valores del detalle en una sola consulta
+            capturados = self._resultados_por_detalle([detalle_id])
+
             resultados = []
             for par in params:
                 param_id = par['ParametroID']
-                rp = self.db.query_one(
-                    f"SELECT Valor, ValorReferencia, Estado, FechaCaptura, "
-                    f"FueraDeRango, TipoAlerta "
-                    f"FROM ResultadosParametros "
-                    f"WHERE DetalleID = {detalle_id} AND ParametroID = {param_id}"
-                )
-                valor_ref = (rp or {}).get('ValorReferencia') or par.get('ValorRefDefault') or ''
+                rp = capturados.get((detalle_id, param_id)) or {}
+                valor_ref = rp.get('ValorReferencia') or par.get('ValorRefDefault') or ''
+                fuera, tipo = self.evaluar_alerta(
+                    rp.get('Valor'), valor_ref,
+                    rp.get('FueraDeRango'), rp.get('TipoAlerta'))
                 row = {
                     'NombreParametro': par.get('NombreParametro', ''),
                     'UnidadID': par.get('UnidadID'),
@@ -392,17 +598,17 @@ class GestorHistorialClinico:
                     'ValorRef': valor_ref,
                     'Seccion': par.get('Seccion', ''),
                     'Secuencia': par.get('Secuencia', 0),
-                    'Valor': (rp or {}).get('Valor', ''),
-                    'Estado': (rp or {}).get('Estado', ''),
-                    'FechaCaptura': (rp or {}).get('FechaCaptura'),
-                    'FueraDeRango': (rp or {}).get('FueraDeRango', False),
-                    'TipoAlerta': (rp or {}).get('TipoAlerta', ''),
+                    'Valor': rp.get('Valor', ''),
+                    'Estado': rp.get('Estado', ''),
+                    'FechaCaptura': rp.get('FechaCaptura'),
+                    'FueraDeRango': fuera,
+                    'TipoAlerta': tipo or (rp.get('TipoAlerta') or ''),
                 }
                 resultados.append(row)
 
             return resultados
         except Exception as e:
-            print(f"Error obteniendo resultados detalle: {e}")
+            logging.getLogger("angeslab.historial_clinico").warning("Error obteniendo resultados detalle: %s", e)
             return []
 
     # ================================================================
@@ -455,40 +661,40 @@ class GestorHistorialClinico:
                 f"ORDER BY pp.Secuencia"
             )
 
+            # Ambas mediciones en una sola consulta, en vez de dos por parametro
+            ids_detalle = [detalle_reciente['DetalleID']]
+            if detalle_anterior:
+                ids_detalle.append(detalle_anterior['DetalleID'])
+            capturados = self._resultados_por_detalle(ids_detalle)
+
             resultado_comparativo = []
 
             for param in (parametros_def or []):
                 param_id = param['ParametroID']
 
-                val_rec = self.db.query_one(
-                    f"SELECT Valor, ValorReferencia, FueraDeRango, TipoAlerta "
-                    f"FROM ResultadosParametros "
-                    f"WHERE DetalleID = {detalle_reciente['DetalleID']} "
-                    f"AND ParametroID = {param_id}"
-                )
-
-                val_ant = None
+                val_rec = capturados.get((detalle_reciente['DetalleID'], param_id)) or {}
+                val_ant = {}
                 if detalle_anterior:
-                    val_ant = self.db.query_one(
-                        f"SELECT Valor, FueraDeRango, TipoAlerta "
-                        f"FROM ResultadosParametros "
-                        f"WHERE DetalleID = {detalle_anterior['DetalleID']} "
-                        f"AND ParametroID = {param_id}"
-                    )
+                    val_ant = capturados.get(
+                        (detalle_anterior['DetalleID'], param_id)) or {}
 
-                valor_reciente = (val_rec or {}).get('Valor', '')
-                valor_anterior = (val_ant or {}).get('Valor', '') if val_ant else ''
-                valor_ref = ((val_rec or {}).get('ValorReferencia')
+                valor_reciente = val_rec.get('Valor', '')
+                valor_anterior = val_ant.get('Valor', '')
+                valor_ref = (val_rec.get('ValorReferencia')
+                             or val_ant.get('ValorReferencia')
                              or param.get('ValorRefDefault') or '')
 
                 tendencia = self._evaluar_tendencia_parametro(
                     valor_anterior, valor_reciente, valor_ref
                 )
 
-                fuera_rango_rec = bool((val_rec or {}).get('FueraDeRango'))
-                tipo_alerta_rec = (val_rec or {}).get('TipoAlerta') or ''
-                fuera_rango_ant = bool((val_ant or {}).get('FueraDeRango')) if val_ant else False
-                tipo_alerta_ant = (val_ant or {}).get('TipoAlerta') or '' if val_ant else ''
+                # Se evalua con la misma regla que el resumen y las alertas
+                fuera_rango_rec, tipo_alerta_rec = self.evaluar_alerta(
+                    valor_reciente, valor_ref,
+                    val_rec.get('FueraDeRango'), val_rec.get('TipoAlerta'))
+                fuera_rango_ant, tipo_alerta_ant = self.evaluar_alerta(
+                    valor_anterior, valor_ref,
+                    val_ant.get('FueraDeRango'), val_ant.get('TipoAlerta'))
 
                 resultado_comparativo.append({
                     'nombre': param['NombreParametro'] or '',
@@ -544,7 +750,7 @@ class GestorHistorialClinico:
                 f"ORDER BY MAX(s.FechaSolicitud) DESC"
             ) or []
         except Exception as e:
-            print(f"Error obteniendo pruebas con resultados: {e}")
+            logging.getLogger("angeslab.historial_clinico").warning("Error obteniendo pruebas con resultados: %s", e)
             return []
 
     # ================================================================
@@ -656,12 +862,16 @@ class GestorHistorialClinico:
             # Parametros de la prueba
             parametros_def = self.db.query(
                 f"SELECT pp.ParametroID, par.NombreParametro, par.UnidadID, "
-                f"par.Seccion, pp.Secuencia "
+                f"par.Seccion, par.Observaciones AS ValorRefDefault, pp.Secuencia "
                 f"FROM ParametrosPrueba pp "
                 f"INNER JOIN Parametros par ON pp.ParametroID = par.ParametroID "
                 f"WHERE pp.PruebaID = {prueba_id} "
                 f"ORDER BY pp.Secuencia"
             )
+
+            # Todas las mediciones de todos los parametros en una sola consulta
+            capturados = self._resultados_por_detalle(
+                [d['DetalleID'] for d in detalles])
 
             parametros_resultado = []
 
@@ -669,32 +879,36 @@ class GestorHistorialClinico:
                 param_id = param['ParametroID']
                 unidad = self._obtener_unidad(param.get('UnidadID'))
 
-                # Obtener todos los valores historicos para este parametro
+                # El rango de referencia se resuelve antes de recorrer las
+                # mediciones: si se toma del primer registro que lo traiga, un
+                # parametro nunca capturado se queda sin rango y la tendencia
+                # no se puede calificar de favorable o desfavorable
+                valor_ref = param.get('ValorRefDefault') or ''
+                for det in detalles:
+                    ref_row = (capturados.get((det['DetalleID'], param_id))
+                               or {}).get('ValorReferencia')
+                    if ref_row:
+                        valor_ref = ref_row
+                        break
+
                 valores = []
                 valores_numericos = []
                 valor_anterior_str = None
-                valor_ref = ''  # se tomara del primer registro con ValorReferencia
 
                 for det in detalles:
-                    val_row = self.db.query_one(
-                        f"SELECT Valor, ValorReferencia, FueraDeRango, TipoAlerta "
-                        f"FROM ResultadosParametros "
-                        f"WHERE DetalleID = {det['DetalleID']} "
-                        f"AND ParametroID = {param_id}"
-                    )
-                    valor_str = (val_row or {}).get('Valor', '')
-                    ref_row = (val_row or {}).get('ValorReferencia') or ''
-                    if ref_row and not valor_ref:
-                        valor_ref = ref_row
-                    fuera_rango = bool((val_row or {}).get('FueraDeRango'))
-                    tipo_alerta = (val_row or {}).get('TipoAlerta') or ''
+                    val_row = capturados.get((det['DetalleID'], param_id)) or {}
+                    valor_str = val_row.get('Valor', '')
+
+                    fuera_rango, tipo_alerta = self.evaluar_alerta(
+                        valor_str, valor_ref,
+                        val_row.get('FueraDeRango'), val_row.get('TipoAlerta'))
 
                     # Calcular tendencia respecto al valor anterior
                     tendencia = self._evaluar_tendencia_parametro(
                         valor_anterior_str, valor_str, valor_ref
                     ) if valor_anterior_str is not None else {
                         'direccion': 'sin_datos', 'favorable': None,
-                        'icono': '\u2014', 'color': '#9e9e9e'
+                        'icono': '—', 'color': '#9e9e9e'
                     }
 
                     valores.append({
@@ -731,6 +945,10 @@ class GestorHistorialClinico:
                     'seccion': param.get('Seccion') or '',
                     'valores': valores,
                     'resumen': resumen,
+                    # Permite que la interfaz oculte los parametros que este
+                    # paciente nunca se hizo, en vez de listar filas vacias
+                    'tiene_datos': bool(valores_numericos) or any(
+                        v['valor'] for v in valores),
                 })
 
             return {
@@ -828,12 +1046,16 @@ class GestorHistorialClinico:
 
             alertas = []
             for sol in (solicitudes or []):
+                # Access exige parentesis con varios JOIN: sin ellos la
+                # consulta lanzaba excepcion, el except devolvia [] y la vista
+                # de alertas historicas quedaba vacia para todo paciente
                 resultados = self.db.query(
                     f"SELECT par.NombreParametro, rp.ValorReferencia AS ValorRef, "
+                    f"par.Observaciones AS ValorRefDefault, "
                     f"rp.Valor, rp.FueraDeRango, rp.TipoAlerta, u.Simbolo AS Unidad "
-                    f"FROM ResultadosParametros rp "
-                    f"INNER JOIN DetalleSolicitudes d ON rp.DetalleID = d.DetalleID "
-                    f"INNER JOIN Parametros par ON rp.ParametroID = par.ParametroID "
+                    f"FROM ((ResultadosParametros rp "
+                    f"INNER JOIN DetalleSolicitudes d ON rp.DetalleID = d.DetalleID) "
+                    f"INNER JOIN Parametros par ON rp.ParametroID = par.ParametroID) "
                     f"LEFT JOIN Unidades u ON par.UnidadID = u.UnidadID "
                     f"WHERE d.SolicitudID = {sol['SolicitudID']} "
                     f"AND rp.Valor IS NOT NULL AND rp.Valor <> ''"
@@ -841,48 +1063,28 @@ class GestorHistorialClinico:
 
                 for r in (resultados or []):
                     valor_str = str(r.get('Valor', '')).replace(',', '.').strip()
-                    valor_ref = r.get('ValorRef') or ''
-                    fuera_rango = r.get('FueraDeRango')
-                    tipo_alerta = r.get('TipoAlerta') or ''
-
-                    if fuera_rango:
-                        tipo_lower = tipo_alerta.lower()
-                        tipo = 'alto' if 'alto' in tipo_lower else 'bajo'
-                        alertas.append({
-                            'parametro': r.get('NombreParametro', ''),
-                            'valor': valor_str,
-                            'unidad': r.get('Unidad') or '',
-                            'referencia': valor_ref,
-                            'tipo': tipo,
-                            'critico': 'critico' in tipo_lower,
-                            'fecha': sol.get('FechaSolicitud'),
-                            'numero_solicitud': sol.get('NumeroSolicitud', ''),
-                        })
+                    valor_ref = (r.get('ValorRef')
+                                 or r.get('ValorRefDefault') or '')
+                    fuera, tipo = self.evaluar_alerta(
+                        valor_str, valor_ref,
+                        r.get('FueraDeRango'), r.get('TipoAlerta'))
+                    if not fuera:
                         continue
-
-                    # Fallback: calcular con valor de referencia textual
-                    if not valor_ref:
-                        continue
-                    try:
-                        valor_num = float(valor_str)
-                    except (ValueError, TypeError):
-                        continue
-
-                    fuera = self._verificar_fuera_de_rango(valor_num, valor_ref)
-                    if fuera:
-                        alertas.append({
-                            'parametro': r.get('NombreParametro', ''),
-                            'valor': valor_str,
-                            'unidad': r.get('Unidad') or '',
-                            'referencia': valor_ref,
-                            'tipo': fuera,
-                            'critico': False,
-                            'fecha': sol.get('FechaSolicitud'),
-                            'numero_solicitud': sol.get('NumeroSolicitud', ''),
-                        })
+                    alertas.append({
+                        'parametro': r.get('NombreParametro', ''),
+                        'valor': valor_str,
+                        'unidad': r.get('Unidad') or '',
+                        'referencia': valor_ref,
+                        'tipo': tipo,
+                        'critico': 'critico' in str(r.get('TipoAlerta') or '').lower(),
+                        'fecha': sol.get('FechaSolicitud'),
+                        'numero_solicitud': sol.get('NumeroSolicitud', ''),
+                    })
 
             return alertas
-        except Exception:
+        except Exception as e:
+            logging.getLogger("angeslab.historial_clinico").warning(
+                "Error obteniendo alertas historicas: %s", e)
             return []
 
     # ================================================================
@@ -1101,7 +1303,7 @@ class GestorHistorialClinico:
                         resultado['paciente_info']['NumeroSolicitud'] = (
                             sol_info.get('NumeroSolicitud') or '')
                 except Exception as e:
-                    print(f"[preparar_datos_para_ia] Error datos solicitud: {e}")
+                    logging.getLogger("angeslab.historial_clinico").warning("[preparar_datos_para_ia] Error datos solicitud: %s", e)
 
             # Resultados del detalle actual
             try:
@@ -1139,7 +1341,7 @@ class GestorHistorialClinico:
                 resultado['resultados_actuales'] = params_actuales
                 resultado['parametros_alterados'] = params_alterados
             except Exception as e:
-                print(f"[preparar_datos_para_ia] Error resultados actuales: {e}")
+                logging.getLogger("angeslab.historial_clinico").warning("[preparar_datos_para_ia] Error resultados actuales: %s", e)
 
             # Historial de evolucion (reutiliza metodo existente)
             try:
@@ -1149,10 +1351,10 @@ class GestorHistorialClinico:
                 resultado['n_mediciones_previas'] = max(0, n_med - 1)
                 resultado['tiene_historial_previo'] = n_med > 1
             except Exception as e:
-                print(f"[preparar_datos_para_ia] Error historial: {e}")
+                logging.getLogger("angeslab.historial_clinico").warning("[preparar_datos_para_ia] Error historial: %s", e)
 
         except Exception as e:
-            print(f"[preparar_datos_para_ia] Error general: {e}")
+            logging.getLogger("angeslab.historial_clinico").warning("[preparar_datos_para_ia] Error general: %s", e)
 
         return resultado
 
@@ -1202,18 +1404,35 @@ class GestorHistorialClinico:
             sol_ultima = sol_ids[0]
             sol_penultima = sol_ids[1] if len(sol_ids) > 1 else None
 
+            def _consultar(sol_id):
+                """Parametros con valor de una solicitud, con su referencia."""
+                return self.db.query(
+                    f"SELECT rp.ParametroID, rp.Valor, rp.FueraDeRango, "
+                    f"rp.TipoAlerta, rp.ValorReferencia, "
+                    f"par.Observaciones AS ValorRefDefault "
+                    f"FROM ((DetalleSolicitudes ds "
+                    f"INNER JOIN ResultadosParametros rp "
+                    f"    ON ds.DetalleID = rp.DetalleID) "
+                    f"INNER JOIN Parametros par "
+                    f"    ON rp.ParametroID = par.ParametroID) "
+                    f"WHERE ds.SolicitudID = {sol_id} "
+                    f"AND rp.Valor IS NOT NULL AND rp.Valor <> ''"
+                ) or []
+
             def _es_fuera(r):
-                f = r.get('FueraDeRango')
-                return bool(f) and str(f).lower() not in ('', 'none', 'false', '0')
+                # Se evalua con la misma regla que el resto del historial: leer
+                # solo la columna FueraDeRango hacia que este banner anunciara
+                # «Optimo» a un paciente con la hemoglobina y la glicemia
+                # alteradas, porque esa columna esta en False en todo resultado
+                # anterior a que la columna existiera
+                fuera, _ = self.evaluar_alerta(
+                    r.get('Valor'),
+                    r.get('ValorReferencia') or r.get('ValorRefDefault') or '',
+                    r.get('FueraDeRango'), r.get('TipoAlerta'))
+                return fuera
 
             # Parametros de la ultima solicitud
-            filas_ult = self.db.query(
-                f"SELECT rp.ParametroID, rp.FueraDeRango "
-                f"FROM (DetalleSolicitudes ds "
-                f"INNER JOIN ResultadosParametros rp ON ds.DetalleID = rp.DetalleID) "
-                f"WHERE ds.SolicitudID = {sol_ultima} "
-                f"AND rp.Valor IS NOT NULL AND rp.Valor <> ''"
-            )
+            filas_ult = _consultar(sol_ultima)
             if not filas_ult:
                 return resultado
 
@@ -1242,13 +1461,7 @@ class GestorHistorialClinico:
                 return resultado
 
             # Parametros de la penultima solicitud
-            filas_pen = self.db.query(
-                f"SELECT rp.ParametroID, rp.FueraDeRango "
-                f"FROM (DetalleSolicitudes ds "
-                f"INNER JOIN ResultadosParametros rp ON ds.DetalleID = rp.DetalleID) "
-                f"WHERE ds.SolicitudID = {sol_penultima} "
-                f"AND rp.Valor IS NOT NULL AND rp.Valor <> ''"
-            )
+            filas_pen = _consultar(sol_penultima)
             set_alt_pen = {r['ParametroID'] for r in (filas_pen or []) if _es_fuera(r)}
             alt_pen = len(set_alt_pen)
 
@@ -1287,7 +1500,7 @@ class GestorHistorialClinico:
                 })
 
         except Exception as e:
-            print(f"[obtener_tendencias_globales] Error: {e}")
+            logging.getLogger("angeslab.historial_clinico").warning("[obtener_tendencias_globales] Error: %s", e)
 
         return resultado
 

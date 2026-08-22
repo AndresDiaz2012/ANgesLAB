@@ -5,13 +5,14 @@ color 0D
 
 echo.
 echo ================================================================
-echo     ANgesLAB v2.1 - Instalando Dependencias de IA Clinica
+echo     ANgesLAB v2.0 - Instalando Dependencias de IA Clinica
 echo ================================================================
 echo.
 echo  Este proceso instalara las librerias necesarias para las
 echo  funcionalidades de Inteligencia Artificial e Historial Avanzado:
 echo.
 echo    - matplotlib  : Graficas de evolucion de parametros clinicos
+echo    - numpy       : Calculos numericos (dependencia de matplotlib)
 echo    - requests    : Comunicacion con Ollama (LLM local)
 echo    - anthropic   : Integracion con Claude IA (online, opcional)
 echo.
@@ -20,7 +21,7 @@ echo.
 echo ----------------------------------------------------------------
 
 echo.
-echo  [1/3] Instalando matplotlib (graficas de evolucion clinica)...
+echo  [1/4] Instalando matplotlib (graficas de evolucion clinica)...
 echo        Esto puede tomar unos minutos (~30 MB de descarga)...
 pip install matplotlib --quiet --disable-pip-version-check
 if %errorlevel% neq 0 (
@@ -32,7 +33,16 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo  [2/3] Instalando requests (comunicacion con Ollama LLM local)...
+echo  [2/4] Instalando numpy (calculos numericos)...
+pip install numpy --quiet --disable-pip-version-check
+if %errorlevel% neq 0 (
+    echo         [AVISO] No se pudo instalar numpy.
+) else (
+    echo         [OK] numpy instalado correctamente.
+)
+
+echo.
+echo  [3/4] Instalando requests (comunicacion con Ollama LLM local)...
 pip install requests --quiet --disable-pip-version-check
 if %errorlevel% neq 0 (
     echo         [AVISO] No se pudo instalar requests.
@@ -42,7 +52,7 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo  [3/3] Instalando anthropic (Claude IA - interpretacion online)...
+echo  [4/4] Instalando anthropic (Claude IA - interpretacion online)...
 pip install anthropic --quiet --disable-pip-version-check
 if %errorlevel% neq 0 (
     echo         [AVISO] No se pudo instalar anthropic.

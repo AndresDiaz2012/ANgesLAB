@@ -4,7 +4,7 @@ ANgesLAB - Sistema de Gestión de Laboratorio Clínico
 
 Interfaz gráfica para configurar el sistema de numeración de solicitudes.
 
-Copyright © 2024-2025 ANgesLAB Solutions
+Copyright © 2024-2026 ANgesLAB Solutions
 """
 
 import tkinter as tk

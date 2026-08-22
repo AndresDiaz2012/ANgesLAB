@@ -30,7 +30,13 @@ IF EXIST "C:\Program Files\Inno Setup 6\ISCC.exe" (
     goto :found
 )
 
-:: Ruta 3: Buscar en PATH
+:: Ruta 3: Instalacion por usuario (Inno Setup sin permisos de admin)
+IF EXIST "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" (
+    SET "ISCC=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
+    goto :found
+)
+
+:: Ruta 4: Buscar en PATH
 where ISCC.exe >nul 2>&1
 IF %ERRORLEVEL% EQU 0 (
     SET "ISCC=ISCC.exe"

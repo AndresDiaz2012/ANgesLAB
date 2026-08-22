@@ -5,9 +5,10 @@ ANgesLAB - Sistema de Gestión de Laboratorio Clínico
 Este módulo maneja la configuración y generación de números de solicitud
 con diferentes modos de numeración según las necesidades del laboratorio.
 
-Copyright © 2024-2025 ANgesLAB Solutions
+Copyright © 2024-2026 ANgesLAB Solutions
 """
 
+import logging
 from datetime import datetime, timedelta
 from enum import Enum
 
@@ -50,9 +51,9 @@ class ConfiguradorNumeracion:
                     (TipoNumeracion, UltimoNumero, FechaUltimoReseteo, FormatoNumero, LongitudNumero, FechaCreacion)
                     VALUES ('anual', 0, {fecha_actual}, 'AAAA-NNNNNN', 6, {fecha_actual})
                 """)
-                print("Configuración de numeración inicializada en modo anual")
+                logging.getLogger("angeslab.config_numeracion").info("Configuración de numeración inicializada en modo anual")
         except Exception as e:
-            print(f"Error al inicializar configuración: {e}")
+            logging.getLogger("angeslab.config_numeracion").warning("Error al inicializar configuración: %s", e)
 
     def obtener_configuracion(self):
         """
@@ -68,7 +69,7 @@ class ConfiguradorNumeracion:
             """)
             return result
         except Exception as e:
-            print(f"Error al obtener configuración: {e}")
+            logging.getLogger("angeslab.config_numeracion").warning("Error al obtener configuración: %s", e)
             return None
 
     def actualizar_configuracion(self, tipo_numeracion, resetear=False):
@@ -107,7 +108,7 @@ class ConfiguradorNumeracion:
 
             return True
         except Exception as e:
-            print(f"Error al actualizar configuración: {e}")
+            logging.getLogger("angeslab.config_numeracion").warning("Error al actualizar configuración: %s", e)
             return False
 
     def _obtener_formato(self, tipo_numeracion):
@@ -167,7 +168,7 @@ class ConfiguradorNumeracion:
                 return ahora >= fecha_limite
 
         except Exception as e:
-            print(f"Error al verificar necesidad de reseteo: {e}")
+            logging.getLogger("angeslab.config_numeracion").warning("Error al verificar necesidad de reseteo: %s", e)
             return False
 
     def resetear_contador(self, manual=False):
@@ -202,7 +203,7 @@ class ConfiguradorNumeracion:
 
             return True
         except Exception as e:
-            print(f"Error al resetear contador: {e}")
+            logging.getLogger("angeslab.config_numeracion").warning("Error al resetear contador: %s", e)
             return False
 
     def generar_numero_solicitud(self):
@@ -245,7 +246,7 @@ class ConfiguradorNumeracion:
             return self._formatear_numero(tipo, nuevo_numero, longitud)
 
         except Exception as e:
-            print(f"Error al generar número de solicitud: {e}")
+            logging.getLogger("angeslab.config_numeracion").warning("Error al generar número de solicitud: %s", e)
             # Fallback al sistema antiguo en caso de error
             return self._generar_numero_legado()
 
@@ -348,5 +349,5 @@ class ConfiguradorNumeracion:
             }
 
         except Exception as e:
-            print(f"Error al obtener estadísticas: {e}")
+            logging.getLogger("angeslab.config_numeracion").warning("Error al obtener estadísticas: %s", e)
             return None

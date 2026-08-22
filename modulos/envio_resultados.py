@@ -16,6 +16,24 @@ from email import encoders
 from datetime import datetime
 
 try:
+    from modulos.whatsapp_envio import crear_enviador_whatsapp, normalizar_telefono
+    WHATSAPP_AUTOMATICO = True
+except ImportError:
+    try:
+        from whatsapp_envio import crear_enviador_whatsapp, normalizar_telefono
+        WHATSAPP_AUTOMATICO = True
+    except ImportError:
+        WHATSAPP_AUTOMATICO = False
+
+try:
+    from modulos.logging_config import obtener_logger
+    _log_envio = obtener_logger('angeslab.envio')
+except Exception:
+    import logging
+    _log_envio = logging.getLogger('angeslab.envio')
+    _log_envio.addHandler(logging.NullHandler())
+
+try:
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import letter
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -57,7 +75,7 @@ class GeneradorPDF:
             self.lab_rif = (config.get('RIF') or '') if config else ''
             self.lab_telefono = (config.get('Telefono1') or config.get('Telefono') or '') if config else ''
             self.lab_whatsapp = (config.get('WhatsApp') or '') if config else ''
-        except:
+        except Exception:
             self.lab_nombre = 'LABORATORIO CLINICO'
             self.lab_direccion = ''
             self.lab_rif = ''
@@ -312,7 +330,7 @@ class GeneradorPDF:
 
                             tabla_res.setStyle(TableStyle(estilo_res))
                             elementos.append(tabla_res)
-                    except:
+                    except Exception:
                         pass
 
                     # Espaciado entre secciones de prueba
@@ -321,7 +339,7 @@ class GeneradorPDF:
                 elementos.append(Paragraph(
                     "No hay pruebas registradas para esta solicitud.",
                     ParagraphStyle('NoPruebas', fontSize=8)))
-        except:
+        except Exception:
             elementos.append(Paragraph(
                 "No se pudieron cargar las pruebas.",
                 ParagraphStyle('Error', fontSize=8)))
@@ -373,7 +391,7 @@ class GeneradorPDF:
                 if ruta_abs_firma and os.path.exists(ruta_abs_firma):
                     try:
                         from reportlab.platypus import Image as RLImage
-                        firma_img_elem = RLImage(ruta_abs_firma, width=2.5*cm, height=0.9*cm)
+                        firma_img_elem = RLImage(ruta_abs_firma, width=4.5*cm, height=1.8*cm)
                         firma_img_elem.hAlign = 'CENTER'
                     except Exception:
                         firma_img_elem = ''
@@ -494,7 +512,7 @@ class EnviadorResultados:
         try:
             config = self.db.query_one("SELECT * FROM ConfiguracionSistema")
             self.lab_nombre = config.get('NombreLaboratorio', 'Laboratorio') if config else 'Laboratorio'
-        except:
+        except Exception:
             self.lab_nombre = 'Laboratorio'
 
     def obtener_datos_paciente(self, solicitud_id):
@@ -506,18 +524,28 @@ class EnviadorResultados:
             WHERE s.SolicitudID = {solicitud_id}
         """)
 
-    def enviar_whatsapp(self, solicitud_id, mensaje_personalizado=None):
+    def enviar_whatsapp(self, solicitud_id, mensaje_personalizado=None,
+                        telefono_destino=None, codigo_pais=None):
+        """Envía los resultados por WhatsApp con el PDF adjuntado automáticamente.
+
+        Args:
+            solicitud_id: solicitud a enviar
+            mensaje_personalizado: texto extra dentro del mensaje
+            telefono_destino: número a usar en lugar del registrado (por ejemplo,
+                              el que se indica al momento del ingreso cuando el
+                              paciente no tiene teléfono en su ficha)
+            codigo_pais: código de país para números sin prefijo internacional
+        """
         datos = self.obtener_datos_paciente(solicitud_id)
 
         if not datos:
             return {'exito': False, 'mensaje': 'Solicitud no encontrada', 'telefono': None}
 
-        telefono = datos.get('Telefono1', '')
+        telefono = (telefono_destino or datos.get('Telefono1', '') or '').strip()
         if not telefono:
-            return {'exito': False, 'mensaje': 'El paciente no tiene teléfono registrado', 'telefono': None}
-
-        # Limpiar teléfono
-        telefono_limpio = ''.join(filter(str.isdigit, str(telefono)))
+            return {'exito': False,
+                    'mensaje': 'No hay número de WhatsApp: indique uno para el envío',
+                    'telefono': None, 'requiere_telefono': True}
 
         nombre = datos.get('NombrePaciente', 'Paciente') or 'Paciente'
         numero_sol = datos.get('NumeroSolicitud', '')
@@ -528,13 +556,34 @@ class EnviadorResultados:
             mensaje += f"{mensaje_personalizado}\n\n"
         mensaje += f"Atentamente,\n{self.lab_nombre}"
 
-        url = f"https://wa.me/{telefono_limpio}?text={urllib.parse.quote(mensaje)}"
+        # Generar el PDF para adjuntarlo
+        try:
+            ruta_pdf = self.generador_pdf.generar_pdf_resultados(solicitud_id)
+        except Exception as e:
+            ruta_pdf = None
+            _log_envio.warning("No se pudo generar el PDF para WhatsApp: %s", e)
 
+        if WHATSAPP_AUTOMATICO and ruta_pdf:
+            try:
+                enviador = crear_enviador_whatsapp()
+                r = enviador.enviar_documento(telefono, ruta_pdf, mensaje,
+                                              codigo_pais=codigo_pais)
+                r['ruta_pdf'] = ruta_pdf
+                return r
+            except Exception as e:
+                _log_envio.warning("Envío automático por WhatsApp fallido: %s", e)
+
+        # Respaldo: abrir la conversación y adjuntar manualmente
+        telefono_limpio = ''.join(filter(str.isdigit, str(telefono)))
+        url = f"https://wa.me/{telefono_limpio}?text={urllib.parse.quote(mensaje)}"
         try:
             webbrowser.open(url)
-            return {'exito': True, 'mensaje': f'WhatsApp abierto para {nombre}', 'telefono': telefono}
+            return {'exito': True, 'enviado': False,
+                    'mensaje': f'WhatsApp abierto para {nombre}. Adjunte el PDF.',
+                    'telefono': telefono, 'ruta_pdf': ruta_pdf}
         except Exception as e:
-            return {'exito': False, 'mensaje': str(e), 'telefono': telefono}
+            return {'exito': False, 'enviado': False, 'mensaje': str(e),
+                    'telefono': telefono, 'ruta_pdf': ruta_pdf}
 
     def generar_y_guardar_pdf(self, solicitud_id, ruta_destino):
         try:

@@ -1,5 +1,5 @@
 ================================================================================
-            ANgesLAB v2.1 - INFORMACION DE INSTALACION
+            ANgesLAB v2.0 - INFORMACION DE INSTALACION
             Sistema de Gestion de Laboratorio Clinico
 ================================================================================
 
@@ -7,7 +7,7 @@ Gracias por adquirir ANgesLAB. A continuacion encontrara informacion
 importante sobre la instalacion y configuracion del sistema.
 
 ================================================================================
-  NOVEDADES v2.1 - IA CLINICA E HISTORIAL AVANZADO
+  NOVEDADES v2.0 - IA CLINICA E HISTORIAL AVANZADO
 ================================================================================
 
   Esta version incluye nuevas funcionalidades de inteligencia artificial
@@ -42,7 +42,7 @@ importante sobre la instalacion y configuracion del sistema.
   PROGRAMAS NECESARIOS (PREREQUISITOS)
 ================================================================================
 
-  1. Python 3.8 o superior
+  1. Python 3.10 o superior
      Descarga: https://www.python.org/downloads/
      IMPORTANTE: Durante la instalacion de Python, marque la casilla
      "Add Python to PATH" (Agregar Python al PATH del sistema).
@@ -56,6 +56,7 @@ importante sobre la instalacion y configuracion del sistema.
      - reportlab (generacion de reportes PDF)
      - Pillow (procesamiento de imagenes)
      - pypiwin32 (integracion con Windows/COM)
+     - qrcode (codigos QR en reportes)
 
   4. Librerias IA (instalacion opcional durante el setup):
      - matplotlib (graficas de evolucion clinica)

@@ -4,9 +4,10 @@ ANgesLAB - Sistema de Gestión de Laboratorio Clínico
 
 Este módulo maneja toda la configuración administrativa del laboratorio.
 
-Copyright © 2024-2025 ANgesLAB Solutions
+Copyright © 2024-2026 ANgesLAB Solutions
 """
 
+import logging
 from datetime import datetime
 import os
 import shutil
@@ -27,15 +28,119 @@ class ConfiguradorAdministrativo:
         self.db = db_connection
         self._inicializar_configuracion()
 
+    # Todas las columnas que el sistema necesita en ConfiguracionLaboratorio
+    _COLUMNAS_REQUERIDAS = {
+        # Información básica
+        'NombreLaboratorio': 'TEXT(200)',
+        'RazonSocial': 'TEXT(200)',
+        'RIF': 'TEXT(50)',
+        'Direccion': 'MEMO',
+        'Telefono1': 'TEXT(50)',
+        'Telefono2': 'TEXT(50)',
+        'WhatsApp': 'TEXT(50)',
+        'Email': 'TEXT(100)',
+        'SitioWeb': 'TEXT(200)',
+        # Logo
+        'RutaLogo': 'TEXT(255)',
+        'MostrarLogo': 'BIT',
+        'FormaLogo': 'TEXT(20)',
+        # Impresión
+        'FormatoImpresion': 'TEXT(20)',
+        'TamanoPapel': 'TEXT(20)',
+        'Orientacion': 'TEXT(20)',
+        'MargenSuperior': 'DOUBLE',
+        'MargenInferior': 'DOUBLE',
+        'MargenIzquierdo': 'DOUBLE',
+        'MargenDerecho': 'DOUBLE',
+        # Impresoras por rol (ver modulos/impresoras.py)
+        'ImpresoraResultados': 'TEXT(255)',
+        'ImpresoraResultadosDirecto': 'BIT',
+        'ImpresoraHojasTrabajo': 'TEXT(255)',
+        'ImpresoraHojasTrabajoDirecto': 'BIT',
+        'ImpresoraCotizaciones': 'TEXT(255)',
+        'ImpresoraCotizacionesDirecto': 'BIT',
+        'ImpresoraFacturacion': 'TEXT(255)',
+        'ImpresoraFacturacionDirecto': 'BIT',
+        'ImpresoraRecibos': 'TEXT(255)',
+        'ImpresoraRecibosDirecto': 'BIT',
+        'ImpresoraEtiquetas': 'TEXT(255)',
+        'ImpresoraEtiquetasDirecto': 'BIT',
+        # Papel, calidad y copias de cada rol, en JSON
+        'OpcionesImpresoras': 'MEMO',
+        # Rol de respaldo de las cotizaciones mientras no tengan impresora
+        # propia: facturacion o resultados
+        'RolCotizaciones': 'TEXT(20)',
+        # Apariencia de las ventanas de trabajo: 'claro' u 'oscuro'
+        'TemaVentanas': 'TEXT(10)',
+        # Resultados
+        'MostrarValoresReferencia': 'BIT',
+        'MostrarUnidades': 'BIT',
+        'MostrarMetodo': 'BIT',
+        'ResaltarAnormales': 'BIT',
+        'ColorAlto': 'TEXT(10)',
+        'ColorBajo': 'TEXT(10)',
+        'ColorEncabezadoTabla': 'TEXT(10)',
+        'UsarColoresTabla': 'BIT',
+        # Financiera
+        'MonedaPrincipal': 'TEXT(10)',
+        'SimboloMoneda': 'TEXT(5)',
+        'DecimalesPrecios': 'INTEGER',
+        'IVAPorDefecto': 'DOUBLE',
+        'DescuentoMaximo': 'DOUBLE',
+        # IGTF / Fiscal SENIAT
+        'IGTFActivo': 'BIT',
+        'TasaIGTF': 'DOUBLE',
+        'TipoContribuyente': 'TEXT(20)',
+        # Proveedor autorizado / imprenta (Providencia SNAT/2011/0071 art. 30)
+        'ImprentaNombre': 'TEXT(200)',
+        'ImprentaRIF': 'TEXT(50)',
+        'ImprentaProvidencia': 'TEXT(100)',
+        'ImprentaFechaProvidencia': 'DATETIME',
+        # Firma
+        'NombreDirector': 'TEXT(200)',
+        'TituloDirector': 'TEXT(200)',
+        'MostrarFirma': 'BIT',
+        'TextoAutorizacion': 'MEMO',
+        # Textos
+        'HorarioAtencion': 'MEMO',
+        'TextoEncabezado': 'MEMO',
+        'TextoPiePagina': 'MEMO',
+        'NotasResultados': 'MEMO',
+        # Auditoría
+        'FechaActualizacion': 'DATETIME',
+    }
+
     def _inicializar_configuracion(self):
-        """Inicializa la configuración si no existe."""
+        """Inicializa la configuración si no existe y asegura que todas las columnas existan."""
         try:
             config = self.obtener_configuracion()
             if not config:
-                print("Advertencia: No hay configuración administrativa.")
-                print("Ejecute el script: scripts/agregar_config_administrativa.py")
+                # Intentar crear un registro inicial
+                try:
+                    self.db.execute("INSERT INTO ConfiguracionLaboratorio (NombreLaboratorio) VALUES ('Mi Laboratorio')")
+                except Exception:
+                    pass
+                config = self.obtener_configuracion()
+                if not config:
+                    logging.getLogger("angeslab.config_administrativa").warning("No hay configuración administrativa.")
+                    return
+
+            # Verificar y agregar columnas faltantes
+            self._asegurar_columnas()
         except Exception as e:
-            print(f"Error al inicializar configuración administrativa: {e}")
+            logging.getLogger("angeslab.config_administrativa").warning("Error al inicializar configuración administrativa: %s", e)
+
+    def _asegurar_columnas(self):
+        """Verifica que todas las columnas requeridas existan en la tabla."""
+        for col, tipo in self._COLUMNAS_REQUERIDAS.items():
+            try:
+                self.db.query_one(f"SELECT TOP 1 [{col}] FROM ConfiguracionLaboratorio")
+            except Exception:
+                # Columna no existe, agregarla
+                try:
+                    self.db.execute(f"ALTER TABLE ConfiguracionLaboratorio ADD COLUMN [{col}] {tipo}")
+                except Exception:
+                    pass  # Puede fallar si la columna ya existe con otro nombre
 
     def obtener_configuracion(self):
         """
@@ -51,7 +156,7 @@ class ConfiguradorAdministrativo:
             """)
             return result
         except Exception as e:
-            print(f"Error al obtener configuración: {e}")
+            logging.getLogger("angeslab.config_administrativa").warning("Error al obtener configuración: %s", e)
             return None
 
     def actualizar_informacion_basica(self, datos):
@@ -98,7 +203,7 @@ class ConfiguradorAdministrativo:
             return True
 
         except Exception as e:
-            print(f"Error al actualizar información básica: {e}")
+            logging.getLogger("angeslab.config_administrativa").warning("Error al actualizar información básica: %s", e)
             return False
 
     def actualizar_configuracion_impresion(self, datos):
@@ -145,7 +250,67 @@ class ConfiguradorAdministrativo:
             return True
 
         except Exception as e:
-            print(f"Error al actualizar configuración de impresión: {e}")
+            logging.getLogger("angeslab.config_administrativa").warning("Error al actualizar configuración de impresión: %s", e)
+            return False
+
+    def actualizar_configuracion_impresoras(self, asignaciones,
+                                            rol_cotizaciones=None,
+                                            opciones=None):
+        """
+        Guarda la impresora asignada a cada rol y sus opciones de papel.
+
+        Args:
+            asignaciones (dict): {rol: {'impresora': str, 'directo': bool}}
+                Roles válidos: resultados, cotizaciones, facturacion, recibos,
+                etiquetas. Se permite repetir la misma impresora en varios.
+            rol_cotizaciones (str): rol de respaldo de las cotizaciones
+                ('facturacion' o 'resultados') mientras no tengan impresora
+                propia asignada. None deja el actual.
+            opciones (dict): {rol: {'copias', 'calidad', 'orientacion',
+                'escala', 'papel', 'bandeja'}}. None deja las actuales.
+        """
+        try:
+            from modulos.impresoras import GestorImpresoras
+            return GestorImpresoras(self.db).guardar(asignaciones,
+                                                     rol_cotizaciones,
+                                                     opciones)
+        except Exception as e:
+            logging.getLogger("angeslab.config_administrativa").warning(
+                "Error al actualizar impresoras: %s", e)
+            return False
+
+    # Valores admitidos para el tema de las ventanas de trabajo
+    TEMAS_VALIDOS = ('claro', 'oscuro')
+    TEMA_POR_DEFECTO = 'claro'
+
+    def obtener_tema_ventanas(self):
+        """Devuelve 'claro' u 'oscuro'; nunca lanza excepcion."""
+        try:
+            cfg = self.obtener_configuracion() or {}
+            valor = str(cfg.get('TemaVentanas') or '').strip().lower()
+            if valor in self.TEMAS_VALIDOS:
+                return valor
+        except Exception as e:
+            logging.getLogger("angeslab.config_administrativa").warning(
+                "No se pudo leer el tema de ventanas: %s", e)
+        return self.TEMA_POR_DEFECTO
+
+    def actualizar_tema_ventanas(self, tema):
+        """Guarda el tema elegido para las ventanas de trabajo.
+
+        Args:
+            tema (str): 'claro' u 'oscuro'. Cualquier otro valor se ignora.
+        """
+        valor = str(tema or '').strip().lower()
+        if valor not in self.TEMAS_VALIDOS:
+            return False
+        try:
+            self.db.execute(
+                f"UPDATE ConfiguracionLaboratorio SET [TemaVentanas] = '{valor}'")
+            return True
+        except Exception as e:
+            logging.getLogger("angeslab.config_administrativa").warning(
+                "Error al guardar el tema de ventanas: %s", e)
             return False
 
     def actualizar_configuracion_resultados(self, datos):
@@ -171,6 +336,10 @@ class ConfiguradorAdministrativo:
                 campos.append(f"ColorAlto = '{datos['ColorAlto']}'")
             if 'ColorBajo' in datos:
                 campos.append(f"ColorBajo = '{datos['ColorBajo']}'")
+            if 'ColorEncabezadoTabla' in datos:
+                campos.append(f"ColorEncabezadoTabla = '{datos['ColorEncabezadoTabla']}'")
+            if 'UsarColoresTabla' in datos:
+                campos.append(f"UsarColoresTabla = {datos['UsarColoresTabla']}")
 
             if not campos:
                 return False
@@ -187,7 +356,7 @@ class ConfiguradorAdministrativo:
             return True
 
         except Exception as e:
-            print(f"Error al actualizar configuración de resultados: {e}")
+            logging.getLogger("angeslab.config_administrativa").warning("Error al actualizar configuración de resultados: %s", e)
             return False
 
     def actualizar_configuracion_financiera(self, datos):
@@ -226,7 +395,93 @@ class ConfiguradorAdministrativo:
             return True
 
         except Exception as e:
-            print(f"Error al actualizar configuración financiera: {e}")
+            logging.getLogger("angeslab.config_administrativa").warning("Error al actualizar configuración financiera: %s", e)
+            return False
+
+    def actualizar_configuracion_fiscal(self, datos):
+        """
+        Actualiza la configuracion fiscal (IGTF, tipo contribuyente).
+
+        Args:
+            datos (dict): Configuracion fiscal
+        """
+        try:
+            campos = []
+
+            if 'IGTFActivo' in datos:
+                campos.append(f"IGTFActivo = {datos['IGTFActivo']}")
+            if 'TasaIGTF' in datos:
+                campos.append(f"TasaIGTF = {datos['TasaIGTF']}")
+            if 'TipoContribuyente' in datos:
+                tipo = str(datos['TipoContribuyente']).replace("'", "''")
+                campos.append(f"TipoContribuyente = '{tipo}'")
+
+            # Datos del proveedor autorizado que exige el pie de la factura
+            for campo in ('ImprentaNombre', 'ImprentaRIF', 'ImprentaProvidencia'):
+                if campo in datos:
+                    valor = datos[campo]
+                    if valor is None or str(valor).strip() == '':
+                        campos.append(f"{campo} = NULL")
+                    else:
+                        campos.append(
+                            f"{campo} = '{str(valor).replace(chr(39), chr(39)*2)}'")
+            if 'ImprentaFechaProvidencia' in datos:
+                fecha = datos['ImprentaFechaProvidencia']
+                if hasattr(fecha, 'strftime'):
+                    campos.append("ImprentaFechaProvidencia = "
+                                  + fecha.strftime('#%m/%d/%Y#'))
+                else:
+                    campos.append("ImprentaFechaProvidencia = NULL")
+
+            if not campos:
+                return False
+
+            fecha_actual = datetime.now().strftime('#%m/%d/%Y %H:%M:%S#')
+            campos.append(f"FechaActualizacion = {fecha_actual}")
+
+            sql = f"""
+                UPDATE ConfiguracionLaboratorio
+                SET {', '.join(campos)}
+            """
+
+            self.db.execute(sql)
+            return True
+
+        except Exception as e:
+            logging.getLogger("angeslab.config_administrativa").warning("Error al actualizar configuracion fiscal: %s", e)
+            return False
+
+    def actualizar_configuracion_tasas(self, datos):
+        """
+        Actualiza configuracion de tasas de cambio en ConfiguracionAdministrativa.
+
+        Args:
+            datos (dict): TasaCOP_USD, TasaCambio, etc.
+        """
+        try:
+            campos = []
+
+            if 'TasaCOP_USD' in datos:
+                campos.append(f"TasaCOP_USD = {datos['TasaCOP_USD']}")
+            if 'TasaCambio' in datos:
+                campos.append(f"TasaCambio = {datos['TasaCambio']}")
+
+            fecha = datetime.now().strftime('#%m/%d/%Y %H:%M:%S#')
+            campos.append(f"FechaActualizacion = {fecha}")
+
+            if not campos:
+                return False
+
+            sql = f"""
+                UPDATE ConfiguracionAdministrativa
+                SET {', '.join(campos)}
+            """
+
+            self.db.execute(sql)
+            return True
+
+        except Exception as e:
+            logging.getLogger("angeslab.config_administrativa").warning("Error al actualizar tasas: %s", e)
             return False
 
     def actualizar_firma_autorizacion(self, datos):
@@ -266,7 +521,7 @@ class ConfiguradorAdministrativo:
             return True
 
         except Exception as e:
-            print(f"Error al actualizar firma: {e}")
+            logging.getLogger("angeslab.config_administrativa").warning("Error al actualizar firma: %s", e)
             return False
 
     def guardar_logo(self, ruta_origen):
@@ -310,7 +565,7 @@ class ConfiguradorAdministrativo:
             return ruta_destino
 
         except Exception as e:
-            print(f"Error al guardar logo: {e}")
+            logging.getLogger("angeslab.config_administrativa").warning("Error al guardar logo: %s", e)
             return None
 
     def obtener_ruta_logo(self):
@@ -327,7 +582,7 @@ class ConfiguradorAdministrativo:
                 if os.path.exists(ruta):
                     return ruta
             return None
-        except:
+        except Exception:
             return None
 
     def actualizar_textos_personalizados(self, datos):
@@ -368,7 +623,7 @@ class ConfiguradorAdministrativo:
             return True
 
         except Exception as e:
-            print(f"Error al actualizar textos: {e}")
+            logging.getLogger("angeslab.config_administrativa").warning("Error al actualizar textos: %s", e)
             return False
 
     def obtener_formato_precio(self):
@@ -385,7 +640,7 @@ class ConfiguradorAdministrativo:
                 decimales = config.get('DecimalesPrecios', 2)
                 return (simbolo, decimales)
             return ('$', 2)
-        except:
+        except Exception:
             return ('$', 2)
 
     def formatear_precio(self, monto):

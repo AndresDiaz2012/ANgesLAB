@@ -15,6 +15,7 @@ Copyright © 2024-2026 ANgesLAB Solutions
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
+import logging
 from datetime import datetime
 import os
 
@@ -89,6 +90,7 @@ class VentanaConfiguracionCompleta:
         if es_admin_o_dev:
             self._crear_tab_numeracion()
             self._crear_tab_precios()
+            self._crear_tab_financiera()
         self._crear_tab_personalizacion()
         if es_admin_o_dev:
             self._crear_tab_usuarios()
@@ -154,7 +156,7 @@ class VentanaConfiguracionCompleta:
             row=0, column=0, columnspan=2, sticky='w', pady=(0, 20))
 
         info = [
-            ("Versión:", "1.0.0"),
+            ("Versión:", "2.0.0"),
             ("Base de datos:", "ANgesLAB.accdb"),
             ("Usuario actual:", self.user.get('NombreCompleto', 'N/A')),
             ("Nombre de usuario:", self.user.get('NombreUsuario', 'N/A')),
@@ -227,21 +229,39 @@ class VentanaConfiguracionCompleta:
         ttk.Label(frame, text="Gestión de Precios de Pruebas",
                  font=('Segoe UI', 14, 'bold')).pack(anchor='w', pady=(0, 10))
 
-        # Instrucciones
-        ttk.Label(frame, text="Seleccione una prueba de la lista y haga clic en 'Editar Precio' para modificar su valor.",
-                 font=('Segoe UI', 10)).pack(anchor='w', pady=(0, 20))
+        ttk.Label(frame, text="Busque la prueba, haga doble clic sobre ella y escriba el precio. "
+                              "La ventana de precios permanece abierta para seguir editando.",
+                 font=('Segoe UI', 10)).pack(anchor='w', pady=(0, 15))
 
-        # Filtro por área
+        # ── Filtros: área, búsqueda y «sin precio» ────────────────────────
         filtro_frame = ttk.Frame(frame)
-        filtro_frame.pack(fill='x', pady=(0, 10))
+        filtro_frame.pack(fill='x', pady=(0, 6))
 
-        ttk.Label(filtro_frame, text="Filtrar por Área:",
-                 font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Label(filtro_frame, text="Área:",
+                 font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 6))
 
         self.combo_filtro_area = ttk.Combobox(filtro_frame, state='readonly',
-                                               width=35, font=('Segoe UI', 10))
-        self.combo_filtro_area.pack(side=tk.LEFT, padx=(0, 10))
+                                               width=26, font=('Segoe UI', 10))
+        self.combo_filtro_area.pack(side=tk.LEFT, padx=(0, 15))
         self.combo_filtro_area.bind('<<ComboboxSelected>>', lambda e: self._cargar_precios())
+
+        # Con 500+ pruebas, filtrar solo por área no alcanza: la búsqueda por
+        # nombre o código es lo que hace usable la pantalla
+        ttk.Label(filtro_frame, text="Buscar:",
+                 font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 6))
+        self.var_buscar_precio = tk.StringVar()
+        entry_buscar = ttk.Entry(filtro_frame, textvariable=self.var_buscar_precio,
+                                 width=26, font=('Segoe UI', 10))
+        entry_buscar.pack(side=tk.LEFT, padx=(0, 6))
+        self.var_buscar_precio.trace_add('write',
+                                          lambda *_: self._cargar_precios())
+        ttk.Button(filtro_frame, text="✕", width=3,
+                   command=lambda: self.var_buscar_precio.set('')).pack(side=tk.LEFT)
+
+        self.var_solo_sin_precio = tk.BooleanVar(value=False)
+        ttk.Checkbutton(filtro_frame, text="Solo sin precio",
+                        variable=self.var_solo_sin_precio,
+                        command=self._cargar_precios).pack(side=tk.LEFT, padx=15)
 
         # Cargar áreas en el combobox
         self._areas_precios = []  # Lista de (AreaID, NombreArea)
@@ -256,11 +276,11 @@ class VentanaConfiguracionCompleta:
 
         # Botones de acción (arriba de la lista)
         btn_frame = ttk.Frame(frame)
-        btn_frame.pack(fill='x', pady=(0, 10))
+        btn_frame.pack(fill='x', pady=(0, 6))
 
         ttk.Button(btn_frame, text="💵 Editar Precio",
                   command=self._editar_precio,
-                  width=20).pack(side=tk.LEFT, padx=5)
+                  width=20).pack(side=tk.LEFT, padx=(0, 5))
 
         ttk.Button(btn_frame, text="🔄 Actualizar Lista",
                   command=self._cargar_precios,
@@ -274,9 +294,15 @@ class VentanaConfiguracionCompleta:
                   command=lambda: self._aplicar_porcentaje_precios('descuento'),
                   width=22).pack(side=tk.LEFT, padx=5)
 
+        # Contador: cuántas se ven y cuántas siguen sin precio
+        self.lbl_resumen_precios = ttk.Label(frame, text="",
+                                             font=('Segoe UI', 9),
+                                             foreground='#64748b')
+        self.lbl_resumen_precios.pack(anchor='w', pady=(0, 4))
+
         # Lista de pruebas con precios
         tree_frame = ttk.Frame(frame)
-        tree_frame.pack(fill='both', expand=True, pady=10)
+        tree_frame.pack(fill='both', expand=True, pady=(0, 10))
 
         cols = ('Código', 'Prueba', 'Área', 'Precio')
         self.tree_precios = ttk.Treeview(tree_frame, columns=cols, show='headings',
@@ -293,6 +319,9 @@ class VentanaConfiguracionCompleta:
         self.tree_precios.column('Área', width=150, anchor='w')
         self.tree_precios.column('Precio', width=120, anchor='e')
 
+        # Las pruebas sin precio se resaltan: son las que hay que atender
+        self.tree_precios.tag_configure('sin_precio', foreground='#b45309')
+
         # Scrollbar
         scrollbar_precios = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree_precios.yview)
         self.tree_precios.configure(yscrollcommand=scrollbar_precios.set)
@@ -300,19 +329,436 @@ class VentanaConfiguracionCompleta:
         self.tree_precios.pack(side=tk.LEFT, fill='both', expand=True)
         scrollbar_precios.pack(side=tk.RIGHT, fill='y')
 
-        # Doble clic también edita
+        # Doble clic y Enter también editan
         self.tree_precios.bind('<Double-1>', lambda e: self._editar_precio())
+        self.tree_precios.bind('<Return>', lambda e: self._editar_precio())
 
         # Información adicional
         info_frame = ttk.Frame(frame)
-        info_frame.pack(fill='x', pady=(10, 0))
+        info_frame.pack(fill='x', pady=(6, 0))
 
-        ttk.Label(info_frame, text="💡 Consejo: Haga doble clic en una prueba para editar su precio. "
-                 "Seleccione varias pruebas (Ctrl+clic) para aplicar incremento/descuento solo a esas.",
-                 font=('Segoe UI', 9), foreground='gray').pack(anchor='w')
+        ttk.Label(info_frame,
+                 text="💡 Doble clic edita el precio. Seleccione varias con Ctrl+clic para "
+                      "aplicarles incremento o descuento; sin selección se aplica a toda la lista visible.\n"
+                      "    El incremento y el descuento son porcentajes sobre el precio actual: "
+                      "una prueba en $0.00 seguirá en $0.00 hasta que se le ponga un precio.",
+                 font=('Segoe UI', 9), foreground='gray',
+                 justify='left').pack(anchor='w')
 
         # Cargar precios
         self._cargar_precios()
+
+    # ==================================================================
+    # TAB FINANCIERA (IGTF, TASAS DE CAMBIO, MONEDA)
+    # ==================================================================
+
+    def _crear_tab_financiera(self):
+        """Pestana: Configuracion financiera, IGTF y tasas de cambio."""
+        tab, frame = self._crear_tab_con_scroll("💰 Financiera")
+
+        # --- Titulo ---
+        ttk.Label(frame, text="Configuracion Financiera, IGTF y Tasas de Cambio",
+                 font=('Segoe UI', 14, 'bold')).pack(anchor='w', pady=(0, 5))
+        ttk.Label(frame, text="Configure moneda, impuestos IGTF y tasas de cambio BCV.",
+                 font=('Segoe UI', 10), foreground='gray').pack(anchor='w', pady=(0, 20))
+
+        # ============================================
+        # Seccion 1: Moneda
+        # ============================================
+        sec_moneda = ttk.LabelFrame(frame, text="  💵 Moneda  ", padding=15)
+        sec_moneda.pack(fill='x', pady=(0, 15))
+
+        mon_row = ttk.Frame(sec_moneda)
+        mon_row.pack(fill='x', pady=5)
+
+        ttk.Label(mon_row, text="Moneda Principal:",
+                 font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 10))
+        self.combo_moneda_fin = ttk.Combobox(mon_row, state='readonly', width=12,
+                                              values=['USD', 'VES', 'EUR', 'COP'],
+                                              font=('Segoe UI', 10))
+        self.combo_moneda_fin.set('USD')
+        self.combo_moneda_fin.pack(side=tk.LEFT, padx=(0, 20))
+
+        ttk.Label(mon_row, text="Simbolo:",
+                 font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 10))
+        self.entry_simbolo_fin = ttk.Entry(mon_row, width=8, font=('Segoe UI', 10))
+        self.entry_simbolo_fin.insert(0, '$')
+        self.entry_simbolo_fin.pack(side=tk.LEFT, padx=(0, 20))
+
+        ttk.Label(mon_row, text="Decimales:",
+                 font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 10))
+        self.spin_decimales_fin = ttk.Spinbox(mon_row, from_=0, to=4, width=5,
+                                               font=('Segoe UI', 10))
+        self.spin_decimales_fin.set(2)
+        self.spin_decimales_fin.pack(side=tk.LEFT)
+
+        # ============================================
+        # Seccion 2: IVA y Descuentos
+        # ============================================
+        sec_iva = ttk.LabelFrame(frame, text="  📋 IVA y Descuentos  ", padding=15)
+        sec_iva.pack(fill='x', pady=(0, 15))
+
+        iva_row = ttk.Frame(sec_iva)
+        iva_row.pack(fill='x', pady=5)
+
+        ttk.Label(iva_row, text="IVA por Defecto (%):",
+                 font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 10))
+        self.spin_iva_fin = ttk.Spinbox(iva_row, from_=0, to=100, increment=0.5,
+                                         width=8, font=('Segoe UI', 10))
+        self.spin_iva_fin.set(16.0)
+        self.spin_iva_fin.pack(side=tk.LEFT, padx=(0, 30))
+
+        ttk.Label(iva_row, text="Descuento Maximo (%):",
+                 font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 10))
+        self.spin_desc_max_fin = ttk.Spinbox(iva_row, from_=0, to=100, increment=5,
+                                              width=8, font=('Segoe UI', 10))
+        self.spin_desc_max_fin.set(50.0)
+        self.spin_desc_max_fin.pack(side=tk.LEFT)
+
+        # ============================================
+        # Seccion 3: IGTF
+        # ============================================
+        sec_igtf = ttk.LabelFrame(frame, text="  🏦 IGTF (Grandes Transacciones Financieras)  ", padding=15)
+        sec_igtf.pack(fill='x', pady=(0, 15))
+
+        igtf_row1 = ttk.Frame(sec_igtf)
+        igtf_row1.pack(fill='x', pady=5)
+
+        self.var_igtf_activo = tk.BooleanVar(value=True)
+        ttk.Checkbutton(igtf_row1, text="IGTF Activo",
+                        variable=self.var_igtf_activo,
+                        style='TCheckbutton').pack(side=tk.LEFT, padx=(0, 30))
+
+        ttk.Label(igtf_row1, text="Tasa IGTF (%):",
+                 font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 10))
+        self.spin_igtf = ttk.Spinbox(igtf_row1, from_=0, to=10, increment=0.5,
+                                      width=8, font=('Segoe UI', 10))
+        self.spin_igtf.set(3.0)
+        self.spin_igtf.pack(side=tk.LEFT, padx=(0, 30))
+
+        ttk.Label(igtf_row1, text="Tipo Contribuyente:",
+                 font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 10))
+        self.combo_tipo_contrib = ttk.Combobox(igtf_row1,
+                                                values=['Ordinario', 'Especial'],
+                                                state='readonly', width=14,
+                                                font=('Segoe UI', 10))
+        self.combo_tipo_contrib.set('Ordinario')
+        self.combo_tipo_contrib.pack(side=tk.LEFT)
+
+        ttk.Label(sec_igtf,
+                 text="Se aplica automaticamente a pagos en Divisa/Zelle (3% sobre base imponible).",
+                 foreground='gray', font=('Segoe UI', 9)).pack(anchor='w', pady=(5, 0))
+
+        # ============================================
+        # Seccion 4: Tasas de Cambio
+        # ============================================
+        sec_tasas = ttk.LabelFrame(frame, text="  📈 Tasas de Cambio (BCV)  ", padding=15)
+        sec_tasas.pack(fill='x', pady=(0, 15))
+
+        # Tasa USD/Bs (solo lectura, viene del BCV)
+        tasa_row1 = ttk.Frame(sec_tasas)
+        tasa_row1.pack(fill='x', pady=3)
+
+        ttk.Label(tasa_row1, text="Tasa BCV USD/Bs:",
+                 font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 10))
+        self.label_tasa_usd = ttk.Label(tasa_row1, text="--",
+                                         font=('Segoe UI', 12, 'bold'), foreground='#1565c0')
+        self.label_tasa_usd.pack(side=tk.LEFT, padx=(0, 40))
+
+        ttk.Label(tasa_row1, text="Tasa BCV EUR/Bs:",
+                 font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 10))
+        self.label_tasa_eur = ttk.Label(tasa_row1, text="--",
+                                         font=('Segoe UI', 12, 'bold'), foreground='#1565c0')
+        self.label_tasa_eur.pack(side=tk.LEFT)
+
+        # Tasa COP/USD (manual)
+        tasa_row2 = ttk.Frame(sec_tasas)
+        tasa_row2.pack(fill='x', pady=(10, 3))
+
+        ttk.Label(tasa_row2, text="Tasa COP/USD (manual):",
+                 font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 10))
+        self.entry_tasa_cop = ttk.Entry(tasa_row2, width=15, font=('Segoe UI', 10))
+        self.entry_tasa_cop.pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Label(tasa_row2, text="COP por 1 USD",
+                 foreground='gray', font=('Segoe UI', 9)).pack(side=tk.LEFT)
+
+        # Boton actualizar BCV y timestamp
+        tasa_row3 = ttk.Frame(sec_tasas)
+        tasa_row3.pack(fill='x', pady=(10, 5))
+
+        ttk.Button(tasa_row3, text="🔄 Actualizar Tasas BCV",
+                  command=self._actualizar_tasas_bcv, width=25).pack(side=tk.LEFT, padx=(0, 15))
+
+        self.label_ultima_act = ttk.Label(tasa_row3,
+                                           text="Ultima actualizacion: --",
+                                           foreground='gray', font=('Segoe UI', 9))
+        self.label_ultima_act.pack(side=tk.LEFT)
+
+        ttk.Label(sec_tasas,
+                 text="Las tasas BCV se obtienen automaticamente via pyBCV. "
+                      "Si no esta instalado, ejecute: pip install pyBCV",
+                 foreground='gray', font=('Segoe UI', 9)).pack(anchor='w', pady=(5, 0))
+
+        # ============================================
+        # Botones de accion
+        # ============================================
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill='x', pady=15)
+
+        ttk.Button(btn_frame, text="💾 Guardar Configuracion Financiera",
+                  command=self._guardar_config_financiera, width=35).pack(side='left', padx=5)
+
+        # Cargar datos guardados
+        self._cargar_config_financiera()
+
+    def _actualizar_tasas_bcv(self):
+        """Consulta las tasas BCV y actualiza la interfaz."""
+        try:
+            from modulos.tasas_cambio import GestorTasasCambio
+            gestor = GestorTasasCambio(self.db)
+            tasas = gestor.actualizar_tasas_bcv()
+
+            if 'USD' in tasas:
+                self.label_tasa_usd.config(text=f"Bs. {tasas['USD']:,.4f}")
+            if 'EUR' in tasas:
+                self.label_tasa_eur.config(text=f"Bs. {tasas['EUR']:,.4f}")
+
+            self.label_ultima_act.config(
+                text=f"Ultima actualizacion: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+
+            messagebox.showinfo("Tasas Actualizadas",
+                                "Las tasas BCV se han actualizado correctamente.",
+                                parent=self.win)
+
+        except ImportError:
+            messagebox.showwarning("pyBCV no disponible",
+                                   "El modulo pyBCV no esta instalado.\n"
+                                   "Ejecute: pip install pyBCV",
+                                   parent=self.win)
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al actualizar tasas BCV:\n{e}",
+                                parent=self.win)
+
+    @staticmethod
+    def _safe_float(valor, defecto=0.0):
+        """Convierte a float sin lanzar; `defecto` si el valor no sirve."""
+        try:
+            if valor is None or str(valor).strip() == '':
+                return defecto
+            return float(valor)
+        except (ValueError, TypeError):
+            return defecto
+
+    @staticmethod
+    def _safe_int(valor, defecto=0):
+        """Convierte a int sin lanzar; `defecto` si el valor no sirve."""
+        try:
+            if valor is None or str(valor).strip() == '':
+                return defecto
+            return int(float(valor))
+        except (ValueError, TypeError):
+            return defecto
+
+    def _cargar_config_financiera(self):
+        """Carga la configuracion financiera desde la BD."""
+        try:
+            config = self.db.query_one(
+                "SELECT * FROM ConfiguracionLaboratorio") or {}
+        except Exception as e:
+            logging.getLogger("angeslab.ventana_configuracion_completa").warning(
+                "[CONFIG-FIN] Error cargando config financiera: %s", e)
+            config = {}
+
+        def _poner(widget, valor):
+            """Escribe un valor en el campo. Nunca recibe None (ver abajo)."""
+            widget.delete(0, tk.END)
+            widget.insert(0, str(valor))
+
+        # Una columna añadida con ALTER TABLE existe pero está en NULL, no
+        # ausente: config.get(col, defecto) devuelve None, no el defecto. Ese
+        # None dejaba el campo vacío y al guardar reventaba con
+        # «could not convert string to float». Por eso aquí se usa siempre
+        # `or defecto` / _safe_*, y cada campo va por separado para que un
+        # NULL no aborte la carga de los que vienen detrás.
+        self.combo_moneda_fin.set(config.get('MonedaPrincipal') or 'USD')
+        _poner(self.entry_simbolo_fin, config.get('SimboloMoneda') or '$')
+        _poner(self.spin_decimales_fin,
+               self._safe_int(config.get('DecimalesPrecios'), 2))
+
+        _poner(self.spin_iva_fin,
+               self._safe_float(config.get('IVAPorDefecto'), 16.0))
+        _poner(self.spin_desc_max_fin,
+               self._safe_float(config.get('DescuentoMaximo'), 50.0))
+
+        igtf_activo = config.get('IGTFActivo')
+        self.var_igtf_activo.set(True if igtf_activo is None
+                                 else bool(igtf_activo))
+        _poner(self.spin_igtf, self._safe_float(config.get('TasaIGTF'), 3.0))
+        self.combo_tipo_contrib.set(
+            config.get('TipoContribuyente') or 'Ordinario')
+
+        # Tasas de cambio
+        try:
+            from modulos.tasas_cambio import GestorTasasCambio
+            gestor = GestorTasasCambio(self.db)
+
+            tasa_usd = gestor.get_tasa_actual('USD')
+            if tasa_usd and tasa_usd != 1.0:
+                self.label_tasa_usd.config(text=f"Bs. {tasa_usd:,.4f}")
+
+            tasa_eur = gestor.get_tasa_actual('EUR')
+            if tasa_eur and tasa_eur != 1.0:
+                self.label_tasa_eur.config(text=f"Bs. {tasa_eur:,.4f}")
+
+            ultima = gestor.get_ultima_actualizacion()
+            if ultima:
+                try:
+                    self.label_ultima_act.config(
+                        text=f"Ultima actualizacion: {ultima.strftime('%d/%m/%Y %H:%M')}")
+                except Exception:
+                    pass
+
+        except Exception as e:
+            logging.getLogger("angeslab.ventana_configuracion_completa").warning("[CONFIG-FIN] Error cargando tasas: %s", e)
+
+        # Tasa COP/USD
+        try:
+            config_admin = self.db.query_one(
+                "SELECT TasaCOP_USD FROM ConfiguracionAdministrativa")
+            if config_admin and config_admin.get('TasaCOP_USD'):
+                cop_val = self._safe_float(config_admin['TasaCOP_USD'], 0.0)
+                if cop_val > 0:
+                    self.entry_tasa_cop.delete(0, tk.END)
+                    self.entry_tasa_cop.insert(0, f"{cop_val:,.2f}")
+        except Exception:
+            pass
+
+    def _guardar_config_financiera(self):
+        """Guarda la configuracion financiera en la BD."""
+        try:
+            # Asegurar columnas IGTF existen en ConfiguracionLaboratorio
+            _cols_fiscal = {
+                'IGTFActivo': 'BIT',
+                'TasaIGTF': 'DOUBLE',
+                'TipoContribuyente': 'TEXT(20)',
+            }
+            for col, tipo in _cols_fiscal.items():
+                try:
+                    self.db.query(f"SELECT TOP 1 [{col}] FROM ConfiguracionLaboratorio")
+                except Exception:
+                    try:
+                        self.db.execute(
+                            f"ALTER TABLE ConfiguracionLaboratorio ADD COLUMN [{col}] {tipo}")
+                    except Exception:
+                        pass
+
+            # ── Leer la interfaz ────────────────────────────────────────
+            # Ningún campo puede tumbar el guardado: un valor vacío o
+            # ilegible cae al de fábrica en vez de lanzar una excepción que
+            # deja el resto de la pestaña sin guardar (incluida la tasa
+            # COP/USD, que se escribe al final).
+            moneda = self.combo_moneda_fin.get() or 'USD'
+            simbolo = (self.entry_simbolo_fin.get() or '$').replace("'", "''")
+            decimales = max(0, min(4, self._safe_int(
+                self.spin_decimales_fin.get(), 2)))
+            iva = self._safe_float(self.spin_iva_fin.get(), 16.0)
+            desc_max = self._safe_float(self.spin_desc_max_fin.get(), 50.0)
+            igtf_activo = bool(self.var_igtf_activo.get())
+            tasa_igtf = self._safe_float(self.spin_igtf.get(), 3.0)
+            tipo_contrib = (self.combo_tipo_contrib.get() or 'Ordinario').replace("'", "''")
+
+            # ── Tasa COP/USD: se valida ANTES de tocar la base ──────────
+            # Antes un texto ilegible se descartaba en silencio y la ventana
+            # igual decía «guardada correctamente»: el usuario cambiaba la
+            # tasa, veía el mensaje de éxito y seguía facturando en pesos con
+            # la tasa vieja sin enterarse.
+            from modulos.tasas_cambio import parsear_tasa
+            tasa_cop_str = self.entry_tasa_cop.get().strip()
+            tasa_cop_val = None
+            if tasa_cop_str:
+                tasa_cop_val = parsear_tasa(tasa_cop_str)
+                if tasa_cop_val is None or tasa_cop_val <= 0:
+                    messagebox.showerror(
+                        "Tasa COP/USD",
+                        f"«{tasa_cop_str}» no es una tasa válida.\n\n"
+                        "Escriba cuántos pesos vale 1 dólar, por ejemplo "
+                        "3600 o 3.600,50.\n\n"
+                        "No se guardó nada; corrija el campo y vuelva a "
+                        "intentarlo.",
+                        parent=self.win)
+                    return
+
+            # ── Escritura ───────────────────────────────────────────────
+            self.db.execute(f"""
+                UPDATE ConfiguracionLaboratorio
+                SET MonedaPrincipal = '{moneda}',
+                    SimboloMoneda = '{simbolo}',
+                    DecimalesPrecios = {decimales},
+                    IVAPorDefecto = {iva},
+                    DescuentoMaximo = {desc_max},
+                    IGTFActivo = {igtf_activo},
+                    TasaIGTF = {tasa_igtf},
+                    TipoContribuyente = '{tipo_contrib}'
+            """)
+
+            if tasa_cop_val is not None:
+                try:
+                    self.db.query("SELECT TOP 1 [TasaCOP_USD] FROM ConfiguracionAdministrativa")
+                except Exception:
+                    try:
+                        self.db.execute(
+                            "ALTER TABLE ConfiguracionAdministrativa "
+                            "ADD COLUMN [TasaCOP_USD] DOUBLE DEFAULT 0")
+                    except Exception:
+                        pass
+                self.db.execute(
+                    f"UPDATE ConfiguracionAdministrativa SET TasaCOP_USD = {tasa_cop_val}")
+
+                # Historial de tasas: de aquí la lee el formulario de ingreso
+                # del paciente al calcular el total en pesos
+                try:
+                    from modulos.tasas_cambio import GestorTasasCambio
+                    GestorTasasCambio(self.db).guardar_tasa_manual(
+                        'COP_USD', tasa_cop_val)
+                except Exception as e_tasa:
+                    logging.getLogger(
+                        "angeslab.ventana_configuracion_completa").warning(
+                        "[CONFIG-FIN] No se pudo historiar la tasa COP: %s",
+                        e_tasa)
+
+                # El campo se reescribe con lo entendido: si el usuario quiso
+                # decir otra cosa, lo ve aquí y no en una factura
+                self.entry_tasa_cop.delete(0, tk.END)
+                self.entry_tasa_cop.insert(0, f"{tasa_cop_val:,.2f}")
+
+            # ── Confirmación con lo que quedó guardado ──────────────────
+            resumen = [
+                f"Moneda: {moneda}  ({self.entry_simbolo_fin.get() or '$'})"
+                f"   ·   {decimales} decimales",
+                f"IVA: {iva:g}%   ·   Descuento máximo: {desc_max:g}%",
+                f"IGTF: {'activo' if igtf_activo else 'inactivo'} "
+                f"({tasa_igtf:g}%)   ·   Contribuyente "
+                f"{self.combo_tipo_contrib.get() or 'Ordinario'}",
+            ]
+            if tasa_cop_val is not None:
+                resumen.append(
+                    f"Tasa COP/USD: {tasa_cop_val:,.2f} pesos por 1 dólar")
+
+            messagebox.showinfo("Exito",
+                                "Configuracion financiera guardada.\n\n"
+                                + "\n".join(resumen),
+                                parent=self.win)
+
+            if self.callback_actualizar:
+                try:
+                    self.callback_actualizar()
+                except Exception:
+                    pass
+
+        except Exception as e:
+            messagebox.showerror("Error",
+                                f"Error al guardar configuracion financiera:\n{e}",
+                                parent=self.win)
 
     def _crear_tab_personalizacion(self):
         """Pestaña 4: Personalización"""
@@ -692,7 +1138,7 @@ class VentanaConfiguracionCompleta:
                             "No puede desactivar o cambiar el nivel del ultimo usuario con privilegios.",
                             parent=win)
                         return
-                except:
+                except Exception:
                     pass
 
             try:
@@ -781,9 +1227,9 @@ class VentanaConfiguracionCompleta:
                 # Generar hash seguro
                 pwd_hash, pwd_salt = SeguridadContrasenas.hash_password(nueva)
                 self.db.execute(
-                    f"UPDATE Usuarios SET PasswordHash='{pwd_hash}', "
-                    f"PasswordSalt='{pwd_salt}', Password='' "
-                    f"WHERE UsuarioID={user_id}"
+                    f"UPDATE [Usuarios] SET [PasswordHash]='{pwd_hash}', "
+                    f"[PasswordSalt]='{pwd_salt}', [Password]='' "
+                    f"WHERE [UsuarioID]={user_id}"
                 )
                 messagebox.showinfo("Éxito", "Contraseña actualizada correctamente", parent=win)
                 win.destroy()
@@ -806,46 +1252,21 @@ class VentanaConfiguracionCompleta:
         self._impresoras_disponibles = self._obtener_impresoras()
 
         # ============================================
-        # Sección 1: Impresora para Resultados
+        # Sección 1: Impresoras asignadas a cada función
         # ============================================
-        sec1 = ttk.LabelFrame(frame, text="  🧾 Impresora para Resultados  ", padding=15)
+        # El panel es compartido con Configuración Administrativa
+        # (modulos/panel_impresoras.py): las dos ventanas escriben las mismas
+        # columnas, y tener dos copias distintas hacía que una pisara a la otra
+        # y el documento saliera por la impresora equivocada.
+        sec1 = ttk.LabelFrame(frame, text="  🖨️ Impresoras por Función  ",
+                              padding=15)
         sec1.pack(fill='x', pady=(0, 15))
 
-        ttk.Label(sec1, text="Seleccione la impresora donde se enviarán los resultados de laboratorio:",
-                 font=('Segoe UI', 10)).pack(anchor='w', pady=(0, 10))
-
-        combo_frame1 = ttk.Frame(sec1)
-        combo_frame1.pack(fill='x', pady=5)
-
-        ttk.Label(combo_frame1, text="Impresora:", font=('Segoe UI', 10, 'bold')).pack(side='left', padx=(0, 10))
-        self.combo_impresora_resultados = ttk.Combobox(
-            combo_frame1, values=self._impresoras_disponibles,
-            state='readonly', width=50, font=('Segoe UI', 10))
-        self.combo_impresora_resultados.pack(side='left', fill='x', expand=True, padx=(0, 10))
-
-        ttk.Button(combo_frame1, text="🔄", width=3,
-                  command=self._refrescar_impresoras).pack(side='left')
-
-        # ============================================
-        # Sección 2: Impresora para Informes
-        # ============================================
-        sec2 = ttk.LabelFrame(frame, text="  📄 Impresora para Informes  ", padding=15)
-        sec2.pack(fill='x', pady=(0, 15))
-
-        ttk.Label(sec2, text="Seleccione la impresora donde se enviarán los informes y reportes del laboratorio:",
-                 font=('Segoe UI', 10)).pack(anchor='w', pady=(0, 10))
-
-        combo_frame2 = ttk.Frame(sec2)
-        combo_frame2.pack(fill='x', pady=5)
-
-        ttk.Label(combo_frame2, text="Impresora:", font=('Segoe UI', 10, 'bold')).pack(side='left', padx=(0, 10))
-        self.combo_impresora_informes = ttk.Combobox(
-            combo_frame2, values=self._impresoras_disponibles,
-            state='readonly', width=50, font=('Segoe UI', 10))
-        self.combo_impresora_informes.pack(side='left', fill='x', expand=True, padx=(0, 10))
-
-        ttk.Button(combo_frame2, text="🔄", width=3,
-                  command=self._refrescar_impresoras).pack(side='left')
+        from modulos.panel_impresoras import PanelImpresoras
+        self.panel_impresoras = PanelImpresoras(
+            sec1, self.db, con_boton_guardar=True,
+            al_guardar=self.callback_actualizar)
+        self.panel_impresoras.pack(fill='x')
 
         # ============================================
         # Sección 3: Formato de impresión
@@ -901,7 +1322,7 @@ class VentanaConfiguracionCompleta:
         btn_frame = ttk.Frame(frame)
         btn_frame.pack(fill='x', pady=15)
 
-        ttk.Button(btn_frame, text="💾 Guardar Configuración de Impresión",
+        ttk.Button(btn_frame, text="💾 Guardar Impresoras y Formato",
                   command=self._guardar_config_impresion, width=35).pack(side='left', padx=5)
 
         ttk.Button(btn_frame, text="🖨️ Imprimir Página de Prueba",
@@ -993,40 +1414,12 @@ class VentanaConfiguracionCompleta:
         """Recarga toda la configuración"""
         self._cargar_precios()
         self._cargar_personalizacion()
-
-    def _cargar_precios(self):
-        """Carga los precios de las pruebas, opcionalmente filtrados por área"""
-        # Limpiar árbol
-        for item in self.tree_precios.get_children():
-            self.tree_precios.delete(item)
-
-        # Determinar filtro de área
-        filtro_idx = self.combo_filtro_area.current()
-        where_area = ""
-        if filtro_idx > 0 and filtro_idx <= len(self._areas_precios):
-            area_id = self._areas_precios[filtro_idx - 1][0]
-            where_area = f" WHERE p.AreaID = {area_id}"
-
-        # Cargar pruebas
-        try:
-            pruebas = self.db.query(f"""
-                SELECT p.CodigoPrueba, p.NombrePrueba, p.Precio, a.NombreArea
-                FROM Pruebas p LEFT JOIN Areas a ON p.AreaID = a.AreaID
-                {where_area}
-                ORDER BY p.NombrePrueba
-            """)
-
-            for p in pruebas:
-                precio = p.get('Precio') or 0
-                area = p.get('NombreArea') or 'Sin área'
-                self.tree_precios.insert('', 'end', values=(
-                    p['CodigoPrueba'],
-                    p['NombrePrueba'],
-                    area,
-                    f"${precio:.2f}"
-                ))
-        except Exception as e:
-            messagebox.showerror("Error", f"Error al cargar precios:\n{e}")
+        # Recargar financiera si la pestana existe
+        if hasattr(self, 'var_igtf_activo'):
+            try:
+                self._cargar_config_financiera()
+            except Exception:
+                pass
 
     def _cargar_personalizacion(self):
         """Carga la configuración de personalización"""
@@ -1052,54 +1445,259 @@ class VentanaConfiguracionCompleta:
                         else:
                             entry.delete(0, tk.END)
                             entry.insert(0, valor)
-                    except:
+                    except Exception:
                         pass
-        except:
+        except Exception:
             pass
 
-    def _editar_precio(self):
-        """Edita el precio de una prueba"""
-        sel = self.tree_precios.selection()
-        if not sel:
-            messagebox.showwarning("Aviso", "Seleccione una prueba")
+    # ==================================================================
+    # PRECIOS
+    # ==================================================================
+    @staticmethod
+    def _precio_a_float(valor):
+        """
+        Precio de la BD como float.
+
+        Access devuelve las columnas de moneda como decimal.Decimal, y
+        `Decimal * float` lanza TypeError. Al ocurrir dentro del callback de un
+        botón de Tkinter la excepción no se ve en ningún lado: el botón
+        simplemente no hace nada. Era el motivo de que el descuento «a veces»
+        no se aplicara (solo fallaba si alguna de las pruebas mostradas en la
+        vista previa tenía precio distinto de cero).
+        """
+        try:
+            return float(valor or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    @staticmethod
+    def _parsear_precio(texto):
+        """
+        Convierte lo que escribió el usuario en un número.
+
+        Acepta las dos formas que se usan a diario: «12.50» y «12,50», con o
+        sin símbolo de moneda y con separador de miles. Si el separador lleva
+        exactamente tres dígitos detrás se interpreta como miles («1.500» son
+        mil quinientos, no uno con cinco).
+
+        Returns float, o None si no es un precio válido.
+        """
+        crudo = str(texto or '').strip()
+        for basura in ('$', 'usd', 'USD', ' ', ' '):
+            crudo = crudo.replace(basura, '')
+        if not crudo:
+            return None
+
+        tiene_coma, tiene_punto = ',' in crudo, '.' in crudo
+        if tiene_coma and tiene_punto:
+            # El último separador es el decimal; el otro es de miles
+            decimal = ',' if crudo.rfind(',') > crudo.rfind('.') else '.'
+            miles = '.' if decimal == ',' else ','
+            crudo = crudo.replace(miles, '').replace(decimal, '.')
+        elif tiene_coma or tiene_punto:
+            sep = ',' if tiene_coma else '.'
+            entera, _, decimales = crudo.rpartition(sep)
+            if entera and decimales.isdigit() and len(decimales) == 3:
+                crudo = entera.replace(sep, '') + decimales      # miles
+            else:
+                crudo = crudo.replace(sep, '.')
+
+        try:
+            valor = float(crudo)
+        except ValueError:
+            return None
+        return valor if valor >= 0 else None
+
+    def _restaurar_grab(self):
+        """
+        Devuelve el foco modal a esta ventana.
+
+        Cuando una ventana hija hace grab_set() y luego se destruye, el grab no
+        vuelve solo: la ventana de configuración se queda sin foco modal y cae
+        detrás de la principal, que es lo que parecía «se salió de todo».
+        """
+        try:
+            if self.win.winfo_exists():
+                self.win.grab_set()
+                self.win.lift()
+                self.win.focus_force()
+        except Exception:
+            pass
+
+    def _cargar_precios(self):
+        """Carga las pruebas con su precio, aplicando los filtros en pantalla."""
+        # Conservar dónde estaba el usuario: recargar y perder el sitio en una
+        # lista de 500 pruebas obliga a buscar otra vez a cada edición
+        seleccion = set(self.tree_precios.selection())
+        try:
+            desplazamiento = self.tree_precios.yview()[0]
+        except Exception:
+            desplazamiento = 0.0
+
+        for item in self.tree_precios.get_children():
+            self.tree_precios.delete(item)
+
+        # Filtro de área
+        filtro_idx = self.combo_filtro_area.current()
+        where_area = ""
+        if filtro_idx > 0 and filtro_idx <= len(self._areas_precios):
+            area_id = self._areas_precios[filtro_idx - 1][0]
+            where_area = f" WHERE p.AreaID = {area_id}"
+
+        try:
+            pruebas = self.db.query(f"""
+                SELECT p.PruebaID, p.CodigoPrueba, p.NombrePrueba, p.Precio,
+                       a.NombreArea
+                FROM Pruebas p LEFT JOIN Areas a ON p.AreaID = a.AreaID
+                {where_area}
+                ORDER BY p.NombrePrueba
+            """)
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al cargar precios:\n{e}",
+                                 parent=self.win)
             return
 
-        codigo = self.tree_precios.item(sel[0])['values'][0]
-        nombre = self.tree_precios.item(sel[0])['values'][1]
-        precio_actual = str(self.tree_precios.item(sel[0])['values'][3]).replace('$', '')
+        busqueda = (self.var_buscar_precio.get() or '').strip().lower()
+        solo_sin_precio = bool(self.var_solo_sin_precio.get())
+        total_sin_precio = 0
+        mostradas = 0
 
-        # Ventana para editar precio
+        for p in pruebas:
+            precio = self._precio_a_float(p.get('Precio'))
+            if not precio:
+                total_sin_precio += 1
+            if solo_sin_precio and precio:
+                continue
+
+            nombre = p.get('NombrePrueba') or ''
+            codigo = p.get('CodigoPrueba') or ''
+            if busqueda and busqueda not in nombre.lower() \
+                    and busqueda not in str(codigo).lower():
+                continue
+
+            # El identificador de la fila es el PruebaID: actualizar por código
+            # fallaba en silencio con los códigos vacíos o repetidos
+            iid = f"p{p['PruebaID']}"
+            self.tree_precios.insert(
+                '', 'end', iid=iid,
+                values=(codigo or '—', nombre,
+                        p.get('NombreArea') or 'Sin área', f"${precio:.2f}"),
+                tags=('sin_precio',) if not precio else ())
+            mostradas += 1
+
+        resumen = f"{mostradas} prueba(s) en la lista"
+        if total_sin_precio:
+            resumen += f"  ·  {total_sin_precio} sin precio asignado"
+        self.lbl_resumen_precios.config(text=resumen)
+
+        # Restaurar selección y posición
+        vivos = [i for i in seleccion if self.tree_precios.exists(i)]
+        if vivos:
+            self.tree_precios.selection_set(vivos)
+            self.tree_precios.focus(vivos[0])
+        if desplazamiento:
+            try:
+                self.tree_precios.yview_moveto(desplazamiento)
+            except Exception:
+                pass
+
+    def _prueba_id_de_fila(self, iid):
+        """PruebaID a partir del identificador de la fila del árbol."""
+        try:
+            return int(str(iid).lstrip('p'))
+        except Exception:
+            return None
+
+    def _editar_precio(self):
+        """Edita el precio de la prueba seleccionada."""
+        sel = self.tree_precios.selection()
+        if not sel:
+            messagebox.showwarning("Aviso", "Seleccione una prueba",
+                                   parent=self.win)
+            return
+
+        fila = sel[0]
+        prueba_id = self._prueba_id_de_fila(fila)
+        if prueba_id is None:
+            messagebox.showerror("Error", "No se pudo identificar la prueba.",
+                                 parent=self.win)
+            return
+
+        valores = self.tree_precios.item(fila)['values']
+        nombre = valores[1]
+        precio_actual = str(valores[3]).replace('$', '')
+
         win = tk.Toplevel(self.win)
         win.title(f"Editar Precio - {nombre}")
-        win.geometry("400x200")
+        win.geometry("420x230")
+        win.resizable(False, False)
+        win.transient(self.win)
         win.grab_set()
-        win.focus_set()
+        # Sin esto la ventana de configuración se queda sin foco modal al
+        # cerrar el editor y parece que el sistema se cerró
+        win.bind('<Destroy>', lambda e: self._restaurar_grab(), add='+')
 
-        ttk.Label(win, text=f"Prueba: {nombre}", font=('Segoe UI', 11, 'bold')).pack(pady=10)
-        ttk.Label(win, text="Nuevo precio:").pack(pady=5)
+        cuerpo = ttk.Frame(win, padding=16)
+        cuerpo.pack(fill='both', expand=True)
 
-        entry_precio = ttk.Entry(win, width=20, font=('Segoe UI', 12))
-        entry_precio.insert(0, precio_actual)
-        entry_precio.pack(pady=5)
+        ttk.Label(cuerpo, text=nombre, font=('Segoe UI', 11, 'bold'),
+                  wraplength=380, justify='left').pack(anchor='w')
+        ttk.Label(cuerpo, text=f"Precio actual: ${self._parsear_precio(precio_actual) or 0:.2f}",
+                  foreground='#64748b').pack(anchor='w', pady=(2, 12))
+
+        ttk.Label(cuerpo, text="Nuevo precio (USD):",
+                  font=('Segoe UI', 10, 'bold')).pack(anchor='w')
+
+        entry_precio = ttk.Entry(cuerpo, width=18, font=('Segoe UI', 12))
+        entry_precio.insert(0, precio_actual.strip())
+        entry_precio.pack(anchor='w', pady=(4, 2))
+        entry_precio.select_range(0, tk.END)
         entry_precio.focus()
 
-        def guardar():
-            try:
-                nuevo_precio = float(entry_precio.get().strip())
-                self.db.execute(f"""
-                    UPDATE Pruebas
-                    SET Precio = {nuevo_precio}
-                    WHERE CodigoPrueba = '{codigo}'
-                """)
-                messagebox.showinfo("Éxito", "Precio actualizado correctamente")
-                win.destroy()
-                self._cargar_precios()
-            except ValueError:
-                messagebox.showerror("Error", "Ingrese un precio válido")
-            except Exception as e:
-                messagebox.showerror("Error", f"Error al guardar:\n{e}")
+        lbl_error = ttk.Label(cuerpo, text="", foreground='#dc2626')
+        lbl_error.pack(anchor='w')
 
-        ttk.Button(win, text="💾 Guardar", command=guardar).pack(pady=20)
+        ttk.Label(cuerpo, text="Puede escribirlo con coma o con punto: 12,50 o 12.50",
+                  font=('Segoe UI', 8), foreground='#94a3b8').pack(anchor='w',
+                                                                   pady=(2, 0))
+
+        def guardar(event=None):
+            nuevo_precio = self._parsear_precio(entry_precio.get())
+            if nuevo_precio is None:
+                lbl_error.config(text="Escriba un precio válido (no negativo).")
+                entry_precio.focus()
+                return
+            try:
+                resultado = self.db.execute(
+                    f"UPDATE Pruebas SET Precio = {nuevo_precio:.2f} "
+                    f"WHERE PruebaID = {prueba_id}")
+                # ADODB devuelve (recordset, filas_afectadas): si no cambió
+                # ninguna fila hay que decirlo, no cantar éxito
+                afectadas = resultado[1] if isinstance(resultado, tuple) else 1
+                if not afectadas:
+                    lbl_error.config(text="No se actualizó ninguna prueba.")
+                    return
+            except Exception as e:
+                messagebox.showerror("Error", f"Error al guardar:\n{e}",
+                                     parent=win)
+                return
+
+            win.destroy()
+            self._cargar_precios()
+            # Dejar la prueba editada seleccionada y a la vista
+            if self.tree_precios.exists(fila):
+                self.tree_precios.selection_set(fila)
+                self.tree_precios.focus(fila)
+                self.tree_precios.see(fila)
+
+        botones = ttk.Frame(cuerpo)
+        botones.pack(anchor='w', pady=(14, 0))
+        ttk.Button(botones, text="💾 Guardar", command=guardar).pack(side='left')
+        ttk.Button(botones, text="Cancelar",
+                   command=win.destroy).pack(side='left', padx=6)
+
+        entry_precio.bind('<Return>', guardar)
+        win.bind('<Escape>', lambda e: win.destroy())
 
     def _aplicar_porcentaje_precios(self, tipo):
         """
@@ -1111,27 +1709,33 @@ class VentanaConfiguracionCompleta:
         # Determinar pruebas afectadas
         seleccion = self.tree_precios.selection()
         if seleccion:
-            # Solo las seleccionadas
-            codigos = [self.tree_precios.item(item)['values'][0] for item in seleccion]
+            filas = list(seleccion)
             modo = "seleccionadas"
         else:
-            # Todas las visibles
-            todos = self.tree_precios.get_children()
-            if not todos:
-                messagebox.showwarning("Aviso", "No hay pruebas en la lista.")
+            filas = list(self.tree_precios.get_children())
+            if not filas:
+                messagebox.showwarning("Aviso", "No hay pruebas en la lista.",
+                                       parent=self.win)
                 return
-            codigos = [self.tree_precios.item(item)['values'][0] for item in todos]
-            modo = "visibles"
+            modo = "de la lista visible"
+
+        ids = [i for i in (self._prueba_id_de_fila(f) for f in filas)
+               if i is not None]
+        if not ids:
+            messagebox.showwarning("Aviso", "No se pudo identificar las pruebas.",
+                                   parent=self.win)
+            return
 
         # Pedir porcentaje
         etiqueta = "incremento" if tipo == 'incremento' else "descuento"
         porcentaje = simpledialog.askfloat(
             f"Aplicar {etiqueta.capitalize()}",
             f"Ingrese el porcentaje de {etiqueta} a aplicar\n"
-            f"({len(codigos)} pruebas {modo}):",
+            f"({len(ids)} pruebas {modo}):",
             minvalue=0.01, maxvalue=100.0,
             parent=self.win
         )
+        self._restaurar_grab()
 
         if porcentaje is None:
             return
@@ -1142,57 +1746,87 @@ class VentanaConfiguracionCompleta:
         else:
             factor = 1 - (porcentaje / 100)
 
-        # Obtener precios actuales para preview
-        codigos_str = ", ".join(f"'{str(c).replace(chr(39), chr(39)+chr(39))}'" for c in codigos)
+        lista_ids = ", ".join(str(i) for i in ids)
         try:
             pruebas = self.db.query(f"""
-                SELECT CodigoPrueba, NombrePrueba, Precio
+                SELECT PruebaID, NombrePrueba, Precio
                 FROM Pruebas
-                WHERE CodigoPrueba IN ({codigos_str})
+                WHERE PruebaID IN ({lista_ids})
             """)
         except Exception as e:
-            messagebox.showerror("Error", f"Error al consultar pruebas:\n{e}")
+            messagebox.showerror("Error", f"Error al consultar pruebas:\n{e}",
+                                 parent=self.win)
             return
 
         if not pruebas:
-            messagebox.showwarning("Aviso", "No se encontraron pruebas para actualizar.")
+            messagebox.showwarning("Aviso", "No se encontraron pruebas para actualizar.",
+                                   parent=self.win)
+            return
+
+        # Un porcentaje sobre 0 sigue siendo 0: hay que avisarlo antes, no
+        # dejar que el usuario crea que el descuento «no aplicó»
+        con_precio = [p for p in pruebas
+                      if self._precio_a_float(p.get('Precio')) > 0]
+        sin_precio = len(pruebas) - len(con_precio)
+        if not con_precio:
+            messagebox.showwarning(
+                "Aviso",
+                f"Las {len(pruebas)} pruebas seleccionadas están en $0.00.\n\n"
+                f"Un {etiqueta} porcentual sobre cero sigue siendo cero: "
+                "asígneles primero un precio.", parent=self.win)
             return
 
         # Preparar preview (mostrar primeras 5)
         preview_lines = []
-        for p in pruebas[:5]:
-            precio_ant = p.get('Precio') or 0
+        for p in con_precio[:5]:
+            precio_ant = self._precio_a_float(p.get('Precio'))
             precio_nuevo = round(precio_ant * factor, 2)
-            preview_lines.append(f"  {p['NombrePrueba'][:30]}: ${precio_ant:.2f} -> ${precio_nuevo:.2f}")
-        if len(pruebas) > 5:
-            preview_lines.append(f"  ... y {len(pruebas) - 5} pruebas más")
+            preview_lines.append(
+                f"  {str(p['NombrePrueba'])[:30]}: ${precio_ant:.2f} -> ${precio_nuevo:.2f}")
+        if len(con_precio) > 5:
+            preview_lines.append(f"  ... y {len(con_precio) - 5} pruebas más")
 
         preview = "\n".join(preview_lines)
         signo = "+" if tipo == 'incremento' else "-"
+        nota_sin_precio = (
+            f"\n\n{sin_precio} prueba(s) están en $0.00 y no cambiarán."
+            if sin_precio else "")
 
         confirmar = messagebox.askyesno(
             f"Confirmar {etiqueta.capitalize()}",
-            f"Se aplicará {signo}{porcentaje:.2f}% a {len(pruebas)} pruebas:\n\n"
-            f"{preview}\n\n"
-            f"¿Desea continuar?"
+            f"Se aplicará {signo}{porcentaje:.2f}% a {len(con_precio)} pruebas:\n\n"
+            f"{preview}{nota_sin_precio}\n\n"
+            f"¿Desea continuar?", parent=self.win
         )
 
         if not confirmar:
             return
 
-        # Ejecutar UPDATE
+        # Ejecutar UPDATE solo sobre las que tienen precio
+        ids_con_precio = ", ".join(str(p['PruebaID']) for p in con_precio)
         try:
-            self.db.execute(f"""
+            resultado = self.db.execute(f"""
                 UPDATE Pruebas
                 SET Precio = ROUND(Precio * {factor}, 2)
-                WHERE CodigoPrueba IN ({codigos_str})
+                WHERE PruebaID IN ({ids_con_precio})
             """)
-            messagebox.showinfo("Éxito",
-                              f"{etiqueta.capitalize()} de {signo}{porcentaje:.2f}% aplicado "
-                              f"a {len(pruebas)} pruebas.")
+            afectadas = (resultado[1] if isinstance(resultado, tuple)
+                         else len(con_precio))
             self._cargar_precios()
+            if afectadas:
+                messagebox.showinfo(
+                    "Éxito",
+                    f"{etiqueta.capitalize()} de {signo}{porcentaje:.2f}% aplicado "
+                    f"a {afectadas} prueba(s).{nota_sin_precio}",
+                    parent=self.win)
+            else:
+                messagebox.showwarning(
+                    "Sin cambios",
+                    "No se actualizó ninguna prueba. Verifique la selección.",
+                    parent=self.win)
         except Exception as e:
-            messagebox.showerror("Error", f"Error al aplicar {etiqueta}:\n{e}")
+            messagebox.showerror("Error", f"Error al aplicar {etiqueta}:\n{e}",
+                                 parent=self.win)
 
     def _verificar_clave_admin(self, titulo="Acceso Administrador"):
         """Verifica que el usuario logueado sea Administrador o Desarrollador."""
@@ -1305,13 +1939,31 @@ class VentanaConfiguracionCompleta:
 
         # Verificar contraseña actual
         try:
+            from modulos.seguridad_db import SeguridadContrasenas
+
             user_id = self.user.get('UsuarioID')
             user_actual = self.db.query_one(f"""
-                SELECT * FROM Usuarios
-                WHERE UsuarioID = {user_id} AND Password = '{pass_actual.replace("'", "''")}'
+                SELECT * FROM [Usuarios]
+                WHERE [UsuarioID] = {user_id}
             """)
 
             if not user_actual:
+                messagebox.showerror("Error", "Usuario no encontrado")
+                return
+
+            # Verificar contra hash o plain text (retrocompat)
+            hash_guardado = user_actual.get('PasswordHash', '') or ''
+            salt_guardado = user_actual.get('PasswordSalt', '') or ''
+            pass_plain = user_actual.get('Password', '') or ''
+
+            password_ok = False
+            if hash_guardado and salt_guardado:
+                password_ok = SeguridadContrasenas.verificar_password(
+                    pass_actual, hash_guardado, salt_guardado)
+            elif pass_plain:
+                password_ok = (pass_actual == pass_plain)
+
+            if not password_ok:
                 messagebox.showerror("Error", "La contraseña actual es incorrecta")
                 return
 
@@ -1319,12 +1971,15 @@ class VentanaConfiguracionCompleta:
             if not messagebox.askyesno("Confirmar", "¿Está seguro de cambiar la contraseña?"):
                 return
 
-            # Actualizar contraseña
-            self.db.execute(f"""
-                UPDATE Usuarios
-                SET Password = '{pass_nueva.replace("'", "''")}'
-                WHERE UsuarioID = {user_id}
-            """)
+            # Hash nueva contraseña con PBKDF2
+            pwd_hash, pwd_salt = SeguridadContrasenas.hash_password(pass_nueva)
+
+            # Actualizar contraseña (hash + limpiar plain text)
+            self.db.execute(
+                f"UPDATE [Usuarios] SET [PasswordHash]='{pwd_hash}', "
+                f"[PasswordSalt]='{pwd_salt}', [Password]='' "
+                f"WHERE [UsuarioID]={user_id}"
+            )
 
             messagebox.showinfo("Éxito",
                               "Contraseña actualizada correctamente.\n"
@@ -1347,9 +2002,23 @@ class VentanaConfiguracionCompleta:
             return
         try:
             from modulos.ventana_config_administrativa import abrir_ventana_config_administrativa
-            abrir_ventana_config_administrativa(self.win, self.db, self.callback_actualizar)
+            # Liberar grab de esta ventana para que la hija pueda tomar el suyo
+            self.win.grab_release()
+            v = abrir_ventana_config_administrativa(self.win, self.db, self.callback_actualizar)
+            # Restaurar grab de esta ventana cuando la hija se cierre
+            def _restaurar_grab(event=None):
+                try:
+                    if self.win.winfo_exists():
+                        self.win.grab_set()
+                except Exception:
+                    pass
+            v.win.bind("<Destroy>", _restaurar_grab, add="+")
         except Exception as e:
             messagebox.showerror("Error", f"Error al abrir configuración administrativa:\n{e}")
+            try:
+                self.win.grab_set()
+            except Exception:
+                pass
 
     def _resetear_bd(self, tipo):
         """
@@ -1452,7 +2121,7 @@ class VentanaConfiguracionCompleta:
                 for query in info['queries']:
                     try:
                         self.db.execute(query)
-                    except:
+                    except Exception:
                         pass  # Algunas pueden fallar si no hay datos
 
             messagebox.showinfo("Completado", info['exito'])
@@ -1563,193 +2232,117 @@ class VentanaConfiguracionCompleta:
             pass
 
     def _refrescar_impresoras(self):
-        """Refresca la lista de impresoras disponibles."""
+        """Vuelve a leer las impresoras del sistema."""
         self._impresoras_disponibles = self._obtener_impresoras()
-        self.combo_impresora_resultados['values'] = self._impresoras_disponibles
-        self.combo_impresora_informes['values'] = self._impresoras_disponibles
         self._cargar_info_impresoras()
+        self.panel_impresoras.refrescar()
         messagebox.showinfo("Impresoras", "Lista de impresoras actualizada.")
 
     def _cargar_config_impresion(self):
-        """Carga la configuración de impresión guardada en la BD."""
+        """Carga el formato de página guardado."""
         try:
             config = self.db.query_one("SELECT * FROM ConfiguracionLaboratorio")
             if config:
-                # Impresora de resultados
-                imp_resultados = config.get('ImpresoraResultados') or ''
-                if imp_resultados and imp_resultados in self._impresoras_disponibles:
-                    self.combo_impresora_resultados.set(imp_resultados)
-                else:
-                    # Usar predeterminada
-                    pred = self._obtener_impresora_predeterminada()
-                    if pred in self._impresoras_disponibles:
-                        self.combo_impresora_resultados.set(pred)
-
-                # Impresora de informes
-                imp_informes = config.get('ImpresoraInformes') or ''
-                if imp_informes and imp_informes in self._impresoras_disponibles:
-                    self.combo_impresora_informes.set(imp_informes)
-                else:
-                    pred = self._obtener_impresora_predeterminada()
-                    if pred in self._impresoras_disponibles:
-                        self.combo_impresora_informes.set(pred)
-
-                # Formato de impresión
                 formato = config.get('FormatoImpresion') or 'Completa'
                 self.var_formato_impresion.set(formato)
         except Exception:
-            # Si no existen los campos, usar predeterminada
-            pred = self._obtener_impresora_predeterminada()
-            if pred in self._impresoras_disponibles:
-                self.combo_impresora_resultados.set(pred)
-                self.combo_impresora_informes.set(pred)
+            pass
 
     def _guardar_config_impresion(self):
-        """Guarda la configuración de impresión en la BD."""
-        imp_resultados = self.combo_impresora_resultados.get()
-        imp_informes = self.combo_impresora_informes.get()
+        """
+        Guarda toda la pestaña: formato de página y asignación de impresoras.
+
+        Antes este botón solo guardaba el formato y aun así avisaba «Éxito»,
+        así que quien asignaba las impresoras en el panel de arriba y pulsaba
+        aquí se quedaba sin guardarlas: los documentos seguían saliendo por
+        donde no era o se abrían en el visor de PDF. El botón que dice guardar
+        la configuración de impresión tiene que guardarla entera.
+        """
         formato = self.var_formato_impresion.get()
-
-        if not imp_resultados or imp_resultados == '(No se detectaron impresoras)':
-            messagebox.showwarning("Aviso", "Seleccione una impresora para resultados.")
-            return
-
-        if not imp_informes or imp_informes == '(No se detectaron impresoras)':
-            messagebox.showwarning("Aviso", "Seleccione una impresora para informes.")
-            return
-
         try:
-            # Intentar agregar columnas si no existen
-            self._asegurar_campos_impresora()
-
-            imp_resultados_esc = imp_resultados.replace("'", "''")
-            imp_informes_esc = imp_informes.replace("'", "''")
-
             self.db.execute(f"""
                 UPDATE ConfiguracionLaboratorio
-                SET ImpresoraResultados = '{imp_resultados_esc}',
-                    ImpresoraInformes = '{imp_informes_esc}',
-                    FormatoImpresion = '{formato}'
+                SET FormatoImpresion = '{formato}'
             """)
-
-            messagebox.showinfo("Éxito",
-                              f"Configuración de impresión guardada:\n\n"
-                              f"Resultados: {imp_resultados}\n"
-                              f"Informes: {imp_informes}\n"
-                              f"Formato: Hoja {formato}")
-
-            if self.callback_actualizar:
-                self.callback_actualizar()
-
         except Exception as e:
-            messagebox.showerror("Error", f"Error al guardar configuración de impresión:\n{e}")
+            messagebox.showerror(
+                "Error",
+                f"Error al guardar configuración de impresión:\n{e}")
+            return
 
-    def _asegurar_campos_impresora(self):
-        """Agrega los campos de impresora a la BD si no existen."""
-        campos = [
-            ("ImpresoraResultados", "TEXT(255)"),
-            ("ImpresoraInformes", "TEXT(255)")
-        ]
-        for campo, tipo in campos:
-            try:
-                self.db.execute(f"""
-                    ALTER TABLE ConfiguracionLaboratorio
-                    ADD COLUMN {campo} {tipo}
-                """)
-            except Exception:
-                pass  # Ya existe
+        if not self.panel_impresoras.guardar():
+            messagebox.showerror(
+                "Error",
+                "Se guardó el formato de página, pero no se pudieron guardar "
+                "las impresoras por función.\n\nRevise la carpeta logs/ e "
+                "inténtelo de nuevo.")
+            return
+
+        from modulos.impresoras import ORDEN_ROLES
+        asignaciones = self.panel_impresoras.recolectar()
+        asignadas = sum(1 for d in asignaciones.values() if d['impresora'])
+        messagebox.showinfo(
+            "Éxito",
+            f"Configuración de impresión guardada.\n\n"
+            f"Formato: Hoja {formato}\n"
+            f"Funciones con impresora asignada: {asignadas} de "
+            f"{len(ORDEN_ROLES)}")
+        if self.callback_actualizar:
+            self.callback_actualizar()
 
     def _imprimir_pagina_prueba(self):
-        """Imprime una página de prueba en la impresora seleccionada."""
-        impresora = self.combo_impresora_resultados.get()
-        if not impresora or impresora == '(No se detectaron impresoras)':
-            messagebox.showwarning("Aviso", "Seleccione una impresora primero.")
+        """Imprime una página de prueba por la impresora de resultados."""
+        from modulos.impresoras import (GestorImpresoras, generar_pagina_prueba,
+                                        enviar_documento, diagnostico_motor)
+
+        gestor = GestorImpresoras(self.db)
+        impresora = gestor.impresora_de('resultados')
+        if not impresora:
+            messagebox.showwarning(
+                "Página de prueba",
+                "La función «Resultados e informes» no tiene impresora "
+                "asignada.\n\nAsígnela en Configuración Administrativa → "
+                "pestaña «Impresión».")
             return
 
-        if not messagebox.askyesno("Página de Prueba",
-                                    f"Se enviará una página de prueba a:\n\n{impresora}\n\n¿Desea continuar?"):
+        faltan = diagnostico_motor()
+        if faltan:
+            messagebox.showerror(
+                "Página de prueba",
+                "Este equipo no puede imprimir directamente.\n\n"
+                f"Falta instalar: {', '.join(faltan)}\n\n"
+                "Ejecute:  pip install -r requirements.txt")
             return
 
-        try:
-            import win32print
-            import win32ui
+        if not messagebox.askyesno(
+                "Página de prueba",
+                f"Se enviará una página de prueba a:\n\n{impresora}\n\n"
+                "¿Desea continuar?"):
+            return
 
-            # Crear documento de prueba
-            hprinter = win32print.OpenPrinter(impresora)
-            try:
-                pdc = win32ui.CreateDC()
-                pdc.CreatePrinterDC(impresora)
-                pdc.StartDoc("ANgesLAB - Página de Prueba")
-                pdc.StartPage()
+        ruta = generar_pagina_prueba('resultados', impresora)
+        if not ruta:
+            messagebox.showerror("Página de prueba",
+                                 "No se pudo generar la página de prueba.")
+            return
 
-                # Obtener dimensiones de la página
-                page_width = pdc.GetDeviceCaps(110)   # HORZRES
-                page_height = pdc.GetDeviceCaps(111)   # VERTRES
-
-                # Dibujar contenido de prueba
-                y = 100
-
-                # Título
-                font_title = win32ui.CreateFont({
-                    'name': 'Arial',
-                    'height': 60,
-                    'weight': 700,
-                })
-                pdc.SelectObject(font_title)
-                pdc.TextOut(100, y, "ANgesLAB - Página de Prueba")
-                y += 100
-
-                # Línea separadora
-                pdc.MoveTo(100, y)
-                pdc.LineTo(page_width - 100, y)
-                y += 50
-
-                # Información
-                font_normal = win32ui.CreateFont({
-                    'name': 'Arial',
-                    'height': 40,
-                    'weight': 400,
-                })
-                pdc.SelectObject(font_normal)
-
-                from datetime import datetime as dt
-                lineas = [
-                    f"Impresora: {impresora}",
-                    f"Fecha: {dt.now().strftime('%d/%m/%Y %H:%M:%S')}",
-                    "",
-                    "Si puede leer este texto, la impresora está",
-                    "configurada correctamente para ANgesLAB.",
-                    "",
-                    "Sistema de Gestión de Laboratorio Clínico",
-                    "ANgesLAB v1.0.0",
-                ]
-
-                for linea in lineas:
-                    pdc.TextOut(100, y, linea)
-                    y += 60
-
-                # Línea final
-                y += 40
-                pdc.MoveTo(100, y)
-                pdc.LineTo(page_width - 100, y)
-
-                pdc.EndPage()
-                pdc.EndDoc()
-                pdc.DeleteDC()
-
-                messagebox.showinfo("Éxito",
-                                  f"Página de prueba enviada a:\n{impresora}")
-
-            finally:
-                win32print.ClosePrinter(hprinter)
-
-        except ImportError:
-            messagebox.showerror("Error",
-                               "No se pudo imprimir la página de prueba.\n\n"
-                               "Se requiere la librería pywin32.\n"
-                               "Ejecute: pip install pywin32")
-        except Exception as e:
-            messagebox.showerror("Error", f"Error al imprimir página de prueba:\n{e}")
+        opciones = dict(gestor.opciones_de('resultados'))
+        opciones['copias'] = 1
+        resultado = enviar_documento(ruta, impresora, 1, opciones,
+                                     'ANgesLAB - Página de prueba')
+        self.panel_impresoras.refrescar()
+        if resultado['ok']:
+            detalle = (f"\nTrabajo n° {resultado['trabajo']}"
+                       if resultado.get('trabajo') else '')
+            messagebox.showinfo(
+                "Página de prueba",
+                f"Enviada a {impresora}.{detalle}\n\n"
+                "Si no sale el papel, revise la cola de impresión de Windows.")
+        else:
+            messagebox.showerror(
+                "Página de prueba",
+                f"No se pudo imprimir en {impresora}.\n\n"
+                f"Motivo: {resultado.get('error') or 'desconocido'}")
 
 
     # ================================================================
@@ -1855,10 +2448,64 @@ class VentanaConfiguracionCompleta:
         # Cargar datos iniciales
         self._cargar_bioanalistas()
 
+    def _asegurar_tabla_bioanalistas(self):
+        """Asegura que la tabla Bioanalistas exista con todas las columnas necesarias.
+        Retorna True si la tabla está lista, False si no se pudo preparar."""
+        # Verificar si la tabla existe intentando una consulta simple
+        try:
+            self.db.query_one("SELECT TOP 1 [BioanalistaID] FROM [Bioanalistas]")
+            # Tabla existe, verificar columnas necesarias
+            columnas_requeridas = {
+                'NombreCompleto': 'TEXT(200)',
+                'Cedula': 'TEXT(20)',
+                'NumeroRegistro': 'TEXT(50)',
+                'AreaID': 'LONG',
+                'RutaFirma': 'TEXT(255)',
+                'Activo': 'BIT',
+            }
+            for col, tipo in columnas_requeridas.items():
+                try:
+                    self.db.query_one(f"SELECT TOP 1 [{col}] FROM [Bioanalistas]")
+                except Exception:
+                    try:
+                        self.db.execute(f"ALTER TABLE [Bioanalistas] ADD COLUMN [{col}] {tipo}")
+                    except Exception:
+                        pass
+            return True
+        except Exception:
+            return self._crear_tabla_bioanalistas()
+
+    def _crear_tabla_bioanalistas(self):
+        """Crea la tabla Bioanalistas. Retorna True si tuvo éxito."""
+        try:
+            self.db.execute(
+                "CREATE TABLE [Bioanalistas] ("
+                "[BioanalistaID] COUNTER PRIMARY KEY, "
+                "[NombreCompleto] TEXT(200), "
+                "[Cedula] TEXT(20), "
+                "[NumeroRegistro] TEXT(50), "
+                "[AreaID] LONG, "
+                "[RutaFirma] TEXT(255), "
+                "[Activo] BIT)"
+            )
+            return True
+        except Exception as e:
+            logging.getLogger("angeslab.ventana_configuracion").warning("No se pudo crear tabla Bioanalistas: %s", e)
+            return False
+
     def _cargar_bioanalistas(self):
         """Carga los bioanalistas desde la BD al Treeview."""
         for item in self.tree_bioanalistas.get_children():
             self.tree_bioanalistas.delete(item)
+
+        # Asegurar que la tabla existe con todas las columnas
+        tabla_ok = self._asegurar_tabla_bioanalistas()
+
+        if not tabla_ok:
+            self.tree_bioanalistas.insert('', 'end', iid='placeholder', values=(
+                '', 'Tabla Bioanalistas no disponible. Contacte soporte técnico.', '', '', '', '', ''
+            ))
+            return
 
         try:
             bioanalistas = self.db.query(
@@ -1868,21 +2515,7 @@ class VentanaConfiguracionCompleta:
                 "ORDER BY b.NombreCompleto"
             )
         except Exception:
-            # Si la tabla no existe aún, intentar crearla
-            try:
-                self.db.execute(
-                    "CREATE TABLE Bioanalistas ("
-                    "BioanalistaID AUTOINCREMENT PRIMARY KEY, "
-                    "NombreCompleto TEXT(200), "
-                    "Cedula TEXT(20), "
-                    "NumeroRegistro TEXT(50), "
-                    "AreaID LONG, "
-                    "RutaFirma TEXT(500), "
-                    "Activo BIT DEFAULT TRUE)"
-                )
-                bioanalistas = []
-            except Exception:
-                bioanalistas = []
+            bioanalistas = []
 
         if not bioanalistas:
             self.tree_bioanalistas.insert('', 'end', iid='placeholder', values=(
@@ -2155,20 +2788,40 @@ class VentanaConfiguracionCompleta:
                                           f"No se pudo copiar la firma:\n{e}\n\nEl bioanalista se guardará sin firma.",
                                           parent=win)
 
+            datos_bio = {
+                'NombreCompleto': nombre,
+                'Cedula': cedula,
+                'NumeroRegistro': registro,
+                'AreaID': area_id,
+                'RutaFirma': ruta_firma_rel,
+                'Activo': activo
+            }
             try:
-                self.db.insert('Bioanalistas', {
-                    'NombreCompleto': nombre,
-                    'Cedula': cedula,
-                    'NumeroRegistro': registro,
-                    'AreaID': area_id,
-                    'RutaFirma': ruta_firma_rel,
-                    'Activo': activo
-                })
+                self.db.insert('Bioanalistas', datos_bio)
                 messagebox.showinfo("Éxito", f"Bioanalista '{nombre}' registrado correctamente.", parent=win)
                 win.destroy()
                 self._cargar_bioanalistas()
             except Exception as e:
-                messagebox.showerror("Error", f"No se pudo guardar el bioanalista:\n{e}", parent=win)
+                # Si la tabla no existe, intentar crearla y reintentar
+                if 'no se encontr' in str(e).lower() or 'not found' in str(e).lower() or 'cannot find' in str(e).lower():
+                    if self._crear_tabla_bioanalistas():
+                        try:
+                            self.db.insert('Bioanalistas', datos_bio)
+                            messagebox.showinfo("Éxito", f"Bioanalista '{nombre}' registrado correctamente.", parent=win)
+                            win.destroy()
+                            self._cargar_bioanalistas()
+                            return
+                        except Exception as e2:
+                            messagebox.showerror("Error", f"No se pudo guardar el bioanalista:\n{e2}", parent=win)
+                            return
+                    else:
+                        messagebox.showerror("Error",
+                            f"No se pudo crear la tabla Bioanalistas en la base de datos.\n\n"
+                            f"Error original: {e}\n\n"
+                            f"Verifique que el archivo .accdb no esté abierto en Access "
+                            f"y que tenga permisos de escritura.", parent=win)
+                else:
+                    messagebox.showerror("Error", f"No se pudo guardar el bioanalista:\n{e}", parent=win)
 
         ttk.Button(btn_frame, text="💾 Guardar", command=guardar, width=20).pack(side='left', padx=5)
         ttk.Button(btn_frame, text="Cancelar", command=win.destroy, width=15).pack(side='right', padx=5)

@@ -3,7 +3,7 @@
 gtt_reporte.py - Generador de reporte PDF para la Prueba de Tolerancia a la Glucosa
 ======================================================================================
 Genera un informe PDF en hoja completa (letter) con:
-  - Encabezado del laboratorio y datos del paciente
+  - Encabezado del laboratorio y datos del paciente (mismo formato que resultados)
   - Tabla de resultados por tiempo (Basal, 30min, 1h, 2h, 3h, 4h)
   - Grafica de la curva de glucemia generada con matplotlib (embebida en reportlab)
   - Zona de interpretacion y observaciones
@@ -80,14 +80,21 @@ LIMITES_ALTO = {
 }
 LIMITES_BAJO = {'GTT001': 70.0}
 
-COLOR_AZUL_OSCURO = colors.HexColor('#1a237e')
-COLOR_AZUL_MEDIO  = colors.HexColor('#1565c0')
-COLOR_HEADER_BG   = colors.HexColor('#e3f2fd')
-COLOR_ROJO        = colors.HexColor('#c62828')
-COLOR_NARANJA     = colors.HexColor('#e65100')
-COLOR_AZUL_BAJO   = colors.HexColor('#1565c0')
-COLOR_VERDE       = colors.HexColor('#2e7d32')
-COLOR_GRIS_CLARO  = colors.HexColor('#f5f5f5')
+# Colores unificados con el reporte general de resultados
+COLOR_HEADER = colors.HexColor('#1565c0')
+COLOR_HEADER_DARK = colors.HexColor('#0d47a1')
+COLOR_FILA_ALT = colors.HexColor('#fafafa')
+COLOR_ACCENT = colors.HexColor('#1565c0')
+COLOR_ROJO = colors.HexColor('#c62828')
+COLOR_NARANJA = colors.HexColor('#e65100')
+COLOR_AZUL_BAJO = colors.HexColor('#1565c0')
+COLOR_VERDE = colors.HexColor('#2e7d32')
+
+# Alias legacy (por compatibilidad)
+COLOR_AZUL_OSCURO = COLOR_HEADER_DARK
+COLOR_AZUL_MEDIO = COLOR_HEADER
+COLOR_HEADER_BG = colors.HexColor('#e3f2fd')
+COLOR_GRIS_CLARO = COLOR_FILA_ALT
 
 
 # ===========================================================================
@@ -153,19 +160,8 @@ def generar_pdf_gtt(db, detalle_id, filename, config_lab=None,
                     ruta_logo=None, bioanalista=None,
                     incluir_grafica=True):
     """
-    Genera el PDF del resultado GTT.
-
-    Args:
-        db: objeto Database
-        detalle_id: ID del detalle de la solicitud
-        filename: ruta del archivo PDF de salida
-        config_lab: dict de configuracion del laboratorio (o None)
-        ruta_logo: ruta al logo (o None)
-        bioanalista: dict del bioanalista responsable (o None)
-        incluir_grafica: bool - si True, incluye la grafica y usa pagina completa
-
-    Returns:
-        True si exito, False si error
+    Genera el PDF del resultado GTT con el MISMO formato visual
+    del reporte general de resultados de ANgesLAB.
     """
     if not REPORTLAB_OK:
         raise ImportError("reportlab no esta instalado. Ejecute: pip install reportlab")
@@ -227,7 +223,7 @@ def generar_pdf_gtt(db, detalle_id, filename, config_lab=None,
             fn = sol['FechaNacimiento']
             hoy = datetime.now()
             edad = hoy.year - fn.year - ((hoy.month, hoy.day) < (fn.month, fn.day))
-            edad_texto = f"{edad} años"
+            edad_texto = f"{edad} Años"
         except Exception:
             pass
 
@@ -238,33 +234,55 @@ def generar_pdf_gtt(db, detalle_id, filename, config_lab=None,
     telefono_lab = (config_lab or {}).get('Telefono1', '')
     telefono2_lab = (config_lab or {}).get('Telefono2', '')
 
+    # Color configurable
+    color_header_hex = (config_lab or {}).get('ColorEncabezadoTabla', '#1565c0') or '#1565c0'
+    _pdf_header = colors.HexColor(color_header_hex)
+    _pdf_header_dark = colors.HexColor('#0d47a1')
+    _pdf_accent = _pdf_header
+
     dosis_str = ''
     dosis_rp = valores.get('GTT000')
     if dosis_rp:
         dosis_str = str(dosis_rp.get('Valor') or '').strip()
 
     # =========================================================================
-    # CONSTRUCCION DEL PDF
+    # CONSTRUCCION DEL PDF — MISMO FORMATO QUE generar_pdf_resultados
     # =========================================================================
     page_size = letter
     page_w, page_h = page_size
 
-    left_m  = 0.5 * inch
+    left_m = 0.5 * inch
     right_m = 0.5 * inch
-    top_m   = 0.4 * inch
-    bot_m   = 1.2 * inch if bioanalista else 0.6 * inch
-    header_h = 1.9 * inch
+    top_m = 0.4 * inch
+    bot_m = 1.2 * inch if bioanalista else 0.6 * inch
+    header_h = 2.0 * inch
+    content_w = page_w - left_m - right_m
 
-    # --- Funciones de dibujo de cabecera y pie ---
+    # Fuentes unificadas con el reporte principal
+    _fln = 11       # nombre lab
+    _fld = 7.5      # detalle lab
+    _lh = 10        # line height info
+    _flbl = 7.5     # label paciente
+    _fval = 7.5     # valor paciente
+    _fo_label = 10   # label orden
+    _fo_valor = 12   # numero orden
+    _fn_pac = 11     # nombre paciente
+
+    # Colores de etiquetas
+    _lbl_color = colors.HexColor('#607d8b')
+    _val_color = colors.HexColor('#212121')
+
+    # --- Header: mismo estilo que el reporte general ---
     def draw_header(canvas, doc):
         canvas.saveState()
         y_top = page_h - top_m
+        right_edge = page_w - right_m
 
-        # Logo
-        logo_w = 1.1 * inch
-        logo_h = 0.9 * inch
+        # ── LOGO ──
+        logo_w = 2.2 * inch
+        logo_h = 2.2 * inch
         logo_x = left_m
-        logo_y = y_top - logo_h - 0.1*inch
+        logo_y = y_top - logo_h + 57
         if ruta_logo and os.path.exists(ruta_logo) and (config_lab or {}).get('MostrarLogo'):
             try:
                 canvas.drawImage(ruta_logo, logo_x, logo_y,
@@ -273,111 +291,150 @@ def generar_pdf_gtt(db, detalle_id, filename, config_lab=None,
             except Exception:
                 pass
 
-        # Nombre lab
-        info_x = left_m + logo_w + 0.25*inch
-        info_y = y_top - 0.15*inch
-        canvas.setFont('Helvetica-Bold', 10)
-        canvas.drawString(info_x, info_y, nombre_lab.upper())
-        canvas.setFont('Helvetica', 8)
-        lh = 11
-        iy = info_y - lh
+        # ── INFO LAB (derecha) ──
+        info_y = y_top - 0.05 * inch
+        canvas.setFont('Helvetica-Bold', _fln)
+        canvas.setFillColor(colors.HexColor('#1a237e'))
+        canvas.drawRightString(right_edge, info_y, nombre_lab.upper())
+
+        canvas.setFont('Helvetica', _fld)
+        canvas.setFillColor(colors.HexColor('#455a64'))
+        info_y -= _lh + 2
         if direccion_lab:
-            canvas.drawString(info_x, iy, direccion_lab[:75])
-            iy -= lh
-        if email_lab:
-            canvas.drawString(info_x, iy, f"Correo: {email_lab}")
-            iy -= lh
-        tel_txt = ''
+            canvas.drawRightString(right_edge, info_y, direccion_lab[:80])
+            info_y -= _lh
         if telefono_lab:
-            tel_txt = f"Tel: {telefono_lab}"
+            canvas.drawRightString(right_edge, info_y, f"Telf.: {telefono_lab}")
+            info_y -= _lh
         if telefono2_lab:
-            tel_txt += f"  WhatsApp: {telefono2_lab}"
-        if tel_txt:
-            canvas.drawString(info_x, iy, tel_txt)
-            iy -= lh
-        canvas.setFont('Helvetica-Oblique', 7)
-        canvas.drawString(info_x, iy, "Impreso por ANgesLAB - Sistema de Gestión de Laboratorio")
+            canvas.drawRightString(right_edge, info_y, f"WhatsApp: {telefono2_lab}")
+            info_y -= _lh
+        if email_lab:
+            canvas.setFillColor(colors.HexColor('#1565c0'))
+            canvas.drawRightString(right_edge, info_y, email_lab)
+            info_y -= _lh
 
-        # Cuadro paciente
-        bx = left_m
-        bw = page_w - left_m - right_m
-        bh = 0.68 * inch
-        by = y_top - logo_h - 0.32*inch
-        canvas.setStrokeColor(colors.black)
-        canvas.setLineWidth(1)
-        canvas.rect(bx, by - bh, bw, bh)
+        # ── LÍNEA SEPARADORA ──
+        _info_h = 0.85 * inch
+        _sep1_y = y_top - _info_h - 0.08 * inch
+        canvas.setStrokeColor(colors.HexColor('#e0e0e0'))
+        canvas.setLineWidth(0.5)
+        canvas.line(left_m, _sep1_y, right_edge, _sep1_y)
 
-        c1x = bx + 0.1*inch
-        c2x = bx + 2.4*inch
-        c3x = bx + 5.0*inch
-        r1y = by - 0.18*inch
-        r2y = r1y - 0.21*inch
-        r3y = r2y - 0.21*inch
+        # ── NÚMERO DE ORDEN ──
+        _orden_y = _sep1_y - 0.17 * inch
+        canvas.setFillColor(colors.HexColor('#37474f'))
+        canvas.setFont('Helvetica-Bold', _fo_label)
+        canvas.drawString(left_m, _orden_y, "ORDEN NO.")
+        _orden_label_w = canvas.stringWidth("ORDEN NO.  ", 'Helvetica-Bold', _fo_label)
+        canvas.setFillColor(colors.HexColor('#1a237e'))
+        canvas.setFont('Helvetica-Bold', _fo_valor)
+        canvas.drawString(left_m + _orden_label_w, _orden_y, str(num_orden))
 
-        canvas.setFont('Helvetica-Bold', 8)
-        for (cx, txt) in [(c1x, 'NOMBRE:'), (c1x, None)]:
-            break
-        for (cx, ry, label) in [
-            (c1x, r1y, 'NOMBRE:'), (c1x, r2y, 'CÉDULA:'), (c1x, r3y, 'EDAD:'),
-            (c2x, r1y, 'GÉNERO:'), (c2x, r2y, 'MÉDICO:'),
-            (c3x, r1y, 'FECHA:'),  (c3x, r2y, 'N° ORDEN:'), (c3x, r3y, 'TELÉFONO:'),
-        ]:
-            canvas.drawString(cx, ry, label)
+        # ── NOMBRE PACIENTE ──
+        _nombre_y = _orden_y - 0.20 * inch
+        canvas.setFillColor(colors.black)
+        canvas.setFont('Helvetica-Bold', _fn_pac)
+        canvas.drawString(left_m, _nombre_y, nombre_pac[:50])
 
-        off = 0.55*inch
-        canvas.setFont('Helvetica', 8)
-        for (cx, ry, val) in [
-            (c1x, r1y, nombre_pac[:35]), (c1x, r2y, cedula), (c1x, r3y, edad_texto),
-            (c2x, r1y, sexo), (c2x, r2y, medico[:24]),
-            (c3x, r1y, fecha_sol), (c3x, r2y, str(num_orden)[:18]),
-            (c3x, r3y, tel_pac[:14]),
-        ]:
-            canvas.drawString(cx + off, ry, val)
+        # ── BARRA DE COLOR ──
+        _bar_y = _nombre_y - 0.10 * inch
+        canvas.setStrokeColor(_pdf_accent)
+        canvas.setLineWidth(3.0)
+        canvas.line(left_m, _bar_y, right_edge, _bar_y)
+
+        # ── DATOS DEL PACIENTE (2 columnas) ──
+        _row_sp = 0.14 * inch
+        _col2_x = left_m + content_w * 0.52
+
+        def _draw_field(x, y, label, value):
+            canvas.setFillColor(_lbl_color)
+            canvas.setFont('Helvetica', _flbl)
+            canvas.drawString(x, y, label)
+            lbl_w = canvas.stringWidth(label + " ", 'Helvetica', _flbl)
+            canvas.setFillColor(_val_color)
+            canvas.setFont('Helvetica-Bold', _fval)
+            canvas.drawString(x + lbl_w, y, value)
+
+        _dy = _bar_y - 0.16 * inch
+        _draw_field(left_m, _dy, "Cédula:", cedula)
+        _draw_field(_col2_x, _dy, "Fecha de ingreso:", fecha_sol)
+        _dy -= _row_sp
+        _draw_field(left_m, _dy, "Sexo:", sexo)
+        _draw_field(_col2_x, _dy, "Médico:", medico[:35])
+        _dy -= _row_sp
+        _draw_field(left_m, _dy, "Edad:", edad_texto)
+        if tel_pac:
+            _draw_field(_col2_x, _dy, "Teléfono:", tel_pac[:14])
+        _dy -= _row_sp + 0.06 * inch
+
+        # ── TÍTULO CENTRADO ──
+        canvas.setFillColor(colors.HexColor('#37474f'))
+        canvas.setFont('Helvetica-Bold', 10)
+        canvas.drawCentredString(page_w / 2, _dy, "Informe de resultados")
+        _dy -= 0.10 * inch
+        canvas.setStrokeColor(colors.HexColor('#bdbdbd'))
+        canvas.setLineWidth(0.5)
+        canvas.line(left_m, _dy, right_edge, _dy)
 
         canvas.restoreState()
 
+    # --- Footer: firma bioanalista + pie de página ---
     def draw_footer(canvas, doc):
-        if not bioanalista:
-            return
         canvas.saveState()
-        fy = bot_m - 0.1*inch
-        bx_bio = page_w / 2  # centrado
+        right_edge = page_w - right_m
 
-        y_pos = fy + 0.85*inch
+        if bioanalista:
+            bx_bio = page_w / 2
+            y_pos = 0.38 * inch + 0.85 * inch
 
-        # Firma imagen si existe
-        ruta_firma = bioanalista.get('RutaFirma', '')
-        if ruta_firma:
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            ruta_abs = os.path.join(base_dir, '..', ruta_firma)
-            if os.path.exists(ruta_abs):
-                try:
-                    fw = 1.1*inch
-                    fh = 0.38*inch
-                    canvas.drawImage(ruta_abs, bx_bio - fw/2, y_pos,
-                                     width=fw, height=fh,
-                                     preserveAspectRatio=True, mask='auto')
-                    y_pos -= 0.03*inch
-                except Exception:
-                    pass
+            # Firma imagen
+            ruta_firma = bioanalista.get('RutaFirma', '')
+            if ruta_firma:
+                base_dir = os.path.dirname(os.path.abspath(__file__))
+                ruta_abs = os.path.join(base_dir, '..', ruta_firma)
+                if os.path.exists(ruta_abs):
+                    try:
+                        fw = 2.2 * inch
+                        fh = 0.8 * inch
+                        canvas.drawImage(ruta_abs, bx_bio - fw / 2, y_pos,
+                                         width=fw, height=fh,
+                                         preserveAspectRatio=True, mask='auto')
+                        y_pos -= 0.05 * inch
+                    except Exception:
+                        pass
 
-        # Linea
-        canvas.setStrokeColor(colors.grey)
-        canvas.setLineWidth(0.5)
-        lw = 1.5*inch
-        canvas.line(bx_bio - lw/2, y_pos, bx_bio + lw/2, y_pos)
-        y_pos -= 0.11*inch
+            # Línea de firma
+            canvas.setStrokeColor(colors.grey)
+            canvas.setLineWidth(0.5)
+            lw = 1.5 * inch
+            canvas.line(bx_bio - lw / 2, y_pos, bx_bio + lw / 2, y_pos)
+            y_pos -= 0.12 * inch
 
-        canvas.setFont('Helvetica-Bold', 7.5)
-        canvas.drawCentredString(bx_bio, y_pos, bioanalista.get('NombreCompleto', ''))
-        y_pos -= 0.1*inch
-        canvas.setFont('Helvetica', 7)
-        canvas.drawCentredString(bx_bio, y_pos, f"C.I.: {bioanalista.get('Cedula', '')}")
-        y_pos -= 0.1*inch
-        canvas.drawCentredString(bx_bio, y_pos, f"Reg.: {bioanalista.get('NumeroRegistro', '')}")
-        y_pos -= 0.09*inch
-        canvas.setFont('Helvetica-Oblique', 6.5)
-        canvas.drawCentredString(bx_bio, y_pos, "Bioanalista - Área Química")
+            canvas.setFont('Helvetica-Bold', 7)
+            canvas.drawCentredString(bx_bio, y_pos, bioanalista.get('NombreCompleto', ''))
+            y_pos -= 0.11 * inch
+            canvas.setFont('Helvetica', 6.5)
+            canvas.drawCentredString(bx_bio, y_pos, f"C.I.: {bioanalista.get('Cedula', '')}")
+            y_pos -= 0.1 * inch
+            canvas.drawCentredString(bx_bio, y_pos, f"Reg.: {bioanalista.get('NumeroRegistro', '')}")
+            y_pos -= 0.09 * inch
+            canvas.setFont('Helvetica-Oblique', 6)
+            canvas.drawCentredString(bx_bio, y_pos, "Bioanalista - Área Química")
+
+        # ── PIE DE PÁGINA (misma línea que el reporte general) ──
+        _pie_y = 0.22 * inch
+        canvas.setStrokeColor(colors.HexColor('#e0e0e0'))
+        canvas.setLineWidth(0.3)
+        canvas.line(left_m, _pie_y + 0.08 * inch, right_edge, _pie_y + 0.08 * inch)
+
+        canvas.setFont('Helvetica', 5.5)
+        canvas.setFillColor(colors.HexColor('#9e9e9e'))
+        _pie_texto = (f"Orden No: {num_orden}  -  {nombre_pac}"
+                      f"  |  Valores de referencia reportados según edad y sexo del paciente")
+        canvas.drawString(left_m, _pie_y, _pie_texto)
+        canvas.drawRightString(right_edge, _pie_y, f"Página {doc.page}")
+
         canvas.restoreState()
 
     def header_footer(canvas, doc):
@@ -387,7 +444,7 @@ def generar_pdf_gtt(db, detalle_id, filename, config_lab=None,
     doc = BaseDocTemplate(filename, pagesize=page_size)
     content_frame = Frame(
         left_m, bot_m,
-        page_w - left_m - right_m,
+        content_w,
         page_h - top_m - header_h - bot_m,
         id='content'
     )
@@ -397,89 +454,85 @@ def generar_pdf_gtt(db, detalle_id, filename, config_lab=None,
     styles = getSampleStyleSheet()
     elements = []
 
-    # ---- Estilo titulo prueba ----
+    # ---- Título de la prueba (mismo formato que titulo_prueba_style del reporte general) ----
     titulo_style = ParagraphStyle(
-        'TituloGTT', parent=styles['Heading1'],
-        fontSize=12, fontName='Helvetica-Bold',
-        alignment=TA_CENTER, spaceAfter=6, spaceBefore=4,
-        textColor=colors.white, backColor=COLOR_AZUL_OSCURO,
-        borderPadding=(7, 7, 7, 7),
+        'TituloGTT', parent=styles['Normal'],
+        fontSize=11, fontName='Helvetica-Bold',
+        alignment=TA_CENTER, spaceAfter=8, spaceBefore=12,
+        leading=13,
+        textColor=_pdf_header_dark,
+        borderWidth=0,
+        borderColor=_pdf_accent,
+        borderPadding=(2, 4, 2, 4),
     )
-    elements.append(Paragraph("CURVA DE GLUCEMIA - PRUEBA DE TOLERANCIA A LA GLUCOSA", titulo_style))
-    elements.append(Spacer(1, 0.12*inch))
+    elements.append(Paragraph("CURVA DE GLUCEMIA - TOLERANCIA A LA GLUCOSA", titulo_style))
+    elements.append(Spacer(1, 0.08 * inch))
 
     # ---- Dosis de carga ----
-    dosis_style = ParagraphStyle(
-        'Dosis', parent=styles['Normal'],
-        fontSize=9, fontName='Helvetica-Bold',
-        alignment=TA_CENTER, spaceAfter=8,
-        textColor=COLOR_AZUL_MEDIO,
-    )
     if dosis_str:
+        dosis_style = ParagraphStyle(
+            'Dosis', parent=styles['Normal'],
+            fontSize=9, fontName='Helvetica',
+            alignment=TA_CENTER, spaceAfter=6,
+            textColor=_pdf_accent,
+        )
         elements.append(Paragraph(
-            f"Dosis de Carga Glucosada: <b>{dosis_str} g</b>",
+            f"<b>Dosis de Carga Glucosada:</b> {dosis_str} g",
             dosis_style
         ))
 
-    # ---- Tabla de resultados ----
-    col_w = [(2.3*inch), (1.3*inch), (1.3*inch), (2.4*inch)]
-    tabla_header = [['Tiempo', 'Resultado', 'Unidad', 'Valor de Referencia']]
+    # ---- Tabla de resultados (idéntico al formato de _flush_area_pdf del reporte general) ----
+    col_w = [2.5 * inch, 1.2 * inch, 0.8 * inch, 2.0 * inch]
 
-    tabla_data = list(tabla_header)
-    estilos_filas = []
-
-    for row_idx, (codigo, etiqueta, minutos, referencia) in enumerate(TIEMPOS_DISPLAY, start=1):
-        rp = valores.get(codigo)
-        valor_str = ''
-        fuera = False
-        tipo_alerta = ''
-        if rp:
-            valor_str = str(rp.get('Valor') or '').strip()
-            fuera = bool(rp.get('FueraDeRango'))
-            tipo_alerta = str(rp.get('TipoAlerta') or '')
-
-        if not valor_str:
-            continue  # Omitir tiempos no capturados
-
-        unidad_str = 'mg/dL'
-        fila = [etiqueta, valor_str, unidad_str, referencia]
-        tabla_data.append(fila)
-
-        # Colorear segun alerta
-        if fuera and 'Critico' in tipo_alerta:
-            estilos_filas.append(('TEXTCOLOR', (1, row_idx), (1, row_idx), COLOR_ROJO))
-            estilos_filas.append(('FONTNAME', (1, row_idx), (1, row_idx), 'Helvetica-Bold'))
-            estilos_filas.append(('BACKGROUND', (0, row_idx), (-1, row_idx), colors.HexColor('#fff3e0')))
-        elif fuera and 'Alto' in tipo_alerta:
-            estilos_filas.append(('TEXTCOLOR', (1, row_idx), (1, row_idx), COLOR_NARANJA))
-            estilos_filas.append(('FONTNAME', (1, row_idx), (1, row_idx), 'Helvetica-Bold'))
-            estilos_filas.append(('BACKGROUND', (0, row_idx), (-1, row_idx), colors.HexColor('#fff8f0')))
-        elif fuera and 'Bajo' in tipo_alerta:
-            estilos_filas.append(('TEXTCOLOR', (1, row_idx), (1, row_idx), COLOR_AZUL_BAJO))
-            estilos_filas.append(('FONTNAME', (1, row_idx), (1, row_idx), 'Helvetica-Bold'))
-        else:
-            estilos_filas.append(('TEXTCOLOR', (1, row_idx), (1, row_idx), COLOR_VERDE))
-
-    tabla_style_base = [
-        ('BOX', (0, 0), (-1, -1), 1, colors.black),
-        ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.grey),
+    # Header de columnas (tabla separada, mismo estilo que el reporte general)
+    header_data = [['Descripción del Examen', 'Resultado', 'Unidad', 'Valores Referenciales']]
+    header_table = Table(header_data, colWidths=col_w)
+    header_table.setStyle(TableStyle([
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 9),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('BACKGROUND', (0, 0), (-1, 0), COLOR_AZUL_MEDIO),
+        ('FONTSIZE', (0, 0), (-1, 0), 9),
+        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+        ('TOPPADDING', (0, 0), (-1, 0), 6),
+        ('BACKGROUND', (0, 0), (-1, 0), _pdf_header),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('TOPPADDING', (0, 0), (-1, -1), 5),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, COLOR_GRIS_CLARO]),
-        ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-    ] + estilos_filas
+    ]))
 
-    if len(tabla_data) > 1:
-        tabla_rl = Table(tabla_data, colWidths=col_w)
-        tabla_rl.setStyle(TableStyle(tabla_style_base))
-        elements.append(tabla_rl)
-        elements.append(Spacer(1, 0.15*inch))
+    param_data = []
+    for codigo, etiqueta, minutos, referencia in TIEMPOS_DISPLAY:
+        rp = valores.get(codigo)
+        if not rp:
+            continue
+        valor_str = str(rp.get('Valor') or '').strip()
+        if not valor_str:
+            continue
+        param_data.append(['   ' + etiqueta, valor_str, 'mg/dL', referencia])
+
+    if param_data:
+        param_table = Table(param_data, colWidths=col_w)
+        table_style = [
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('ALIGN', (1, 0), (1, -1), 'CENTER'),
+            ('ALIGN', (2, 0), (2, -1), 'CENTER'),
+            ('ALIGN', (3, 0), (3, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
+            ('TOPPADDING', (0, 0), (-1, -1), 1),
+            ('LEFTPADDING', (0, 0), (0, -1), 8),
+            ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#bdbdbd')),
+            ('LINEBELOW', (0, -1), (-1, -1), 0.8, colors.HexColor('#37474f')),
+            ('LINEBELOW', (0, 0), (-1, -2), 0.25, colors.HexColor('#e0e0e0')),
+        ]
+        # Filas alternas
+        for i in range(len(param_data)):
+            if i % 2 == 1:
+                table_style.append(('BACKGROUND', (0, i), (-1, i), COLOR_FILA_ALT))
+        param_table.setStyle(TableStyle(table_style))
+
+        elements.append(header_table)
+        elements.append(param_table)
+        elements.append(Spacer(1, 0.1 * inch))
 
     # ---- Interpretacion y observaciones ----
     interp_rp = valores.get('GTT007')
@@ -491,43 +544,36 @@ def generar_pdf_gtt(db, detalle_id, filename, config_lab=None,
         interp_style = ParagraphStyle(
             'InterpGTT', parent=styles['Normal'],
             fontSize=9, fontName='Helvetica',
-            spaceAfter=4, spaceBefore=4,
-        )
-        label_style = ParagraphStyle(
-            'LabelGTT', parent=styles['Normal'],
-            fontSize=9, fontName='Helvetica-Bold',
-            textColor=COLOR_AZUL_OSCURO,
+            spaceAfter=3,
         )
         if interp_val:
-            elements.append(Paragraph("Interpretación:", label_style))
-            elements.append(Paragraph(interp_val, interp_style))
+            elements.append(Paragraph(
+                f"<b>Interpretación:</b> {interp_val}", interp_style))
         if obs_val:
-            elements.append(Paragraph("Observaciones:", label_style))
-            elements.append(Paragraph(obs_val, interp_style))
-        elements.append(Spacer(1, 0.1*inch))
+            elements.append(Paragraph(
+                f"<b>Observaciones:</b> {obs_val}", interp_style))
+        elements.append(Spacer(1, 0.08 * inch))
 
     # ---- Grafica de la curva ----
     if incluir_grafica:
         img_grafica = _generar_imagen_grafica(valores, dosis_str)
         if img_grafica:
-            # Calcular ancho disponible
-            disp_w = page_w - left_m - right_m
-            grafica_h = 3.5 * inch
-            grafica_w = disp_w - 0.2*inch
-            elements.append(Paragraph("Gráfica de la Curva de Glucemia", ParagraphStyle(
-                'GraficaTitulo', parent=styles['Normal'],
-                fontSize=9, fontName='Helvetica-Bold',
-                textColor=COLOR_AZUL_MEDIO, spaceAfter=4, spaceBefore=6,
-                alignment=TA_CENTER,
-            )))
+            grafica_w = content_w - 0.3 * inch
+            grafica_h = 3.3 * inch
+            elements.append(Paragraph(
+                "Gráfica de la Curva de Glucemia",
+                ParagraphStyle('GraficaTitulo', parent=styles['Normal'],
+                               fontSize=9, fontName='Helvetica-Bold',
+                               textColor=_pdf_accent, spaceAfter=3,
+                               spaceBefore=6, alignment=TA_CENTER)
+            ))
             elements.append(RLImage(img_grafica, width=grafica_w, height=grafica_h))
-            elements.append(Spacer(1, 0.08*inch))
+            elements.append(Spacer(1, 0.06 * inch))
 
-            # Leyenda interpretativa
             nota_style = ParagraphStyle(
                 'NotaGTT', parent=styles['Normal'],
-                fontSize=7.5, fontName='Helvetica-Oblique',
-                textColor=colors.grey, alignment=TA_CENTER,
+                fontSize=7, fontName='Helvetica-Oblique',
+                textColor=colors.HexColor('#9e9e9e'), alignment=TA_CENTER,
             )
             elements.append(Paragraph(
                 "Referencia ADA: Basal &lt;100 mg/dL (normal), 100-125 (IFG); "
@@ -563,7 +609,7 @@ def _generar_imagen_grafica(valores, dosis_str='75'):
         120: '2 h', 180: '3 h', 240: '4 h'
     }
 
-    puntos = []  # (minutos, valor, codigo)
+    puntos = []
     for codigo, etq, minutos, _ in [
         ('GTT001', 'Basal',    0,   None),
         ('GTT002', '30 min',   30,  None),
@@ -594,7 +640,6 @@ def _generar_imagen_grafica(valores, dosis_str='75'):
     ys = [v for m, v, _ in puntos]
 
     # Lineas de referencia
-    max_x = max(xs) if xs else 240
     ref_lines = [
         (100, '#4caf50', '--', '100 mg/dL (Normal basal)'),
         (140, '#ff9800', '--', '140 mg/dL (Límite 2h normal)'),
@@ -605,7 +650,7 @@ def _generar_imagen_grafica(valores, dosis_str='75'):
         ax.axhline(y=ref_y, color=col, linestyle=ls, linewidth=1.2,
                    alpha=0.75, label=lbl)
 
-    # Zona normal (0-100 base)
+    # Zona normal
     ax.axhspan(70, 100, alpha=0.07, color='green')
 
     # Curva
@@ -639,11 +684,10 @@ def _generar_imagen_grafica(valores, dosis_str='75'):
                     bbox=dict(boxstyle='round,pad=0.2', facecolor='white',
                               edgecolor=color_txt, alpha=0.8))
 
-    # Eje X con etiquetas personalizadas
+    # Eje X
     todos_x = sorted(set(list(tiempos_min.values())))
     ax.set_xticks(todos_x)
-    ax.set_xticklabels([etiquetas_x.get(t, str(t)) for t in todos_x],
-                       fontsize=9)
+    ax.set_xticklabels([etiquetas_x.get(t, str(t)) for t in todos_x], fontsize=9)
 
     # Limites Y dinamicos
     all_vals = ys + [100, 140, 180, 200]
@@ -652,7 +696,6 @@ def _generar_imagen_grafica(valores, dosis_str='75'):
     ax.set_ylim(y_min, y_max)
     ax.set_xlim(-15, max(todos_x) + 15)
 
-    # Etiquetas
     ax.set_xlabel('Tiempo (minutos)', fontsize=10)
     ax.set_ylabel('Glucosa (mg/dL)', fontsize=10)
     titulo_graf = 'Curva de Glucemia - Tolerancia a la Glucosa'
@@ -664,7 +707,6 @@ def _generar_imagen_grafica(valores, dosis_str='75'):
     ax.grid(axis='y', alpha=0.3, linestyle='--')
     ax.grid(axis='x', alpha=0.15)
 
-    # Leyenda
     ax.legend(loc='upper right', fontsize=7.5, framealpha=0.9,
               ncol=2, handlelength=1.5)
 
@@ -673,7 +715,6 @@ def _generar_imagen_grafica(valores, dosis_str='75'):
 
     fig.tight_layout(pad=0.5)
 
-    # Exportar a BytesIO
     buf = io.BytesIO()
     fig.savefig(buf, format='png', dpi=150, bbox_inches='tight',
                 facecolor='white')
