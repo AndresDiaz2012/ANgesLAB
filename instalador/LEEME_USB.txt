@@ -1,5 +1,5 @@
 ================================================================================
-   ANgesLAB v2.5.5  -  USB de instalacion y actualizacion
+   ANgesLAB v2.5.6  -  USB de instalacion y actualizacion
    Sistema de Gestion de Laboratorio Clinico
 ================================================================================
 
@@ -49,14 +49,14 @@
 --------------------------------------------------------------------------------
   B) EQUIPO NUEVO, SIN ANgesLAB  ->  INSTALAR
 --------------------------------------------------------------------------------
-  1. Doble clic en:  ANgesLAB_Setup_v2.5.5.exe
+  1. Doble clic en:  ANgesLAB_Setup_v2.5.6.exe
   2. Acepte el aviso de Windows (requiere permisos de administrador).
   3. Siga el asistente. Se instala en  C:\ANgesLAB
   4. Al terminar quedan los accesos directos en el Escritorio y el
      Menu Inicio.
 
   NO hace falta ejecutar el actualizador despues: la instalacion nueva ya
-  viene con todo al dia (codigo v2.5.5 y catalogo completo de areas,
+  viene con todo al dia (codigo v2.5.6 y catalogo completo de areas,
   pruebas, parametros y valores de referencia).
 
   ENTRAR LA PRIMERA VEZ:
@@ -100,8 +100,21 @@
 
 
 --------------------------------------------------------------------------------
-  QUE TRAE LA VERSION 2.5.5
+  QUE TRAE LA VERSION 2.5.6
 --------------------------------------------------------------------------------
+  - CADA PRUEBA APARECE UNA SOLA VEZ EN EL BUSCADOR
+    Habia doce nombres repetidos que solo se distinguian por un punto final o
+    un espacio de mas: "SANGRE OCULTA EN HECES" y "SANGRE OCULTA EN HECES.",
+    tres copias de "Helicobacter pilory en Heces". Quien pedia la prueba veia
+    dos opciones identicas, y como cada copia llevaba sus propios parametros
+    -o ninguno- el informe salia distinto segun cual hubiera elegido.
+
+    Las repetidas quedan desactivadas, no borradas: si una solicitud antigua
+    las nombra, se sigue viendo que se le hizo a ese paciente.
+
+    Al crear una prueba nueva, ahora el programa avisa si ya existe otra con
+    ese nombre, y no deja repetir el codigo.
+
   - EL CATALOGO INCORPORA LAS CORRECCIONES DEL LABORATORIO
     Los valores de referencia, las secciones del informe y las unidades que se
     fueron corrigiendo en el laboratorio durante meses de uso real ya vienen
@@ -204,7 +217,7 @@
 --------------------------------------------------------------------------------
   CONTENIDO DE ESTA USB
 --------------------------------------------------------------------------------
-  ANgesLAB_Setup_v2.5.5.exe  Instalador completo (sede que procesa)
+  ANgesLAB_Setup_v2.5.6.exe  Instalador completo (sede que procesa)
   Receptor\                  Instalador de la sede que solo recibe
   actualizador\              Actualizador para instalaciones existentes
   ANgesLAB.pyw               Programa principal
