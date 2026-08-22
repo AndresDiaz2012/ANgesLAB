@@ -4837,6 +4837,58 @@ class MainApplication:
                 messagebox.showerror("Error", "Código y nombre son requeridos")
                 return
 
+            # El catalogo acumulo doce nombres repetidos que solo se distinguian
+            # por un punto final o un espacio de mas ("SANGRE OCULTA EN HECES" y
+            # "SANGRE OCULTA EN HECES."). Quien pedia la prueba veia dos opciones
+            # identicas con parametros distintos, y el informe salia distinto
+            # segun cual eligiera. Se comprueba aqui, al crearla, que es donde
+            # cuesta barato.
+            codigo_nuevo = entry_codigo.get().strip()
+            nombre_nuevo = entry_nombre.get().strip()
+            try:
+                # La comparacion se hace en Python: UCase(Trim(...)) de Access no
+                # colapsa los espacios interiores, que es justo el caso que se
+                # escapa
+                otras = db.query("SELECT PruebaID, CodigoPrueba, NombrePrueba, Activo "
+                                 "FROM Pruebas") or []
+            except Exception:
+                otras = []
+
+            import re
+
+            def _clave(texto):
+                return ' '.join(re.sub(r'[^A-Za-z0-9 ]', ' ', str(texto or '')).upper().split())
+
+            for otra in otras:
+                if prueba_id and otra['PruebaID'] == prueba_id:
+                    continue
+                if _clave(otra['CodigoPrueba']) == _clave(codigo_nuevo):
+                    messagebox.showerror(
+                        "Código repetido",
+                        f"El código {codigo_nuevo} ya lo usa:\n\n"
+                        f"    {otra['NombrePrueba']}\n\n"
+                        "Cada prueba necesita un código propio.")
+                    return
+
+            for otra in otras:
+                if prueba_id and otra['PruebaID'] == prueba_id:
+                    continue
+                # Solo molestan las que estan activas: una desactivada no aparece
+                # en el buscador, asi que nadie puede confundirse con ella. Si el
+                # nombre coincide con una retirada es que la estan reponiendo
+                if not otra['Activo']:
+                    continue
+                if _clave(otra['NombrePrueba']) == _clave(nombre_nuevo):
+                    if not messagebox.askyesno(
+                            "Ya existe una prueba con ese nombre",
+                            f"Con ese mismo nombre ya está activa:\n\n"
+                            f"    {otra['CodigoPrueba']}  {otra['NombrePrueba']}\n\n"
+                            "Dos pruebas con el mismo nombre confunden a quien las pide,\n"
+                            "porque cada una lleva sus propios parámetros.\n\n"
+                            "¿Guardar de todas formas?"):
+                        return
+                    break
+
             area_id = area_map.get(combo_area.get())
 
             data = {
