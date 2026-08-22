@@ -9,14 +9,27 @@ poder decidir cual se queda.
 Por que una hoja y no un traspaso automatico
 ---------------------------------------------
 Porque no todo lo que difiere es una mejora. En la comparacion del 2026-08-21
-aparecieron, mezclados: correcciones buenas (calcio ionico que faltaba,
-toxoplasma en UI/mL), cambios de criterio legitimos (T3 y T4 en pmol/L, que
-dependen del analizador) y errores claros (LINFOCITOS con valor de referencia
-"NEGATIVO", troponina con un cero de mas).
+aparecieron, mezclados: correcciones claras (calcio ionico que faltaba,
+toxoplasma en UI/mL, indices HOMA que no tenian tipo de resultado), decisiones
+que dependen del metodo del laboratorio (cloro 96-106 frente a 97-107,
+Helicobacter en U/mL frente a DO) y campos donde el detalle de aqui es mejor
+que el resumen de alla.
 
 Un traspaso automatico habria metido los tres grupos por igual. Un valor de
-referencia equivocado no se nota al importarlo: se nota cuando un informe sale
+referencia equivocado no se nota al importarlo: se nota cuando sale un informe
 mal, y para entonces ya salio.
+
+Emparejar por nombre, no por codigo
+------------------------------------
+Es la leccion cara de esta comparacion. Al emparejar los parametros por
+CodigoParametro salieron alarmas falsas gravisimas: parecia que alguien habia
+puesto "NEGATIVO" como valor de referencia de los LINFOCITOS. No era cierto.
+El parametro 27 es LINFOCITOS aqui y Brucella Abortus alla, y "NEGATIVO" es
+correcto para Brucella.
+
+Los autonumericos no significan lo mismo en dos bases que llevan meses
+separadas, ni en Pruebas ni en Parametros. Al emparejar por nombre, las 19
+diferencias de valores de referencia se quedaron en 10 reales.
 
 Uso
 ---
@@ -37,10 +50,16 @@ import sys
 
 # (tabla, SQL, clave, campos, columna con el nombre legible)
 BLOQUES = [
+    # Se empareja por NOMBRE, no por CodigoParametro. Los codigos de
+    # parametro tampoco son estables entre las dos bases: el 27 es LINFOCITOS
+    # aqui y Brucella Abortus alla. Compararlos por codigo daba alarmas falsas
+    # gravisimas —parecia que alguien habia puesto "NEGATIVO" como valor de
+    # referencia de los linfocitos— cuando en realidad eran parametros
+    # distintos con el mismo numero.
     ('Parametros',
      'SELECT pa.*, u.CodigoUnidad AS _Unidad '
      'FROM (Parametros pa LEFT JOIN Unidades u ON pa.UnidadID = u.UnidadID)',
-     'CodigoParametro',
+     'NombreParametro',
      ['NombreParametro', '_Unidad', 'TipoResultado', 'Observaciones',
       'Seccion', 'ValorMinimo', 'ValorMaximo', 'Decimales', 'Activo'],
      'NombreParametro'),
