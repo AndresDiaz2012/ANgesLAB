@@ -1,5 +1,5 @@
 ================================================================================
-   ANgesLAB v2.5.6  -  USB de instalacion y actualizacion
+   ANgesLAB v2.5.7  -  USB de instalacion y actualizacion
    Sistema de Gestion de Laboratorio Clinico
 ================================================================================
 
@@ -49,14 +49,14 @@
 --------------------------------------------------------------------------------
   B) EQUIPO NUEVO, SIN ANgesLAB  ->  INSTALAR
 --------------------------------------------------------------------------------
-  1. Doble clic en:  ANgesLAB_Setup_v2.5.6.exe
+  1. Doble clic en:  ANgesLAB_Setup_v2.5.7.exe
   2. Acepte el aviso de Windows (requiere permisos de administrador).
   3. Siga el asistente. Se instala en  C:\ANgesLAB
   4. Al terminar quedan los accesos directos en el Escritorio y el
      Menu Inicio.
 
   NO hace falta ejecutar el actualizador despues: la instalacion nueva ya
-  viene con todo al dia (codigo v2.5.6 y catalogo completo de areas,
+  viene con todo al dia (codigo v2.5.7 y catalogo completo de areas,
   pruebas, parametros y valores de referencia).
 
   ENTRAR LA PRIMERA VEZ:
@@ -100,8 +100,24 @@
 
 
 --------------------------------------------------------------------------------
-  QUE TRAE LA VERSION 2.5.6
+  QUE TRAE LA VERSION 2.5.7
 --------------------------------------------------------------------------------
+  - LOS PRECIOS SE VEN Y SE CARGAN EN LAS TRES MONEDAS
+    La lista de precios (Configuracion - Precios) muestra ahora tres columnas:
+    dolares, bolivares y pesos colombianos. Es el mismo precio convertido, no
+    tres precios distintos.
+
+    Al editar una prueba puede escribir en la casilla que le quede comoda: si
+    escribe 1.101,00 en bolivares, el dolar y el peso se recalculan solos, y
+    al reves. Ya no hace falta la calculadora para pasar una lista de precios
+    que venga en bolivares o en pesos.
+
+    La conversion usa las tasas de Configuracion - Financiera: la del BCV para
+    el bolivar (boton "Actualizar Tasas BCV") y la que usted cargue a mano
+    para el peso. La tasa vigente se muestra encima de la lista, para que se
+    sepa con que se esta convirtiendo. Si una tasa todavia no esta cargada,
+    esa columna sale con un guion en vez de una cifra inventada.
+
   - CADA PRUEBA APARECE UNA SOLA VEZ EN EL BUSCADOR
     Habia doce nombres repetidos que solo se distinguian por un punto final o
     un espacio de mas: "SANGRE OCULTA EN HECES" y "SANGRE OCULTA EN HECES.",
@@ -217,7 +233,7 @@
 --------------------------------------------------------------------------------
   CONTENIDO DE ESTA USB
 --------------------------------------------------------------------------------
-  ANgesLAB_Setup_v2.5.6.exe  Instalador completo (sede que procesa)
+  ANgesLAB_Setup_v2.5.7.exe  Instalador completo (sede que procesa)
   Receptor\                  Instalador de la sede que solo recibe
   actualizador\              Actualizador para instalaciones existentes
   ANgesLAB.pyw               Programa principal
