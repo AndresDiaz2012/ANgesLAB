@@ -294,6 +294,22 @@ class VentanaConfiguracionCompleta:
                   command=lambda: self._aplicar_porcentaje_precios('descuento'),
                   width=22).pack(side=tk.LEFT, padx=5)
 
+        # Tasas con las que se convierten los precios.
+        # El precio vive en dólares en la base; Bs y COP son esa misma cifra
+        # convertida. Sin la tasa a la vista la columna en bolívares no se
+        # puede auditar: no se sabría de qué día es.
+        tasas_frame = ttk.Frame(frame)
+        tasas_frame.pack(fill='x', pady=(0, 4))
+
+        self.lbl_tasas_precios = ttk.Label(tasas_frame, text="",
+                                           font=('Segoe UI', 9, 'bold'),
+                                           foreground='#1565c0')
+        self.lbl_tasas_precios.pack(side=tk.LEFT)
+
+        ttk.Button(tasas_frame, text="🔄 Recargar tasas", width=18,
+                   command=self._refrescar_tasas_precios).pack(side=tk.LEFT,
+                                                               padx=10)
+
         # Contador: cuántas se ven y cuántas siguen sin precio
         self.lbl_resumen_precios = ttk.Label(frame, text="",
                                              font=('Segoe UI', 9),
@@ -304,7 +320,7 @@ class VentanaConfiguracionCompleta:
         tree_frame = ttk.Frame(frame)
         tree_frame.pack(fill='both', expand=True, pady=(0, 10))
 
-        cols = ('Código', 'Prueba', 'Área', 'Precio')
+        cols = ('Código', 'Prueba', 'Área', 'Precio', 'PrecioBs', 'PrecioCOP')
         self.tree_precios = ttk.Treeview(tree_frame, columns=cols, show='headings',
                                           height=20, selectmode='extended')
 
@@ -313,11 +329,15 @@ class VentanaConfiguracionCompleta:
         self.tree_precios.heading('Prueba', text='Nombre de la Prueba')
         self.tree_precios.heading('Área', text='Área')
         self.tree_precios.heading('Precio', text='Precio (USD)')
+        self.tree_precios.heading('PrecioBs', text='Precio (Bs)')
+        self.tree_precios.heading('PrecioCOP', text='Precio (COP)')
 
-        self.tree_precios.column('Código', width=100, anchor='center')
-        self.tree_precios.column('Prueba', width=350, anchor='w')
-        self.tree_precios.column('Área', width=150, anchor='w')
-        self.tree_precios.column('Precio', width=120, anchor='e')
+        self.tree_precios.column('Código', width=90, anchor='center')
+        self.tree_precios.column('Prueba', width=280, anchor='w')
+        self.tree_precios.column('Área', width=120, anchor='w')
+        self.tree_precios.column('Precio', width=100, anchor='e')
+        self.tree_precios.column('PrecioBs', width=120, anchor='e')
+        self.tree_precios.column('PrecioCOP', width=120, anchor='e')
 
         # Las pruebas sin precio se resaltan: son las que hay que atender
         self.tree_precios.tag_configure('sin_precio', foreground='#b45309')
@@ -340,6 +360,8 @@ class VentanaConfiguracionCompleta:
         ttk.Label(info_frame,
                  text="💡 Doble clic edita el precio. Seleccione varias con Ctrl+clic para "
                       "aplicarles incremento o descuento; sin selección se aplica a toda la lista visible.\n"
+                      "    En el editor puede escribir el precio en dólares, en bolívares o en pesos: "
+                      "las otras dos monedas se recalculan solas.\n"
                       "    El incremento y el descuento son porcentajes sobre el precio actual: "
                       "una prueba en $0.00 seguirá en $0.00 hasta que se le ponga un precio.",
                  font=('Segoe UI', 9), foreground='gray',
@@ -525,6 +547,14 @@ class VentanaConfiguracionCompleta:
 
             self.label_ultima_act.config(
                 text=f"Ultima actualizacion: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+
+            # La pestaña de Precios convierte con estas tasas
+            self._cache_tasas_precios = None
+            if hasattr(self, 'tree_precios'):
+                try:
+                    self._cargar_precios()
+                except Exception:
+                    pass
 
             messagebox.showinfo("Tasas Actualizadas",
                                 "Las tasas BCV se han actualizado correctamente.",
@@ -743,6 +773,15 @@ class VentanaConfiguracionCompleta:
             if tasa_cop_val is not None:
                 resumen.append(
                     f"Tasa COP/USD: {tasa_cop_val:,.2f} pesos por 1 dólar")
+
+            # Si cambió la tasa COP/USD, los precios en pesos que se están
+            # mostrando en la otra pestaña quedaron viejos
+            self._cache_tasas_precios = None
+            if hasattr(self, 'tree_precios'):
+                try:
+                    self._cargar_precios()
+                except Exception:
+                    pass
 
             messagebox.showinfo("Exito",
                                 "Configuracion financiera guardada.\n\n"
@@ -1453,6 +1492,58 @@ class VentanaConfiguracionCompleta:
     # ==================================================================
     # PRECIOS
     # ==================================================================
+    def _tasas_precios(self, refrescar=False):
+        """
+        Tasas vigentes para mostrar los precios: (Bs por USD, COP por USD).
+
+        Devuelve None en la moneda que todavía no tenga tasa cargada. El gestor
+        responde 1.0 cuando no hay ninguna guardada, y escribir «Bs. 12,00» en
+        una prueba de 12 dólares sería peor que no mostrar nada: parece un
+        precio real y nadie nota que la tasa falta.
+        """
+        if refrescar or getattr(self, '_cache_tasas_precios', None) is None:
+            tasa_bs = tasa_cop = None
+            try:
+                from modulos.tasas_cambio import GestorTasasCambio
+                gestor = GestorTasasCambio(self.db)
+                valor_bs = self._safe_float(gestor.get_tasa_actual('USD'), 0.0)
+                valor_cop = self._safe_float(gestor.get_tasa_actual('COP_USD'), 0.0)
+                tasa_bs = valor_bs if valor_bs > 0 and valor_bs != 1.0 else None
+                tasa_cop = valor_cop if valor_cop > 0 and valor_cop != 1.0 else None
+            except Exception as e:
+                logging.getLogger("angeslab.ventana_configuracion_completa").warning(
+                    "[PRECIOS] No se pudieron leer las tasas: %s", e)
+            self._cache_tasas_precios = (tasa_bs, tasa_cop)
+        return self._cache_tasas_precios
+
+    def _refrescar_tasas_precios(self):
+        """Vuelve a leer las tasas y repinta la lista de precios."""
+        self._tasas_precios(refrescar=True)
+        self._cargar_precios()
+
+    @staticmethod
+    def _fmt_miles(valor, decimales=2):
+        """
+        Número con el formato de acá: miles con punto y decimales con coma.
+
+        1234.5 -> «1.234,50». La 'M' es solo un intermediario para poder
+        intercambiar los separadores sin pisarlos a medio camino.
+        """
+        texto = f"{valor:,.{decimales}f}"
+        return texto.replace(',', 'M').replace('.', ',').replace('M', '.')
+
+    def _precio_en_bs(self, precio_usd, tasa_bs):
+        """Precio en bolívares para la lista, o guión si no hay tasa."""
+        if not tasa_bs:
+            return '—'
+        return f"Bs. {self._fmt_miles(precio_usd * tasa_bs)}"
+
+    def _precio_en_cop(self, precio_usd, tasa_cop):
+        """Precio en pesos para la lista, o guión si no hay tasa."""
+        if not tasa_cop:
+            return '—'
+        return self._fmt_miles(precio_usd * tasa_cop, 0)
+
     @staticmethod
     def _precio_a_float(valor):
         """
@@ -1483,7 +1574,8 @@ class VentanaConfiguracionCompleta:
         Returns float, o None si no es un precio válido.
         """
         crudo = str(texto or '').strip()
-        for basura in ('$', 'usd', 'USD', ' ', ' '):
+        for basura in ('Bs.', 'bs.', 'BS.', 'Bs', 'bs', 'BS',
+                       'COP', 'cop', 'Cop', '$', 'usd', 'USD', ' ', ' '):
             crudo = crudo.replace(basura, '')
         if not crudo:
             return None
@@ -1557,6 +1649,16 @@ class VentanaConfiguracionCompleta:
                                  parent=self.win)
             return
 
+        tasa_bs, tasa_cop = self._tasas_precios()
+        if hasattr(self, 'lbl_tasas_precios'):
+            detalle = []
+            detalle.append(f"Bs. {self._fmt_miles(tasa_bs)} por USD" if tasa_bs
+                           else "Bs: sin tasa BCV (pestaña Financiera)")
+            detalle.append(f"{self._fmt_miles(tasa_cop, 0)} COP por USD" if tasa_cop
+                           else "COP: sin tasa (pestaña Financiera)")
+            self.lbl_tasas_precios.config(
+                text="Conversión:   " + "   ·   ".join(detalle))
+
         busqueda = (self.var_buscar_precio.get() or '').strip().lower()
         solo_sin_precio = bool(self.var_solo_sin_precio.get())
         total_sin_precio = 0
@@ -1581,7 +1683,9 @@ class VentanaConfiguracionCompleta:
             self.tree_precios.insert(
                 '', 'end', iid=iid,
                 values=(codigo or '—', nombre,
-                        p.get('NombreArea') or 'Sin área', f"${precio:.2f}"),
+                        p.get('NombreArea') or 'Sin área', f"${precio:.2f}",
+                        self._precio_en_bs(precio, tasa_bs),
+                        self._precio_en_cop(precio, tasa_cop)),
                 tags=('sin_precio',) if not precio else ())
             mostradas += 1
 
@@ -1627,9 +1731,12 @@ class VentanaConfiguracionCompleta:
         nombre = valores[1]
         precio_actual = str(valores[3]).replace('$', '')
 
+        tasa_bs, tasa_cop = self._tasas_precios()
+        precio_valor = self._parsear_precio(precio_actual) or 0.0
+
         win = tk.Toplevel(self.win)
         win.title(f"Editar Precio - {nombre}")
-        win.geometry("420x230")
+        win.geometry("540x370")
         win.resizable(False, False)
         win.transient(self.win)
         win.grab_set()
@@ -1641,28 +1748,107 @@ class VentanaConfiguracionCompleta:
         cuerpo.pack(fill='both', expand=True)
 
         ttk.Label(cuerpo, text=nombre, font=('Segoe UI', 11, 'bold'),
-                  wraplength=380, justify='left').pack(anchor='w')
-        ttk.Label(cuerpo, text=f"Precio actual: ${self._parsear_precio(precio_actual) or 0:.2f}",
-                  foreground='#64748b').pack(anchor='w', pady=(2, 12))
+                  wraplength=490, justify='left').pack(anchor='w')
 
-        ttk.Label(cuerpo, text="Nuevo precio (USD):",
-                  font=('Segoe UI', 10, 'bold')).pack(anchor='w')
+        actual = f"Precio actual: ${precio_valor:.2f}"
+        if tasa_bs:
+            actual += f"   ·   Bs. {self._fmt_miles(precio_valor * tasa_bs)}"
+        if tasa_cop:
+            actual += f"   ·   COP {self._fmt_miles(precio_valor * tasa_cop, 0)}"
+        ttk.Label(cuerpo, text=actual,
+                  foreground='#64748b').pack(anchor='w', pady=(2, 10))
 
-        entry_precio = ttk.Entry(cuerpo, width=18, font=('Segoe UI', 12))
-        entry_precio.insert(0, precio_actual.strip())
-        entry_precio.pack(anchor='w', pady=(4, 2))
-        entry_precio.select_range(0, tk.END)
-        entry_precio.focus()
+        ttk.Label(cuerpo,
+                  text="Escriba el precio en la moneda que le quede más cómoda: "
+                       "las otras dos se recalculan solas. Se guarda el valor en dólares.",
+                  font=('Segoe UI', 9), foreground='#475569',
+                  wraplength=490, justify='left').pack(anchor='w', pady=(0, 10))
+
+        var_usd = tk.StringVar(value=self._fmt_miles(precio_valor))
+        var_bs = tk.StringVar(
+            value=self._fmt_miles(precio_valor * tasa_bs) if tasa_bs else '')
+        var_cop = tk.StringVar(
+            value=self._fmt_miles(precio_valor * tasa_cop, 0) if tasa_cop else '')
 
         lbl_error = ttk.Label(cuerpo, text="", foreground='#dc2626')
-        lbl_error.pack(anchor='w')
+
+        # Escribir en un campo reescribe los otros dos. El candado evita que
+        # esa reescritura dispare otra conversión encima de lo que el usuario
+        # está tecleando (se le movería el cursor a media cifra).
+        sincronizando = {'activo': False}
+
+        def _sincronizar(origen):
+            if sincronizando['activo']:
+                return
+            sincronizando['activo'] = True
+            try:
+                if origen == 'USD':
+                    usd = self._parsear_precio(var_usd.get())
+                    if usd is None:
+                        return
+                elif origen == 'BS':
+                    monto_bs = self._parsear_precio(var_bs.get())
+                    if monto_bs is None or not tasa_bs:
+                        return
+                    usd = round(monto_bs / tasa_bs, 2)
+                    var_usd.set(self._fmt_miles(usd))
+                else:
+                    monto_cop = self._parsear_precio(var_cop.get())
+                    if monto_cop is None or not tasa_cop:
+                        return
+                    usd = round(monto_cop / tasa_cop, 2)
+                    var_usd.set(self._fmt_miles(usd))
+
+                if tasa_bs and origen != 'BS':
+                    var_bs.set(self._fmt_miles(usd * tasa_bs))
+                if tasa_cop and origen != 'COP':
+                    var_cop.set(self._fmt_miles(usd * tasa_cop, 0))
+                lbl_error.config(text="")
+            finally:
+                sincronizando['activo'] = False
+
+        grid = ttk.Frame(cuerpo)
+        grid.pack(anchor='w', fill='x')
+
+        def _campo(fila, etiqueta, var, origen, hay_tasa, nota):
+            ttk.Label(grid, text=etiqueta, font=('Segoe UI', 10, 'bold'),
+                      width=16, anchor='w').grid(row=fila, column=0,
+                                                 sticky='w', pady=4)
+            entry = ttk.Entry(grid, width=16, font=('Segoe UI', 12),
+                              textvariable=var)
+            entry.grid(row=fila, column=1, sticky='w', padx=(0, 10), pady=4)
+            ttk.Label(grid, text=nota, font=('Segoe UI', 8),
+                      foreground='#94a3b8' if hay_tasa else '#b45309'
+                      ).grid(row=fila, column=2, sticky='w')
+            if hay_tasa:
+                var.trace_add('write', lambda *_: _sincronizar(origen))
+                entry.bind('<Return>', lambda e: guardar())
+            else:
+                # Sin tasa no se puede convertir: mejor un campo apagado que
+                # uno que acepta cifras y las descarta al guardar
+                entry.state(['disabled'])
+            return entry
+
+        entry_precio = _campo(0, "Dólares (USD):", var_usd, 'USD', True,
+                              "es el valor que se guarda")
+        _campo(1, "Bolívares (Bs):", var_bs, 'BS', bool(tasa_bs),
+               f"tasa {self._fmt_miles(tasa_bs)} Bs/USD" if tasa_bs
+               else "sin tasa BCV — pestaña Financiera")
+        _campo(2, "Pesos (COP):", var_cop, 'COP', bool(tasa_cop),
+               f"tasa {self._fmt_miles(tasa_cop, 0)} COP/USD" if tasa_cop
+               else "sin tasa COP/USD — pestaña Financiera")
+
+        lbl_error.pack(anchor='w', pady=(8, 0))
 
         ttk.Label(cuerpo, text="Puede escribirlo con coma o con punto: 12,50 o 12.50",
                   font=('Segoe UI', 8), foreground='#94a3b8').pack(anchor='w',
                                                                    pady=(2, 0))
 
+        entry_precio.select_range(0, tk.END)
+        entry_precio.focus()
+
         def guardar(event=None):
-            nuevo_precio = self._parsear_precio(entry_precio.get())
+            nuevo_precio = self._parsear_precio(var_usd.get())
             if nuevo_precio is None:
                 lbl_error.config(text="Escriba un precio válido (no negativo).")
                 entry_precio.focus()
