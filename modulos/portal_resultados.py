@@ -363,8 +363,10 @@ class GestorPortalResultados:
         if not tk:
             return
         try:
+            # Nz() no existe para el motor cuando se consulta por ADODB, asi
+            # que el contador de vistas nunca llegaba a incrementarse.
             self.db.execute(
-                f"UPDATE [AccesosQR] SET Vistas=Nz(Vistas,0)+1, "
+                f"UPDATE [AccesosQR] SET Vistas=IIF(Vistas IS NULL, 0, Vistas)+1, "
                 f"UltimaVista={_fecha_access(datetime.now())} "
                 f"WHERE Token='{tk}'")
         except Exception:

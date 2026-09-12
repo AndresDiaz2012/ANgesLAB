@@ -914,6 +914,32 @@ class GestorSolicitudes:
             # Facturación simple si no hay módulo fiscal
             numero_factura = self._generar_numero_factura_simple()
 
+            # Estado de pago real de la factura.
+            #
+            # Antes toda factura nacia 'Pendiente' con saldo por el total,
+            # incluso la que se pagaba de contado en el mostrador. Como el
+            # ingreso si se registraba en caja, el mismo dinero figuraba a la
+            # vez como cobrado y como pendiente de cobro.
+            #
+            # Quien llama indica cuanto se abono; si no lo indica se conserva
+            # el comportamiento anterior.
+            monto_total = float(solicitud.get('MontoTotal', 0) or 0)
+            if datos.get('MontoAbonado') is None:
+                monto_cobrado = 0.0
+            else:
+                try:
+                    monto_cobrado = max(0.0, min(float(datos.get('MontoAbonado')), monto_total))
+                except (TypeError, ValueError):
+                    monto_cobrado = 0.0
+            saldo = round(monto_total - monto_cobrado, 2)
+
+            if saldo <= 0.01:
+                estado_pago = 'Pagada'
+            elif monto_cobrado > 0:
+                estado_pago = 'Abonada'
+            else:
+                estado_pago = 'Pendiente'
+
             factura_data = {
                 'NumeroFactura': numero_factura,
                 'FechaEmision': datetime.now(),
@@ -923,10 +949,10 @@ class GestorSolicitudes:
                 'MontoDescuento': solicitud.get('MontoDescuento', 0),
                 'TasaIVA': 16,
                 'MontoIVA': solicitud.get('MontoIVA', 0),
-                'MontoTotal': solicitud.get('MontoTotal', 0),
-                'EstadoPago': 'Pendiente',
-                'MontoCobrado': 0,
-                'SaldoPendiente': solicitud.get('MontoTotal', 0),
+                'MontoTotal': monto_total,
+                'EstadoPago': estado_pago,
+                'MontoCobrado': monto_cobrado,
+                'SaldoPendiente': saldo,
                 'UsuarioEmite': self.usuario.get('UsuarioID', 1),
                 'FechaRegistro': datetime.now()
             }

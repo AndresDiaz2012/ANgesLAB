@@ -229,18 +229,30 @@ class GestorCuentasPorCobrar:
     def importar_solicitudes_pendientes(self):
         """Importa solicitudes con saldo pendiente que no estan en CxC."""
         try:
-            # Solicitudes cobradas parcialmente o sin cobrar
+            # Solicitudes cobradas parcialmente o sin cobrar.
+            #
+            # Nz() aqui no sirve: es una funcion de la interfaz de Access y el
+            # motor no la conoce cuando se consulta por ADODB, asi que la
+            # consulta entera fallaba y el boton no importaba nada. IIF si
+            # esta disponible por esta via.
+            #
+            # El NOT IN compara contra SolicitudID, no contra FacturaID: son
+            # numeraciones distintas y al mezclarlas una solicitud cuyo ID
+            # coincidiera con el de una factura ya registrada quedaba fuera.
             sql = """
                 SELECT s.SolicitudID, s.NumeroSolicitud, s.PacienteID,
                        p.Nombres & ' ' & p.Apellidos AS NombrePaciente,
-                       s.MontoTotal, Nz(s.MontoCobrado, 0) AS MontoCobrado,
+                       s.MontoTotal,
+                       IIF(s.MontoCobrado IS NULL, 0, s.MontoCobrado) AS MontoCobrado,
                        s.FechaSolicitud
                 FROM Solicitudes s
                 LEFT JOIN Pacientes p ON s.PacienteID = p.PacienteID
-                WHERE Nz(s.MontoTotal, 0) > 0
-                  AND (Nz(s.MontoTotal, 0) - Nz(s.MontoCobrado, 0)) > 0.01
+                WHERE IIF(s.MontoTotal IS NULL, 0, s.MontoTotal) > 0
+                  AND (IIF(s.MontoTotal IS NULL, 0, s.MontoTotal)
+                       - IIF(s.MontoCobrado IS NULL, 0, s.MontoCobrado)) > 0.01
                   AND s.SolicitudID NOT IN (
-                      SELECT Nz(FacturaID, 0) FROM [CuentasPorCobrar]
+                      SELECT IIF(SolicitudID IS NULL, 0, SolicitudID)
+                      FROM [CuentasPorCobrar]
                   )
                 ORDER BY s.FechaSolicitud DESC
             """
@@ -266,7 +278,7 @@ class GestorCuentasPorCobrar:
 
                 try:
                     self.db.execute(
-                        f"INSERT INTO [CuentasPorCobrar] (FacturaID, PacienteID, NombrePaciente, "
+                        f"INSERT INTO [CuentasPorCobrar] (SolicitudID, PacienteID, NombrePaciente, "
                         f"FechaEmision, FechaVencimiento, MontoOriginal, MontoCobrado, SaldoPendiente, "
                         f"DiasVencida, Estado, Observaciones) "
                         f"VALUES ({sol_id}, {pac_id}, '{nombre}', {fe}, {fv}, "

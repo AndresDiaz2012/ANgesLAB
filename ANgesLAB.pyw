@@ -183,6 +183,14 @@ try:
 except ImportError:
     GESTOR_SOLICITUDES_DISPONIBLE = False
 
+# Procedencia: decide si la solicitud se cobra de contado o al seguro
+try:
+    from modulos import procedencia as procedencia_cobro
+    PROCEDENCIA_DISPONIBLE = True
+except ImportError:
+    PROCEDENCIA_DISPONIBLE = False
+    procedencia_cobro = None
+
 # Importar módulo veterinario
 try:
     from modulos.veterinario import GestorVeterinario, crear_gestor_veterinario, ESPECIES, RAZAS, VALORES_REFERENCIA
@@ -271,6 +279,11 @@ except ImportError:
 # Se define al arrancar: indica si Solicitudes tiene la columna Gestante.
 # Permite seguir funcionando contra bases antiguas sin esa columna.
 SOLICITUDES_TIENE_GESTANTE = False
+
+# Igual que el anterior, para las columnas que necesita el cobro por
+# procedencia (ver _asegurar_columnas_cobro).
+SOLICITUDES_TIENE_MONTO_COBRADO = False
+CXC_TIENE_SOLICITUD_ID = False
 
 # Importar módulo de envío por WhatsApp con adjunto automático
 try:
@@ -2170,6 +2183,10 @@ class MainApplication:
         # Columna Gestante en Solicitudes (advertencias de antibiograma)
         self._asegurar_columna_gestante()
 
+        # Columnas de cobro: sin ellas no se puede saber cuanto se abono ni
+        # de que solicitud viene una cuenta por cobrar
+        self._asegurar_columnas_cobro()
+
         # Siempre actualizar catalogo de Microbiologia (agrega pruebas/parametros faltantes)
         try:
             self._crear_catalogo_microbiologia()
@@ -2206,6 +2223,48 @@ class MainApplication:
         except Exception as e:
             SOLICITUDES_TIENE_GESTANTE = False
             _log.warning("No se pudo crear Solicitudes.Gestante: %s", e)
+
+    def _asegurar_columnas_cobro(self):
+        """
+        Agrega las columnas que necesita el cobro por procedencia.
+
+        Solicitudes.MontoCobrado
+            Cuanto se ha cobrado realmente de la solicitud. Antes no existia:
+            el abono se escribia en el recibo impreso pero no quedaba en la
+            base, de modo que una solicitud pagada a medias era
+            indistinguible de una sin pagar.
+
+        CuentasPorCobrar.SolicitudID
+            De que solicitud viene la deuda. Antes se guardaba el ID de la
+            solicitud dentro de la columna FacturaID, mezclando dos
+            numeraciones distintas en un mismo campo.
+        """
+        global SOLICITUDES_TIENE_MONTO_COBRADO, CXC_TIENE_SOLICITUD_ID
+
+        try:
+            db.query_one("SELECT TOP 1 MontoCobrado FROM Solicitudes")
+            SOLICITUDES_TIENE_MONTO_COBRADO = True
+        except Exception:
+            try:
+                db.execute("ALTER TABLE Solicitudes ADD COLUMN MontoCobrado CURRENCY")
+                db.execute("UPDATE Solicitudes SET MontoCobrado = 0 WHERE MontoCobrado IS NULL")
+                SOLICITUDES_TIENE_MONTO_COBRADO = True
+                _log.info("Columna Solicitudes.MontoCobrado creada")
+            except Exception as e:
+                SOLICITUDES_TIENE_MONTO_COBRADO = False
+                _log.warning("No se pudo crear Solicitudes.MontoCobrado: %s", e)
+
+        try:
+            db.query_one("SELECT TOP 1 SolicitudID FROM CuentasPorCobrar")
+            CXC_TIENE_SOLICITUD_ID = True
+        except Exception:
+            try:
+                db.execute("ALTER TABLE CuentasPorCobrar ADD COLUMN SolicitudID LONG")
+                CXC_TIENE_SOLICITUD_ID = True
+                _log.info("Columna CuentasPorCobrar.SolicitudID creada")
+            except Exception as e:
+                CXC_TIENE_SOLICITUD_ID = False
+                _log.warning("No se pudo crear CuentasPorCobrar.SolicitudID: %s", e)
 
     def _asegurar_areas_clinicas(self):
         """
@@ -7277,7 +7336,7 @@ class MainApplication:
                     resultado = self._guardar_agregar_pruebas(win, pruebas_para_guardar, total)
                 else:
                     # MODO: Crear nueva solicitud
-                    resultado = self._guardar_nueva_solicitud(win, pruebas_para_guardar, total, desc_pct, iva_pct)
+                    resultado = self._guardar_nueva_solicitud(win, pruebas_para_guardar, total, desc_pct, iva_pct, abonado)
             else:
                 # Fallback al método antiguo si el gestor no está disponible
                 resultado = self._guardar_solicitud_legacy(win, pruebas_para_guardar, total, desc_pct, iva_pct, abonado)
@@ -7341,30 +7400,21 @@ class MainApplication:
             else:
                 doc_mensaje = f"\nAdvertencia: {doc_result['mensaje']}"
 
-        # Registrar ingreso en caja automaticamente
+        # Asentar el cobro segun la procedencia de la solicitud.
+        # Esta pantalla no pide abono, asi que de contado se cobra el total
+        # del documento, como venia haciendose; lo que cambia es que un
+        # asegurado ya no entra a la caja sino a cuentas por cobrar.
+        cobro = None
         if doc_result and doc_result.get('exito'):
-            try:
-                if VENTANA_ADMIN_DISPONIBLE:
-                    from modulos.modulo_administrativo import GestorCajaChica
-                    _gc = GestorCajaChica(db)
-                    _caja = _gc.obtener_caja_abierta()
-                    if _caja:
-                        _fp_texto = self.combo_forma_pago.get() if hasattr(self, 'combo_forma_pago') else 'Efectivo'
-                        _fp = db.query_one(f"SELECT FormaPagoID FROM [FormasPago] WHERE Nombre LIKE '%{_fp_texto}%' AND Activo=True")
-                        _fp_id = _fp['FormaPagoID'] if _fp else 'Null'
-                        _doc_tipo = 'Recibo' if dialogo.resultado == 'recibo' else 'Factura'
-                        _doc_num = doc_result.get('numero_recibo') or doc_result.get('numero_factura', '')
-                        _gc.registrar_movimiento(_caja['CajaID'], {
-                            'Tipo': 'Ingreso',
-                            'Categoria': 'Pago de solicitud',
-                            'Descripcion': f'{_doc_tipo} {_doc_num}',
-                            'Monto': nuevo_total,
-                            'FormaPagoID': _fp_id,
-                            'Referencia': _doc_num,
-                            'FacturaID': doc_result.get('factura_id', 'Null'),
-                        }, self.user.get('UsuarioID', 1))
-            except Exception as _e_caja:
-                print(f"Advertencia: No se pudo registrar en caja: {_e_caja}")
+            cobro = self._liquidar_cobro_solicitud(
+                sol_id=self.solicitud_existente_id,
+                numero=solicitud_info.get('NumeroSolicitud', ''),
+                total=nuevo_total,
+                abonado=nuevo_total,
+                tipo_servicio=solicitud_info.get('TipoServicio', ''),
+                doc_result=doc_result,
+                forma_pago_texto=(self.combo_forma_pago.get()
+                                  if hasattr(self, 'combo_forma_pago') else 'Efectivo'))
 
         # Mostrar mensaje de éxito
         messagebox.showinfo(
@@ -7372,13 +7422,204 @@ class MainApplication:
             f"{resultado['mensaje']}\n"
             f"Solicitud: {solicitud_info.get('NumeroSolicitud', '')}\n"
             f"Nuevo total: ${nuevo_total:,.2f}{doc_mensaje}"
+            f"{self._texto_resumen_cobro(cobro)}"
         )
 
         win.destroy()
         self.cargar_solicitudes()
         return True
 
-    def _guardar_nueva_solicitud(self, win, pruebas, total, desc_pct, iva_pct):
+    def _calcular_cobro(self, total, abonado, tipo_servicio):
+        """
+        Cuanto se cobra ahora y cuanto queda a deber. Ver modulos/procedencia.
+
+        Si el modulo no esta disponible se conserva el comportamiento
+        historico (cobrar el total) para no dejar la caja sin registrar.
+        """
+        if PROCEDENCIA_DISPONIBLE:
+            return procedencia_cobro.calcular_cobro(total, abonado, tipo_servicio)
+        try:
+            total = float(total or 0)
+        except (TypeError, ValueError):
+            total = 0.0
+        return round(total, 2), 0.0
+
+    def _texto_resumen_cobro(self, cobro):
+        """
+        Linea que se anade al mensaje de exito para que quien registra vea
+        como quedo asentado el dinero, sin tener que abrir el modulo
+        administrativo a comprobarlo.
+        """
+        if not cobro:
+            return ""
+
+        partes = []
+        if cobro['es_credito']:
+            partes.append(f"\nPor seguro: no entra a caja. "
+                          f"Cuenta por cobrar de ${cobro['saldo']:,.2f}.")
+        else:
+            if cobro['en_caja']:
+                partes.append(f"\nCobrado en caja: ${cobro['cobrado']:,.2f}.")
+            if cobro['saldo'] > 0.01:
+                partes.append(f" Saldo por cobrar: ${cobro['saldo']:,.2f}.")
+
+        for aviso in cobro.get('avisos', []):
+            partes.append(f"\n\nATENCION: {aviso}")
+
+        return "".join(partes)
+
+    def _liquidar_cobro_solicitud(self, sol_id, numero, total, abonado,
+                                  tipo_servicio, doc_result, forma_pago_texto):
+        """
+        Asienta el cobro de una solicitud segun su procedencia.
+
+        Es el unico sitio donde se decide si entra dinero a la caja. Antes
+        cada punto de guardado registraba el total como ingreso con solo
+        emitir el documento, de modo que un paciente por seguro aparecia como
+        dinero cobrado el mismo dia de la toma de muestra.
+
+        Reglas:
+
+          Asegurado    No toca la caja. Se abre una cuenta por cobrar por el
+                       total, que se salda cuando el seguro liquide.
+
+          Contado      Entra a la caja lo efectivamente abonado. Si el abono
+                       cubre menos que el total, el resto queda como cuenta
+                       por cobrar a nombre del paciente.
+
+        Un abono en cero se interpreta como pago completo, que es como venia
+        comportandose el sistema: la casilla arranca en 0,00 y casi nadie la
+        rellena cuando el paciente paga todo. Para registrar a alguien que no
+        paga nada esta la procedencia asegurada.
+
+        Devuelve un dict con lo asentado, para poder informarlo al usuario.
+        """
+        es_credito = (procedencia_cobro.es_credito(tipo_servicio)
+                      if PROCEDENCIA_DISPONIBLE else False)
+        cobrado, saldo = self._calcular_cobro(total, abonado, tipo_servicio)
+        resumen = {
+            'es_credito': es_credito,
+            'cobrado': cobrado,
+            'saldo': saldo,
+            'en_caja': False,
+            'cuenta_creada': False,
+            'avisos': [],
+        }
+
+        # Dejar constancia en la solicitud de cuanto se cobro
+        if SOLICITUDES_TIENE_MONTO_COBRADO:
+            try:
+                db.execute(f"UPDATE [Solicitudes] SET MontoCobrado={cobrado} "
+                           f"WHERE SolicitudID={sol_id}")
+            except Exception as e:
+                _log.warning("No se pudo guardar MontoCobrado de %s: %s", numero, e)
+
+        # Ingreso de caja: solo por lo realmente cobrado y solo si es contado
+        if cobrado > 0:
+            if not VENTANA_ADMIN_DISPONIBLE:
+                resumen['avisos'].append(
+                    "El modulo administrativo no esta disponible: "
+                    "el ingreso no se registro en caja.")
+            else:
+                try:
+                    from modulos.modulo_administrativo import GestorCajaChica
+                    _gc = GestorCajaChica(db)
+                    _caja = _gc.obtener_caja_abierta()
+                    if not _caja:
+                        # Antes esto se ignoraba en silencio y el dinero
+                        # simplemente no quedaba registrado en ningun lado.
+                        resumen['avisos'].append(
+                            f"No hay una caja abierta: el ingreso de "
+                            f"{cobrado:,.2f} NO quedo registrado. Abra la caja "
+                            f"en el modulo administrativo y registrelo a mano.")
+                        _log.warning("Solicitud %s: cobro de %.2f sin caja abierta",
+                                     numero, cobrado)
+                    else:
+                        _fp_texto = forma_pago_texto or 'Efectivo'
+                        _fp_safe = str(_fp_texto).replace("'", "''")
+                        _fp = db.query_one(
+                            f"SELECT FormaPagoID FROM [FormasPago] "
+                            f"WHERE Nombre LIKE '%{_fp_safe}%' AND Activo=True")
+                        _fp_id = _fp['FormaPagoID'] if _fp else 'Null'
+                        _doc_num = (doc_result.get('numero_recibo')
+                                    or doc_result.get('numero_factura', '')) if doc_result else ''
+                        _doc_tipo = 'Recibo' if (doc_result or {}).get('numero_recibo') else 'Factura'
+                        _gc.registrar_movimiento(_caja['CajaID'], {
+                            'Tipo': 'Ingreso',
+                            'Categoria': 'Pago de solicitud',
+                            'Descripcion': f'{_doc_tipo} {_doc_num}'.strip(),
+                            'Monto': cobrado,
+                            'FormaPagoID': _fp_id,
+                            'Referencia': _doc_num or numero,
+                            'FacturaID': (doc_result or {}).get('factura_id', 'Null'),
+                        }, self.user.get('UsuarioID', 1))
+                        resumen['en_caja'] = True
+                except Exception as e:
+                    _log.error("Solicitud %s: fallo al registrar en caja: %s", numero, e)
+                    resumen['avisos'].append(
+                        f"No se pudo registrar el ingreso en caja: {e}")
+
+        # Cuenta por cobrar por lo que queda debiendose
+        if saldo > 0.01:
+            try:
+                self._crear_cuenta_por_cobrar(sol_id, numero, saldo,
+                                              tipo_servicio, es_credito)
+                resumen['cuenta_creada'] = True
+            except Exception as e:
+                _log.error("Solicitud %s: fallo al crear cuenta por cobrar: %s", numero, e)
+                resumen['avisos'].append(
+                    f"No se pudo crear la cuenta por cobrar de {saldo:,.2f}: {e}")
+
+        return resumen
+
+    def _crear_cuenta_por_cobrar(self, sol_id, numero, saldo, tipo_servicio, es_credito):
+        """
+        Abre la cuenta por cobrar de una solicitud con saldo.
+
+        El seguro paga a plazo; el saldo de un particular se considera vencido
+        de inmediato, porque se esperaba el pago en el mostrador.
+        """
+        paciente = db.query_one(
+            f"SELECT p.PacienteID, p.Nombres & ' ' & p.Apellidos AS NombreCompleto "
+            f"FROM Solicitudes s LEFT JOIN Pacientes p ON s.PacienteID = p.PacienteID "
+            f"WHERE s.SolicitudID = {sol_id}")
+
+        pac_id = (paciente or {}).get('PacienteID') or 'Null'
+        nombre = str((paciente or {}).get('NombreCompleto') or '').strip() or 'Sin nombre'
+        nombre = nombre.replace("'", "''")
+
+        dias = (procedencia_cobro.DIAS_CREDITO_SEGURO
+                if (PROCEDENCIA_DISPONIBLE and es_credito) else 0)
+        emision = datetime.now()
+        vence = emision + timedelta(days=dias)
+
+        if PROCEDENCIA_DISPONIBLE:
+            obs = procedencia_cobro.descripcion_cuenta(tipo_servicio, numero)
+        else:
+            obs = f"Solicitud {numero}"
+        obs = obs.replace("'", "''")
+
+        fe = emision.strftime('#%m/%d/%Y %H:%M:%S#')
+        fv = vence.strftime('#%m/%d/%Y#')
+
+        if CXC_TIENE_SOLICITUD_ID:
+            cols = ("SolicitudID, PacienteID, NombrePaciente, FechaEmision, "
+                    "FechaVencimiento, MontoOriginal, MontoCobrado, SaldoPendiente, "
+                    "DiasVencida, Estado, Observaciones")
+            vals = f"{sol_id}, {pac_id}, '{nombre}', {fe}, {fv}, "
+        else:
+            # Base antigua: sin columna propia, no se vincula la solicitud
+            # para no volver a mezclarla con la numeracion de facturas.
+            cols = ("PacienteID, NombrePaciente, FechaEmision, "
+                    "FechaVencimiento, MontoOriginal, MontoCobrado, SaldoPendiente, "
+                    "DiasVencida, Estado, Observaciones")
+            vals = f"{pac_id}, '{nombre}', {fe}, {fv}, "
+
+        db.execute(
+            f"INSERT INTO [CuentasPorCobrar] ({cols}) VALUES ("
+            f"{vals}{saldo}, 0, {saldo}, 0, 'Pendiente', '{obs}')")
+
+    def _guardar_nueva_solicitud(self, win, pruebas, total, desc_pct, iva_pct, abonado=0):
         """Crea una nueva solicitud usando el gestor"""
         # Verificar permisos
         if not self.gestor_solicitudes.tiene_permiso('crear_solicitud'):
@@ -7392,11 +7633,15 @@ class MainApplication:
         if dialogo.resultado is None:
             return False  # Usuario canceló
 
+        # Procedencia: de ella depende si el cobro entra a caja o queda
+        # como deuda del seguro
+        tipo_servicio = self.combo_tipo.get() if hasattr(self, 'combo_tipo') else 'Particular'
+
         # Preparar datos de la solicitud
         datos_solicitud = {
             'PacienteID': self.pac_id_seleccionado,
             'MedicoID': self.med_map.get(self.combo_medico.get()) if hasattr(self, 'med_map') else None,
-            'TipoServicio': self.combo_tipo.get() if hasattr(self, 'combo_tipo') else 'Particular',
+            'TipoServicio': tipo_servicio,
             'DiagnosticoPresuntivo': self.txt_diagnostico.get('1.0', 'end').strip() if hasattr(self, 'txt_diagnostico') else '',
             'Observaciones': self.txt_observaciones.get('1.0', 'end').strip() if hasattr(self, 'txt_observaciones') else '',
             'PorcentajeDescuento': desc_pct,
@@ -7427,9 +7672,14 @@ class MainApplication:
         doc_mensaje = ""
         doc_result = None
         if dialogo.resultado == 'recibo':
+            # El recibo debe decir lo que el paciente entrego de verdad. Sin
+            # pasarle el monto, daba por abonado el total incluso cuando el
+            # abono era parcial o la solicitud iba por seguro.
+            cobrado_recibo, _ = self._calcular_cobro(total, abonado, tipo_servicio)
             doc_result = self.gestor_solicitudes.generar_recibo(
                 sol_id,
-                {'FormaPago': dialogo.forma_pago}
+                {'FormaPago': dialogo.forma_pago,
+                 'MontoAbonado': cobrado_recibo}
             )
             if doc_result['exito']:
                 doc_mensaje = f"\nRecibo generado: {doc_result['numero_recibo']}"
@@ -7438,9 +7688,13 @@ class MainApplication:
                 doc_mensaje = f"\nAdvertencia recibo: {doc_result['mensaje']}"
 
         elif dialogo.resultado == 'factura':
+            # Igual que el recibo: la factura nace con el estado de pago que
+            # corresponde en vez de quedar siempre pendiente por el total.
+            cobrado_factura, _ = self._calcular_cobro(total, abonado, tipo_servicio)
             doc_result = self.gestor_solicitudes.generar_factura(
                 sol_id,
-                {'forma_pago_nombre': dialogo.forma_pago or 'Efectivo'},
+                {'forma_pago_nombre': dialogo.forma_pago or 'Efectivo',
+                 'MontoAbonado': cobrado_factura},
                 facturacion_fiscal=self._facturacion_fiscal())
             if doc_result['exito']:
                 doc_mensaje = f"\nFactura generada: {doc_result['numero_factura']}"
@@ -7449,35 +7703,24 @@ class MainApplication:
             else:
                 doc_mensaje = f"\nAdvertencia factura: {doc_result['mensaje']}"
 
-        # Registrar ingreso en caja automaticamente
+        # Asentar el cobro segun la procedencia y lo realmente abonado
+        cobro = None
         if doc_result and doc_result.get('exito'):
-            try:
-                if VENTANA_ADMIN_DISPONIBLE:
-                    from modulos.modulo_administrativo import GestorCajaChica
-                    _gc = GestorCajaChica(db)
-                    _caja = _gc.obtener_caja_abierta()
-                    if _caja:
-                        _fp_texto = dialogo.forma_pago or 'Efectivo'
-                        _fp = db.query_one(f"SELECT FormaPagoID FROM [FormasPago] WHERE Nombre LIKE '%{_fp_texto}%' AND Activo=True")
-                        _fp_id = _fp['FormaPagoID'] if _fp else 'Null'
-                        _doc_tipo = 'Recibo' if dialogo.resultado == 'recibo' else 'Factura'
-                        _doc_num = doc_result.get('numero_recibo') or doc_result.get('numero_factura', '')
-                        _gc.registrar_movimiento(_caja['CajaID'], {
-                            'Tipo': 'Ingreso',
-                            'Categoria': 'Pago de solicitud',
-                            'Descripcion': f'{_doc_tipo} {_doc_num}',
-                            'Monto': total,
-                            'FormaPagoID': _fp_id,
-                            'Referencia': _doc_num,
-                            'FacturaID': doc_result.get('factura_id', 'Null'),
-                        }, self.user.get('UsuarioID', 1))
-            except Exception as _e_caja:
-                print(f"Advertencia: No se pudo registrar en caja: {_e_caja}")
+            cobro = self._liquidar_cobro_solicitud(
+                sol_id=sol_id,
+                numero=numero,
+                total=total,
+                abonado=abonado,
+                tipo_servicio=tipo_servicio,
+                doc_result=doc_result,
+                forma_pago_texto=dialogo.forma_pago)
 
-        # Mostrar mensaje de éxito con opcion de imprimir etiquetas
-        abonado = (_numero_usuario(self.entry_abonado.get(), 0)
-                   if hasattr(self, 'entry_abonado') else 0)
-        self._mostrar_exito_solicitud(win, sol_id, numero, total, abonado, doc_mensaje)
+        # Mostrar mensaje de éxito con opcion de imprimir etiquetas.
+        # Lo abonado que se muestra es lo que quedo asentado, no lo tecleado:
+        # de un asegurado es cero aunque la casilla traiga un importe.
+        abonado_real = cobro['cobrado'] if cobro else abonado
+        self._mostrar_exito_solicitud(win, sol_id, numero, total, abonado_real,
+                                      doc_mensaje + self._texto_resumen_cobro(cobro))
         self.cargar_solicitudes()
         return True
 
@@ -7597,6 +7840,12 @@ class MainApplication:
         sol = db.query_one(f"SELECT SolicitudID FROM Solicitudes WHERE NumeroSolicitud='{numero}'")
         sol_id = sol['SolicitudID'] if sol else None
 
+        # Se inicializan fuera del if: si no se recupera el ID de la solicitud
+        # el mensaje final igual los usa
+        doc_mensaje = ""
+        doc_legacy = None
+        cobro = None
+
         if sol_id:
             # Insertar detalles de pruebas
             for prueba in pruebas:
@@ -7611,23 +7860,35 @@ class MainApplication:
                 db.insert('DetalleSolicitudes', detalle)
 
             # Generar documento según selección
-            doc_mensaje = ""
             if tipo_doc == 'recibo':
                 num_recibo = self._generar_recibo_legacy(sol_id, total)
                 if num_recibo:
                     doc_mensaje = f"\n📄 Recibo generado: {num_recibo}"
                     self._generar_pdf_recibo(num_recibo, sol_id, total, pruebas)
+                    doc_legacy = {'exito': True, 'numero_recibo': num_recibo}
             elif tipo_doc == 'factura':
                 num_factura = self._generar_factura_legacy(sol_id, total, pruebas)
                 if num_factura:
                     doc_mensaje = f"\n📄 Factura generada: {num_factura}"
+                    doc_legacy = {'exito': True, 'numero_factura': num_factura}
 
+            # Esta via de respaldo no asentaba el cobro en ningun sitio: la
+            # solicitud quedaba guardada y el dinero sin registrar.
+            cobro = None
+            if doc_legacy:
+                cobro = self._liquidar_cobro_solicitud(
+                    sol_id=sol_id, numero=numero, total=total, abonado=abonado,
+                    tipo_servicio=data.get('TipoServicio', ''),
+                    doc_result=doc_legacy, forma_pago_texto='Efectivo')
+
+        abonado_real = cobro['cobrado'] if cobro else abonado
         messagebox.showinfo(
             "Éxito",
             f"Solicitud {numero} guardada correctamente\n\n"
             f"Total: ${total:,.2f}\n"
-            f"Abonado: ${abonado:,.2f}\n"
-            f"Saldo: ${total - abonado:,.2f}{doc_mensaje}"
+            f"Abonado: ${abonado_real:,.2f}\n"
+            f"Saldo: ${total - abonado_real:,.2f}{doc_mensaje}"
+            f"{self._texto_resumen_cobro(cobro)}"
         )
         win.destroy()
         self.cargar_solicitudes()
