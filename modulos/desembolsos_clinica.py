@@ -1,25 +1,31 @@
 # -*- coding: utf-8 -*-
 """
 ================================================================================
-DESEMBOLSOS DE LA CLINICA
+CARTERA DE ASEGURADOS Y DESEMBOLSOS DE LA CLINICA
 ================================================================================
-Salda la cartera de pacientes asegurados a medida que la administracion de la
-clinica va desembolsando al laboratorio.
+Control paciente por paciente de lo que la clinica adeuda al laboratorio.
 
 Como funciona el convenio:
 
   1. El paciente asegurado se atiende. No paga en el mostrador, asi que no
-     entra dinero a la caja: queda una cuenta por cobrar (ver procedencia.py).
+     entra dinero a la caja: queda una cuenta por cobrar a su nombre, con su
+     fecha de ingreso (ver procedencia.py).
 
-  2. La clinica cobra al seguro y despues desembolsa al laboratorio, casi
-     siempre por varias atenciones a la vez y no atencion por atencion.
+  2. La administracion de la clinica cobra al seguro y va desembolsando al
+     laboratorio.
 
-  3. Ese desembolso se reparte aqui entre las cuentas pendientes, de la mas
-     antigua a la mas reciente, y recien entonces entra el dinero a la caja.
+  3. Cada desembolso se aplica **a los pacientes concretos que la clinica
+     esta pagando**, con su importe. No se reparte a ojo ni por antiguedad:
+     el laboratorio tiene que poder decir, de cada paciente, cuanto se le
+     debe todavia, cuanto le han ido abonando y en que fecha quedo liberado.
 
-Un desembolso puede no alcanzar para todo lo pendiente: la ultima cuenta que
-toca queda abonada en parte y conserva su saldo. Nunca se salda una cuenta con
-dinero que no llego.
+  4. Cuando una cuenta queda en cero se marca su fecha de liberacion. Desde
+     ese momento el paciente sale de la lista de pendientes pero conserva su
+     historial.
+
+Cada abono queda registrado por separado en AbonosCuentaCobrar, de modo que
+un paciente que se paga en tres veces conserva las tres fechas y sus
+importes, no solo el saldo final.
 
 Copyright 2024-2026 ANgesLAB Solutions
 ================================================================================
@@ -34,106 +40,128 @@ except Exception:  # pragma: no cover - respaldo si falta el modulo de logging
     import logging
     _log = logging.getLogger('angeslab.desembolsos')
 
-try:
-    from modulos.procedencia import es_credito
-except Exception:  # pragma: no cover
-    def es_credito(_tipo):
-        return False
+
+# Estados de una cuenta
+ESTADO_PENDIENTE = 'Pendiente'   # no ha abonado nada
+ESTADO_PARCIAL = 'Parcial'       # va pagando
+ESTADO_LIBERADA = 'Cobrada'      # saldada por completo
+
+ESTADOS_ABIERTOS = (ESTADO_PENDIENTE, ESTADO_PARCIAL)
+
+# Filtros de la vista de control
+FILTRO_PENDIENTES = 'pendientes'   # sin abonar nada
+FILTRO_ABONANDO = 'abonando'       # con abonos pero con saldo
+FILTRO_ABIERTAS = 'abiertas'       # las dos anteriores
+FILTRO_LIBERADAS = 'liberadas'     # ya saldadas
+FILTRO_TODAS = 'todas'
 
 
-# Estados que todavia deben dinero
-ESTADOS_ABIERTOS = ('Pendiente', 'Parcial')
-
-
-def repartir_desembolso(monto, cuentas):
-    """
-    Reparte un desembolso entre cuentas pendientes, de la mas antigua a la mas
-    nueva.
-
-    Args:
-        monto: importe desembolsado por la clinica.
-        cuentas: lista de dicts con al menos CuentaCobrarID y SaldoPendiente,
-                 ya ordenada por antiguedad.
-
-    Returns:
-        (aplicaciones, sobrante) donde aplicaciones es una lista de dicts
-        {cuenta_id, monto, saldo_anterior, saldo_nuevo, salda}.
-
-    El calculo va aparte de la escritura en la base para poder mostrarle al
-    usuario que se va a saldar antes de confirmar, y para poder probarlo sin
-    tocar la base.
-    """
+def _f(valor, por_defecto=0.0):
+    """Lee un importe sin que un dato ilegible tumbe el cobro."""
     try:
-        restante = round(max(0.0, float(monto or 0)), 2)
+        return float(valor if valor is not None else por_defecto)
     except (TypeError, ValueError):
-        restante = 0.0
+        return por_defecto
 
-    aplicaciones = []
-    for cuenta in cuentas or []:
-        if restante <= 0.001:
-            break
-        try:
-            saldo = round(float(cuenta.get('SaldoPendiente', 0) or 0), 2)
-        except (TypeError, ValueError):
-            continue
-        if saldo <= 0.001:
-            continue
 
-        aplicado = round(min(restante, saldo), 2)
-        restante = round(restante - aplicado, 2)
-        aplicaciones.append({
-            'cuenta_id': cuenta.get('CuentaCobrarID'),
-            'paciente': cuenta.get('NombrePaciente', ''),
-            'monto': aplicado,
-            'saldo_anterior': saldo,
-            'saldo_nuevo': round(saldo - aplicado, 2),
-            'salda': (saldo - aplicado) <= 0.001,
-        })
+def _fecha_access(momento):
+    return momento.strftime('#%m/%d/%Y %H:%M:%S#')
 
-    return aplicaciones, round(restante, 2)
+
+def _txt(valor, limite=255):
+    return str(valor if valor is not None else '').replace("'", "''")[:limite]
 
 
 class GestorDesembolsos:
-    """Cartera de asegurados y aplicacion de los desembolsos de la clinica."""
+    """Cartera de asegurados: consulta, abonos por paciente y liberacion."""
 
     def __init__(self, db):
         self.db = db
+        self._cache_columnas = {}
 
-    # ------------------------------------------------------------------ leer
+    # ------------------------------------------------------------- esquema
 
-    def _tiene_columna_procedencia(self):
+    def _tiene_columna(self, tabla, columna):
+        """Comprueba una vez si la columna existe, para no pedirla de mas."""
+        clave = f"{tabla}.{columna}"
+        if clave not in self._cache_columnas:
+            try:
+                self.db.query_one(f"SELECT TOP 1 {columna} FROM {tabla}")
+                self._cache_columnas[clave] = True
+            except Exception:
+                self._cache_columnas[clave] = False
+        return self._cache_columnas[clave]
+
+    def asegurar_esquema(self):
+        """
+        Crea lo que hace falta para el control por paciente.
+
+        Se llama al abrir la cartera, de modo que una instalacion que venia
+        de una version anterior quede al dia sin intervencion.
+        """
+        # Fecha en que la cuenta quedo saldada
+        if not self._tiene_columna('CuentasPorCobrar', 'FechaLiberacion'):
+            try:
+                self.db.execute("ALTER TABLE CuentasPorCobrar "
+                                "ADD COLUMN FechaLiberacion DATETIME")
+                self._cache_columnas['CuentasPorCobrar.FechaLiberacion'] = True
+                _log.info("Columna CuentasPorCobrar.FechaLiberacion creada")
+            except Exception as e:
+                _log.warning("No se pudo crear FechaLiberacion: %s", e)
+
+        # Historial de abonos: un paciente puede pagarse en varias veces
         try:
-            self.db.query_one("SELECT TOP 1 TipoProcedencia FROM CuentasPorCobrar")
-            return True
+            self.db.query_one("SELECT TOP 1 AbonoID FROM AbonosCuentaCobrar")
         except Exception:
-            return False
+            try:
+                self.db.execute(
+                    "CREATE TABLE AbonosCuentaCobrar ("
+                    "AbonoID AUTOINCREMENT PRIMARY KEY, "
+                    "CuentaCobrarID LONG, "
+                    "PacienteID LONG, "
+                    "NombrePaciente TEXT(200), "
+                    "FechaAbono DATETIME, "
+                    "Monto CURRENCY, "
+                    "SaldoAnterior CURRENCY, "
+                    "SaldoPosterior CURRENCY, "
+                    "FormaPagoID LONG, "
+                    "Referencia TEXT(120), "
+                    "Origen TEXT(40), "
+                    "UsuarioID LONG, "
+                    "Observaciones TEXT(255))")
+                _log.info("Tabla AbonosCuentaCobrar creada")
+            except Exception as e:
+                _log.warning("No se pudo crear AbonosCuentaCobrar: %s", e)
 
-    def listar_pendientes(self, solo_asegurados=True):
+    # --------------------------------------------------------------- leer
+
+    def listar_cartera(self, filtro=FILTRO_ABIERTAS, solo_asegurados=True,
+                       texto=None, desde=None, hasta=None):
         """
-        Cuentas con saldo, de la mas antigua a la mas reciente.
+        Cartera de asegurados para la vista de control.
 
-        Con solo_asegurados se devuelve unicamente lo que le toca desembolsar
-        a la clinica, para no aplicar su dinero a la deuda de un particular.
+        Args:
+            filtro: cual de los FILTRO_* aplicar.
+            texto: busca por nombre de paciente.
+            desde/hasta: acotan por fecha de ingreso (FechaEmision).
 
-        Las bases que todavia no tienen la columna TipoProcedencia se filtran
-        por el texto de las observaciones, que es como quedaron marcadas las
-        cuentas creadas antes de anadirla.
+        Devuelve las cuentas mas antiguas primero, que es el orden en que
+        conviene reclamarlas.
         """
-        tiene_proc = self._tiene_columna_procedencia()
+        tiene_proc = self._tiene_columna('CuentasPorCobrar', 'TipoProcedencia')
+        tiene_lib = self._tiene_columna('CuentasPorCobrar', 'FechaLiberacion')
 
         campos = ["CuentaCobrarID", "SolicitudID", "PacienteID", "NombrePaciente",
                   "FechaEmision", "FechaVencimiento", "MontoOriginal",
                   "MontoCobrado", "SaldoPendiente", "Estado", "Observaciones"]
-        # Solo se pide si existe: en una base antigua nombrarla tumbaria la
-        # consulta entera y la cartera apareceria vacia.
+        # Nombrar una columna inexistente tumba la consulta entera y la
+        # cartera apareceria vacia, asi que solo se piden si existen.
         if tiene_proc:
             campos.append("TipoProcedencia")
+        if tiene_lib:
+            campos.append("FechaLiberacion")
 
-        estados = ', '.join(f"'{e}'" for e in ESTADOS_ABIERTOS)
-        sql = (f"SELECT {', '.join(campos)} "
-               "FROM [CuentasPorCobrar] "
-               f"WHERE Estado IN ({estados}) "
-               "AND IIF(SaldoPendiente IS NULL, 0, SaldoPendiente) > 0.001")
+        sql = f"SELECT {', '.join(campos)} FROM [CuentasPorCobrar] WHERE 1=1"
 
         if solo_asegurados:
             if tiene_proc:
@@ -141,153 +169,273 @@ class GestorDesembolsos:
             else:
                 sql += " AND Observaciones LIKE 'Asegurado%'"
 
-        sql += " ORDER BY FechaEmision"
+        saldo = "IIF(SaldoPendiente IS NULL, 0, SaldoPendiente)"
+        cobrado = "IIF(MontoCobrado IS NULL, 0, MontoCobrado)"
+
+        if filtro == FILTRO_PENDIENTES:
+            sql += f" AND {saldo} > 0.001 AND {cobrado} <= 0.001"
+        elif filtro == FILTRO_ABONANDO:
+            sql += f" AND {saldo} > 0.001 AND {cobrado} > 0.001"
+        elif filtro == FILTRO_ABIERTAS:
+            sql += f" AND {saldo} > 0.001"
+        elif filtro == FILTRO_LIBERADAS:
+            sql += f" AND {saldo} <= 0.001"
+        # FILTRO_TODAS no anade condicion
+
+        if texto:
+            sql += f" AND NombrePaciente LIKE '%{_txt(texto, 80)}%'"
+        if desde:
+            sql += f" AND FechaEmision >= {_fecha_access(desde)}"
+        if hasta:
+            sql += f" AND FechaEmision <= {_fecha_access(hasta)}"
+
+        sql += " ORDER BY FechaEmision, NombrePaciente"
 
         try:
             return self.db.query(sql) or []
         except Exception as e:
-            _log.error("No se pudo listar la cartera pendiente: %s", e)
+            _log.error("No se pudo listar la cartera: %s", e)
             return []
 
-    def total_pendiente(self, solo_asegurados=True):
-        """Cuanto debe la clinica en total."""
-        return round(sum(float(c.get('SaldoPendiente', 0) or 0)
-                         for c in self.listar_pendientes(solo_asegurados)), 2)
+    def obtener_cuenta(self, cuenta_id):
+        try:
+            return self.db.query_one(
+                f"SELECT * FROM [CuentasPorCobrar] WHERE CuentaCobrarID={int(cuenta_id)}")
+        except Exception as e:
+            _log.error("No se pudo leer la cuenta %s: %s", cuenta_id, e)
+            return None
 
-    def previsualizar(self, monto, solo_asegurados=True):
+    def historial_abonos(self, cuenta_id):
+        """Los abonos de un paciente, del mas reciente al mas antiguo."""
+        try:
+            return self.db.query(
+                f"SELECT * FROM [AbonosCuentaCobrar] "
+                f"WHERE CuentaCobrarID={int(cuenta_id)} "
+                f"ORDER BY FechaAbono DESC") or []
+        except Exception:
+            return []
+
+    def resumen_cartera(self, solo_asegurados=True):
+        """Cifras para las tarjetas de la vista de control."""
+        abiertas = self.listar_cartera(FILTRO_ABIERTAS, solo_asegurados)
+        pendientes = [c for c in abiertas if _f(c.get('MontoCobrado')) <= 0.001]
+        abonando = [c for c in abiertas if _f(c.get('MontoCobrado')) > 0.001]
+        liberadas = self.listar_cartera(FILTRO_LIBERADAS, solo_asegurados)
+
+        return {
+            'total_pendiente': round(sum(_f(c.get('SaldoPendiente')) for c in abiertas), 2),
+            'n_abiertas': len(abiertas),
+            'n_sin_abonar': len(pendientes),
+            'n_abonando': len(abonando),
+            'n_liberadas': len(liberadas),
+            'total_abonado': round(sum(_f(c.get('MontoCobrado')) for c in abiertas), 2),
+        }
+
+    # ------------------------------------------------------------ escribir
+
+    def registrar_abono(self, cuenta_id, monto, usuario_id, forma_pago_id=None,
+                        referencia='', origen='Desembolso clinica',
+                        observaciones='', registrar_en_caja=True):
         """
-        Que saldaria un desembolso, sin escribir nada.
+        Aplica lo que la clinica desembolsa **por un paciente concreto**.
 
-        Sirve para enseñarle al usuario el reparto antes de que confirme.
+        Devuelve (exito, mensaje, detalle).
+
+        El importe no puede pasar del saldo de esa cuenta: si la clinica
+        manda de mas por un paciente, ese excedente corresponde a otro y hay
+        que aplicarlo en su propia cuenta, no inflar esta.
         """
-        cuentas = self.listar_pendientes(solo_asegurados)
-        return repartir_desembolso(monto, cuentas)
+        cuenta = self.obtener_cuenta(cuenta_id)
+        if not cuenta:
+            return False, "No se encontro la cuenta del paciente.", None
 
-    # --------------------------------------------------------------- escribir
+        saldo = round(_f(cuenta.get('SaldoPendiente')), 2)
+        if saldo <= 0.001:
+            return False, (f"{cuenta.get('NombrePaciente', 'El paciente')} ya esta "
+                           f"liberado: no tiene saldo pendiente."), None
 
-    def registrar_desembolso(self, monto, usuario_id, referencia='',
-                             forma_pago_id=None, solo_asegurados=True,
-                             registrar_en_caja=True):
-        """
-        Aplica un desembolso de la clinica a la cartera y lo asienta en caja.
+        monto = round(_f(monto), 2)
+        if monto <= 0:
+            return False, "El importe debe ser mayor que cero.", None
+        if monto > saldo + 0.001:
+            return False, (f"El importe ({monto:,.2f}) supera lo que se le debe a "
+                           f"{cuenta.get('NombrePaciente', 'este paciente')} "
+                           f"({saldo:,.2f})."), None
 
-        Devuelve (exito, mensaje, detalle) donde detalle trae las
-        aplicaciones, el total aplicado y el sobrante.
+        cobrado_nuevo = round(_f(cuenta.get('MontoCobrado')) + monto, 2)
+        saldo_nuevo = round(saldo - monto, 2)
+        libera = saldo_nuevo <= 0.001
+        estado = ESTADO_LIBERADA if libera else ESTADO_PARCIAL
+        ahora = datetime.now()
 
-        El dinero entra a la caja aqui, que es cuando llega de verdad: al
-        registrar la solicitud del asegurado no habia entrado nada.
-        """
-        cuentas = self.listar_pendientes(solo_asegurados)
-        aplicaciones, sobrante = repartir_desembolso(monto, cuentas)
+        sets = [f"MontoCobrado={cobrado_nuevo}",
+                f"SaldoPendiente={saldo_nuevo}",
+                f"Estado='{estado}'"]
+        if self._tiene_columna('CuentasPorCobrar', 'FechaLiberacion'):
+            # Si vuelve a quedar saldo (una anulacion posterior), la fecha de
+            # liberacion deja de tener sentido y se limpia.
+            sets.append(f"FechaLiberacion={_fecha_access(ahora) if libera else 'Null'}")
 
-        if not aplicaciones:
-            if not cuentas:
-                return False, "No hay cuentas de asegurados pendientes de cobro.", None
-            return False, "El monto indicado no alcanza a cubrir ninguna cuenta.", None
+        try:
+            self.db.execute(f"UPDATE [CuentasPorCobrar] SET {', '.join(sets)} "
+                            f"WHERE CuentaCobrarID={int(cuenta_id)}")
+        except Exception as e:
+            _log.error("Abono en cuenta %s: %s", cuenta_id, e)
+            return False, f"No se pudo registrar el abono: {e}", None
 
-        aplicado_total = round(sum(a['monto'] for a in aplicaciones), 2)
-        saldadas = sum(1 for a in aplicaciones if a['salda'])
-        fecha = datetime.now()
+        self._guardar_historial(cuenta, monto, saldo, saldo_nuevo, forma_pago_id,
+                                referencia, origen, usuario_id, observaciones, ahora)
 
-        # Aplicar cuenta por cuenta
-        errores = []
-        aplicadas_ok = []
-        for ap in aplicaciones:
-            estado = 'Cobrada' if ap['salda'] else 'Parcial'
-            try:
-                cobrado_previo = self._cobrado_actual(ap['cuenta_id'])
-                nuevo_cobrado = round(cobrado_previo + ap['monto'], 2)
-                self.db.execute(
-                    f"UPDATE [CuentasPorCobrar] SET "
-                    f"MontoCobrado={nuevo_cobrado}, "
-                    f"SaldoPendiente={ap['saldo_nuevo']}, "
-                    f"Estado='{estado}' "
-                    f"WHERE CuentaCobrarID={ap['cuenta_id']}")
-                aplicadas_ok.append(ap)
-            except Exception as e:
-                _log.error("Desembolso: fallo al aplicar en cuenta %s: %s",
-                           ap['cuenta_id'], e)
-                errores.append(f"cuenta #{ap['cuenta_id']}: {e}")
-
-        if not aplicadas_ok:
-            return False, "No se pudo aplicar el desembolso: " + "; ".join(errores), None
-
-        # El dinero entra a caja por lo que se aplico de verdad
-        aplicado_real = round(sum(a['monto'] for a in aplicadas_ok), 2)
         aviso_caja = ''
-        if registrar_en_caja and aplicado_real > 0:
-            aviso_caja = self._asentar_en_caja(aplicado_real, usuario_id,
-                                               referencia, forma_pago_id,
-                                               len(aplicadas_ok), fecha)
+        if registrar_en_caja:
+            aviso_caja = self._asentar_en_caja(
+                monto, usuario_id, referencia, forma_pago_id,
+                cuenta.get('NombrePaciente', ''), ahora)
 
         detalle = {
-            'aplicaciones': aplicadas_ok,
-            'aplicado': aplicado_real,
-            'sobrante': sobrante,
-            'saldadas': saldadas,
-            'errores': errores,
+            'cuenta_id': cuenta_id,
+            'paciente': cuenta.get('NombrePaciente', ''),
+            'monto': monto,
+            'saldo_anterior': saldo,
+            'saldo_nuevo': saldo_nuevo,
+            'libera': libera,
             'aviso_caja': aviso_caja,
         }
 
-        partes = [f"Desembolso aplicado: {aplicado_real:,.2f} "
-                  f"sobre {len(aplicadas_ok)} cuenta(s), {saldadas} saldada(s)."]
-        if sobrante > 0.001:
-            partes.append(f"Sobran {sobrante:,.2f} sin aplicar: "
-                          f"ya no hay mas saldo pendiente.")
+        nombre = cuenta.get('NombrePaciente', 'El paciente')
+        if libera:
+            msg = f"{nombre}: abonados {monto:,.2f}. Queda LIBERADO."
+        else:
+            msg = f"{nombre}: abonados {monto:,.2f}. Sigue debiendo {saldo_nuevo:,.2f}."
+        if aviso_caja:
+            msg += " " + aviso_caja
+
+        _log.info("Abono de %.2f en cuenta %s (%s) por usuario %s",
+                  monto, cuenta_id, nombre, usuario_id)
+
+        return True, msg, detalle
+
+    def registrar_desembolso(self, lineas, usuario_id, referencia='',
+                             forma_pago_id=None, registrar_en_caja=True):
+        """
+        Aplica un desembolso que cubre a varios pacientes de una vez.
+
+        Args:
+            lineas: lista de dicts {cuenta_id, monto}. Cada paciente lleva su
+                    importe: el desembolso no se reparte solo.
+
+        Devuelve (exito, mensaje, detalle). Las lineas que fallan no impiden
+        que se apliquen las demas, y se informan una por una.
+
+        Se asienta un unico ingreso de caja por el total aplicado, porque a
+        la caja llego un solo pago de la clinica, aunque cubra a varios
+        pacientes.
+        """
+        if not lineas:
+            return False, "No se indico ningun paciente.", None
+
+        aplicadas, errores = [], []
+        ahora = datetime.now()
+
+        for linea in lineas:
+            cuenta_id = linea.get('cuenta_id')
+            monto = round(_f(linea.get('monto')), 2)
+            if monto <= 0:
+                continue
+            # Cada abono se registra sin tocar caja: el ingreso se asienta
+            # una sola vez al final, por el total del desembolso.
+            ok, msg, det = self.registrar_abono(
+                cuenta_id, monto, usuario_id, forma_pago_id=forma_pago_id,
+                referencia=referencia, origen='Desembolso clinica',
+                registrar_en_caja=False)
+            if ok:
+                aplicadas.append(det)
+            else:
+                errores.append(msg)
+
+        if not aplicadas:
+            return False, ("No se aplico ningun abono. " + " ".join(errores)).strip(), None
+
+        total = round(sum(a['monto'] for a in aplicadas), 2)
+        liberados = [a for a in aplicadas if a['libera']]
+
+        aviso_caja = ''
+        if registrar_en_caja and total > 0:
+            aviso_caja = self._asentar_en_caja(
+                total, usuario_id, referencia, forma_pago_id,
+                f"{len(aplicadas)} paciente(s)", ahora)
+
+        partes = [f"Desembolso aplicado: {total:,.2f} sobre {len(aplicadas)} "
+                  f"paciente(s); {len(liberados)} liberado(s)."]
         if aviso_caja:
             partes.append(aviso_caja)
         if errores:
-            partes.append("Con incidencias: " + "; ".join(errores))
+            partes.append("No se aplicaron: " + " ".join(errores))
 
-        _log.info("Desembolso de clinica: %.2f aplicado a %d cuenta(s) por usuario %s",
-                  aplicado_real, len(aplicadas_ok), usuario_id)
-
+        detalle = {
+            'aplicadas': aplicadas,
+            'total': total,
+            'liberados': len(liberados),
+            'errores': errores,
+            'aviso_caja': aviso_caja,
+        }
         return True, " ".join(partes), detalle
 
     # ---------------------------------------------------------------- apoyo
 
-    def _cobrado_actual(self, cuenta_id):
-        fila = self.db.query_one(
-            f"SELECT MontoCobrado FROM [CuentasPorCobrar] "
-            f"WHERE CuentaCobrarID={cuenta_id}")
+    def _guardar_historial(self, cuenta, monto, saldo_ant, saldo_nuevo,
+                           forma_pago_id, referencia, origen, usuario_id,
+                           observaciones, momento):
+        """
+        Deja constancia del abono. Si falla no se deshace el cobro: el saldo
+        ya quedo bien y perder la linea de historial es el mal menor.
+        """
         try:
-            return float((fila or {}).get('MontoCobrado', 0) or 0)
-        except (TypeError, ValueError):
-            return 0.0
+            pac_id = cuenta.get('PacienteID')
+            self.db.execute(
+                "INSERT INTO [AbonosCuentaCobrar] (CuentaCobrarID, PacienteID, "
+                "NombrePaciente, FechaAbono, Monto, SaldoAnterior, SaldoPosterior, "
+                "FormaPagoID, Referencia, Origen, UsuarioID, Observaciones) VALUES ("
+                f"{int(cuenta.get('CuentaCobrarID'))}, "
+                f"{int(pac_id) if pac_id else 'Null'}, "
+                f"'{_txt(cuenta.get('NombrePaciente'), 200)}', "
+                f"{_fecha_access(momento)}, {monto}, {saldo_ant}, {saldo_nuevo}, "
+                f"{int(forma_pago_id) if forma_pago_id else 'Null'}, "
+                f"'{_txt(referencia, 120)}', '{_txt(origen, 40)}', "
+                f"{int(usuario_id) if usuario_id else 'Null'}, "
+                f"'{_txt(observaciones, 255)}')")
+        except Exception as e:
+            _log.warning("No se pudo guardar el historial del abono: %s", e)
 
-    def _asentar_en_caja(self, monto, usuario_id, referencia, forma_pago_id, n_cuentas, fecha):
-        """
-        Registra el ingreso. Devuelve '' si todo fue bien, o el aviso a mostrar.
-
-        Si no hay caja abierta se avisa: el reparto ya quedo hecho y el dinero
-        no puede quedar sin registrar sin que nadie se entere.
-        """
+    def _asentar_en_caja(self, monto, usuario_id, referencia, forma_pago_id,
+                         concepto, momento):
+        """Devuelve '' si todo fue bien, o el aviso que hay que mostrar."""
         try:
             from modulos.modulo_administrativo import GestorCajaChica
             gestor_caja = GestorCajaChica(self.db)
             caja = gestor_caja.obtener_caja_abierta()
             if not caja:
-                _log.warning("Desembolso de %.2f sin caja abierta", monto)
+                _log.warning("Abono de %.2f sin caja abierta", monto)
                 return (f"ATENCION: no hay caja abierta, asi que el ingreso de "
-                        f"{monto:,.2f} no quedo registrado en caja. Las cuentas "
-                        f"si se saldaron: registre el ingreso a mano al abrirla.")
+                        f"{monto:,.2f} no quedo registrado en caja. La cuenta si "
+                        f"se actualizo: registre el ingreso al abrir la caja.")
 
-            ref = referencia or f"Desembolso {fecha.strftime('%d/%m/%Y')}"
+            ref = referencia or f"Desembolso {momento.strftime('%d/%m/%Y')}"
             ok, msg = gestor_caja.registrar_movimiento(caja['CajaID'], {
                 'Tipo': 'Ingreso',
                 'Categoria': 'Desembolso de la clinica',
-                'Descripcion': f"Desembolso sobre {n_cuentas} cuenta(s) de asegurados",
+                'Descripcion': f"Desembolso - {concepto}",
                 'Monto': monto,
                 'FormaPagoID': forma_pago_id if forma_pago_id else 'Null',
                 'Referencia': ref,
                 'FacturaID': 'Null',
             }, usuario_id)
             if not ok:
-                return f"ATENCION: las cuentas se saldaron pero la caja rechazo el ingreso: {msg}"
+                return f"ATENCION: la cuenta se actualizo pero la caja rechazo el ingreso: {msg}"
             return ''
         except Exception as e:
-            _log.error("Desembolso: fallo al asentar en caja: %s", e)
-            return (f"ATENCION: las cuentas se saldaron pero el ingreso de "
+            _log.error("Abono: fallo al asentar en caja: %s", e)
+            return (f"ATENCION: la cuenta se actualizo pero el ingreso de "
                     f"{monto:,.2f} no pudo registrarse en caja: {e}")
 
 

@@ -1649,6 +1649,7 @@ class MainApplication:
                     ("💰", "Caja", self.show_caja),
                     ("📊", "Dashboard Financiero", self.show_dashboard_financiero),
                     ("💳", "Cuentas por Cobrar", self.show_cuentas_cobrar),
+                    ("🏥", "Cartera Asegurados", self.show_cartera_asegurados),
                     ("📋", "Cuentas por Pagar", self.show_cuentas_pagar),
                     ("💸", "Gastos", self.show_gastos),
                     ("🩺", "Comisiones Médicos", self.show_comisiones_medico),
@@ -19442,6 +19443,14 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
                                 "Ejecute: scripts/crear_tablas_administrativo.py")
             return
         self.ventana_admin.show_cuentas_cobrar(self)
+
+    def show_cartera_asegurados(self):
+        """Cartera de asegurados: quien debe, quien va pagando y quien quedo liberado"""
+        if not self.ventana_admin:
+            messagebox.showerror("Error", "Módulo administrativo no disponible.\n"
+                                "Ejecute: scripts/crear_tablas_administrativo.py")
+            return
+        self.ventana_admin.show_cartera_asegurados(self)
 
     def show_cuentas_pagar(self):
         """Cuentas por Pagar"""

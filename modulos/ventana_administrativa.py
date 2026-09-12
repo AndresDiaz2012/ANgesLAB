@@ -741,53 +741,224 @@ class VentanaAdministrativa:
                       bg=COLORS['info'], fg='white', relief='flat', padx=20, pady=8,
                       cursor='hand2', command=importar_solicitudes).pack(side='left', padx=5)
 
-            def desembolso_clinica():
-                """
-                Aplica lo que la clinica desembolsa a la cartera de asegurados.
-
-                La clinica cobra al seguro y paga al laboratorio por varias
-                atenciones a la vez, no cuenta por cuenta: por eso el importe
-                se reparte solo, de la deuda mas antigua a la mas reciente.
-                """
-                from modulos.desembolsos_clinica import crear_gestor_desembolsos
-                gestor = crear_gestor_desembolsos(self.db)
-
-                pendientes = gestor.listar_pendientes(solo_asegurados=True)
-                if not pendientes:
-                    messagebox.showinfo(
-                        "Desembolso de la clinica",
-                        "No hay cuentas de pacientes asegurados pendientes de cobro.")
-                    return
-
-                total = round(sum(float(c.get('SaldoPendiente', 0) or 0)
-                                  for c in pendientes), 2)
-                formas = self._obtener_formas_pago()
-                dialogo = DialogoDesembolsoClinica(app.root, pendientes, total,
-                                                   formas, gestor)
-                if not dialogo.resultado:
-                    return
-
-                exito, msg, _detalle = gestor.registrar_desembolso(
-                    monto=dialogo.resultado['monto'],
-                    usuario_id=(self.user or {}).get('UsuarioID', 1),
-                    referencia=dialogo.resultado.get('referencia', ''),
-                    forma_pago_id=dialogo.resultado.get('forma_pago_id'),
-                    solo_asegurados=True)
-
-                if exito:
-                    messagebox.showinfo("Desembolso aplicado", msg)
-                    self.show_cuentas_cobrar(app)
-                else:
-                    messagebox.showerror("Desembolso", msg)
-
             tk.Button(btn_frame, text="💵 Registrar Cobro", font=('Segoe UI', 11, 'bold'),
                       bg=COLORS['success'], fg='white', relief='flat', padx=20, pady=8,
                       cursor='hand2', command=registrar_cobro).pack(side='left', padx=5)
 
-            tk.Button(btn_frame, text="🏥 Desembolso de la Clínica",
+            tk.Button(btn_frame, text="🏥 Cartera de Asegurados",
                       font=('Segoe UI', 11, 'bold'),
                       bg=COLORS['warning'], fg='white', relief='flat', padx=20, pady=8,
-                      cursor='hand2', command=desembolso_clinica).pack(side='left', padx=5)
+                      cursor='hand2',
+                      command=lambda: self.show_cartera_asegurados(app)).pack(side='left', padx=5)
+
+    # ==================================================================
+    # VISTA 3b: CARTERA DE ASEGURADOS
+    # ==================================================================
+    def show_cartera_asegurados(self, app):
+        """
+        Control paciente por paciente de lo que la clinica adeuda.
+
+        Responde de un vistazo las tres preguntas del convenio: quien esta
+        pendiente por cancelar, quien va pagando y quien quedo liberado, con
+        sus fechas de ingreso y de liberacion.
+        """
+        if not self._puede_registrar_movimientos():
+            messagebox.showwarning("Acceso Denegado",
+                                   "No tiene permisos para esta seccion.")
+            return
+
+        from modulos.desembolsos_clinica import (
+            FILTRO_ABIERTAS, FILTRO_ABONANDO, FILTRO_LIBERADAS,
+            FILTRO_PENDIENTES, FILTRO_TODAS, crear_gestor_desembolsos)
+
+        gestor = crear_gestor_desembolsos(self.db)
+        gestor.asegurar_esquema()
+
+        app.clear_content()
+        app.set_title("🏥 Cartera de Asegurados")
+        scrollable = app.setup_scrollable_content()
+
+        main_frame = tk.Frame(scrollable, bg=COLORS['bg'])
+        main_frame.pack(fill='both', expand=True, padx=20, pady=10)
+
+        tk.Label(main_frame,
+                 text="Pacientes atendidos por convenio. La clínica cobra al seguro "
+                      "y desembolsa al laboratorio; aquí se descarga paciente por paciente.",
+                 font=('Segoe UI', 9), bg=COLORS['bg'],
+                 fg=COLORS['text_light']).pack(anchor='w', pady=(0, 8))
+
+        # ── Tarjetas de resumen ────────────────────────────────────────
+        resumen = gestor.resumen_cartera()
+        cards = tk.Frame(main_frame, bg=COLORS['bg'])
+        cards.pack(fill='x', pady=5)
+        self._crear_tarjeta_kpi(cards, "💰", "Total por Cobrar",
+                                resumen['total_pendiente'], COLORS['warning'])
+        self._crear_tarjeta_kpi(cards, "✅", "Ya Abonado",
+                                resumen['total_abonado'], COLORS['success'])
+
+        contadores = tk.Frame(main_frame, bg=COLORS['bg'])
+        contadores.pack(fill='x', pady=(4, 10))
+        tk.Label(contadores,
+                 text=(f"Sin abonar: {resumen['n_sin_abonar']}    "
+                       f"Abonando: {resumen['n_abonando']}    "
+                       f"Liberados: {resumen['n_liberadas']}"),
+                 font=('Segoe UI', 10, 'bold'), bg=COLORS['bg'],
+                 fg=COLORS['text']).pack(anchor='w')
+
+        # ── Filtros ────────────────────────────────────────────────────
+        filtro_frame = tk.LabelFrame(main_frame, text="  Filtros  ",
+                                     font=('Segoe UI', 10, 'bold'),
+                                     bg=COLORS['bg'], fg=COLORS['text'])
+        filtro_frame.pack(fill='x', pady=(0, 10))
+        fi = tk.Frame(filtro_frame, bg=COLORS['bg'])
+        fi.pack(fill='x', padx=10, pady=8)
+
+        tk.Label(fi, text="Mostrar:", font=('Segoe UI', 10),
+                 bg=COLORS['bg']).pack(side='left')
+        opciones = [
+            ("Con saldo (todos)", FILTRO_ABIERTAS),
+            ("Sin abonar nada", FILTRO_PENDIENTES),
+            ("Van pagando", FILTRO_ABONANDO),
+            ("Liberados", FILTRO_LIBERADAS),
+            ("Todos", FILTRO_TODAS),
+        ]
+        combo_filtro = ttk.Combobox(fi, font=('Segoe UI', 10), width=20,
+                                    state='readonly',
+                                    values=[o[0] for o in opciones])
+        combo_filtro.set(opciones[0][0])
+        combo_filtro.pack(side='left', padx=(6, 15))
+        mapa_filtro = dict(opciones)
+
+        tk.Label(fi, text="Paciente:", font=('Segoe UI', 10),
+                 bg=COLORS['bg']).pack(side='left')
+        entry_busca = ttk.Entry(fi, font=('Segoe UI', 10), width=24)
+        entry_busca.pack(side='left', padx=6)
+
+        # ── Tabla ──────────────────────────────────────────────────────
+        tabla_frame = tk.Frame(main_frame, bg=COLORS['bg'])
+        tabla_frame.pack(fill='both', expand=True)
+
+        cols = ('ID', 'Paciente', 'Solicitud', 'Ingreso', 'Monto',
+                'Abonado', 'Saldo', 'Estado', 'Liberado')
+        anchos = (45, 200, 85, 95, 90, 90, 90, 95, 95)
+        tree = ttk.Treeview(tabla_frame, columns=cols, show='headings', height=14)
+        for c, w in zip(cols, anchos):
+            tree.heading(c, text=c)
+            tree.column(c, width=w,
+                        anchor='w' if c in ('Paciente',) else 'center')
+        vsb = ttk.Scrollbar(tabla_frame, orient='vertical', command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+        tree.pack(side='left', fill='both', expand=True)
+        vsb.pack(side='right', fill='y')
+
+        tree.tag_configure('liberado', background='#e8f5e9')
+        tree.tag_configure('abonando', background='#fff8e1')
+
+        def fmt_fecha(v):
+            if not v:
+                return '—'
+            try:
+                return v.strftime('%d/%m/%Y')
+            except AttributeError:
+                return str(v)[:10]
+
+        def cargar():
+            for i in tree.get_children():
+                tree.delete(i)
+            filtro = mapa_filtro.get(combo_filtro.get(), FILTRO_ABIERTAS)
+            texto = entry_busca.get().strip() or None
+            for c in gestor.listar_cartera(filtro=filtro, texto=texto):
+                saldo = float(c.get('SaldoPendiente') or 0)
+                abonado = float(c.get('MontoCobrado') or 0)
+                if saldo <= 0.001:
+                    tag, estado = 'liberado', 'Liberado'
+                elif abonado > 0.001:
+                    tag, estado = 'abonando', 'Abonando'
+                else:
+                    tag, estado = '', 'Pendiente'
+                tree.insert('', 'end', iid=str(c.get('CuentaCobrarID')), values=(
+                    c.get('CuentaCobrarID'),
+                    c.get('NombrePaciente', ''),
+                    c.get('SolicitudID') or '—',
+                    fmt_fecha(c.get('FechaEmision')),
+                    f"${float(c.get('MontoOriginal') or 0):,.2f}",
+                    f"${abonado:,.2f}",
+                    f"${saldo:,.2f}",
+                    estado,
+                    fmt_fecha(c.get('FechaLiberacion')),
+                ), tags=(tag,) if tag else ())
+
+        combo_filtro.bind('<<ComboboxSelected>>', lambda e: cargar())
+        entry_busca.bind('<KeyRelease>', lambda e: cargar())
+        tk.Button(fi, text="🔍 Buscar", font=('Segoe UI', 10),
+                  bg=COLORS['primary'], fg='white', relief='flat',
+                  padx=10, pady=3, cursor='hand2',
+                  command=cargar).pack(side='left', padx=8)
+        cargar()
+
+        # ── Acciones ───────────────────────────────────────────────────
+        btns = tk.Frame(main_frame, bg=COLORS['bg'])
+        btns.pack(fill='x', pady=10)
+
+        def seleccionada():
+            sel = tree.selection()
+            if not sel:
+                messagebox.showwarning("Seleccione",
+                                       "Seleccione un paciente de la lista.")
+                return None
+            return int(sel[0])
+
+        def abonar_paciente():
+            """Registra lo que la clinica desembolso por ESE paciente."""
+            cuenta_id = seleccionada()
+            if cuenta_id is None:
+                return
+            cuenta = gestor.obtener_cuenta(cuenta_id)
+            if not cuenta:
+                messagebox.showerror("Error", "No se encontró la cuenta.")
+                return
+            if float(cuenta.get('SaldoPendiente') or 0) <= 0.001:
+                messagebox.showinfo(
+                    "Paciente liberado",
+                    f"{cuenta.get('NombrePaciente', 'Este paciente')} ya está "
+                    f"liberado: no tiene saldo pendiente.")
+                return
+
+            dlg = DialogoAbonoPaciente(app.root, cuenta, self._obtener_formas_pago(),
+                                       gestor.historial_abonos(cuenta_id))
+            if not dlg.resultado:
+                return
+            ok, msg, _det = gestor.registrar_abono(
+                cuenta_id, dlg.resultado['monto'],
+                usuario_id=(self.user or {}).get('UsuarioID', 1),
+                forma_pago_id=dlg.resultado.get('forma_pago_id'),
+                referencia=dlg.resultado.get('referencia', ''),
+                observaciones=dlg.resultado.get('observaciones', ''))
+            if ok:
+                messagebox.showinfo("Abono registrado", msg)
+                self.show_cartera_asegurados(app)
+            else:
+                messagebox.showerror("No se pudo registrar", msg)
+
+        def ver_historial():
+            cuenta_id = seleccionada()
+            if cuenta_id is None:
+                return
+            cuenta = gestor.obtener_cuenta(cuenta_id)
+            DialogoHistorialAbonos(app.root, cuenta,
+                                   gestor.historial_abonos(cuenta_id))
+
+        tk.Button(btns, text="💵 Registrar abono del paciente",
+                  font=('Segoe UI', 11, 'bold'),
+                  bg=COLORS['success'], fg='white', relief='flat',
+                  padx=20, pady=8, cursor='hand2',
+                  command=abonar_paciente).pack(side='left', padx=5)
+
+        tk.Button(btns, text="📜 Ver historial de abonos",
+                  font=('Segoe UI', 11),
+                  bg=COLORS['info'], fg='white', relief='flat',
+                  padx=20, pady=8, cursor='hand2',
+                  command=ver_historial).pack(side='left', padx=5)
 
     # ==================================================================
     # VISTA 4: CUENTAS POR PAGAR
@@ -2366,30 +2537,59 @@ class DialogoRegistrarCobro:
         self.dialog.destroy()
 
 
-class DialogoDesembolsoClinica:
-    """
-    Dialogo para aplicar un desembolso de la administracion de la clinica.
 
-    La clinica paga por varias atenciones a la vez, asi que en vez de pedir
-    cuenta por cuenta se escribe el importe recibido y el sistema lo reparte
-    de la deuda mas antigua a la mas reciente. Antes de confirmar se muestra
-    exactamente que cuentas quedarian saldadas, porque una vez aplicado el
-    reparto hay que deshacerlo a mano.
+
+def _leer_importe(texto):
+    """
+    Lee un importe admitiendo 1.500,50 y 1500.50.
+
+    Devuelve None si no se entiende, para poder avisar en vez de tomarlo como
+    cero, que es lo que descuadraba los importes antes de la v2.5.1.
+    """
+    texto = (texto or '').strip().replace(' ', '')
+    if not texto:
+        return None
+    if ',' in texto and '.' in texto:
+        texto = texto.replace('.', '').replace(',', '.')
+    elif ',' in texto:
+        texto = texto.replace(',', '.')
+    try:
+        return float(texto)
+    except ValueError:
+        return None
+
+
+def _fmt_fecha_corta(valor):
+    if not valor:
+        return '—'
+    try:
+        return valor.strftime('%d/%m/%Y')
+    except AttributeError:
+        return str(valor)[:10]
+
+
+class DialogoAbonoPaciente:
+    """
+    Registra lo que la clinica desembolso por UN paciente.
+
+    El importe se pide por paciente y no como un pago general que el sistema
+    reparta: el laboratorio necesita poder decir, de cada uno, cuanto se le
+    abono y cuando. Debajo se muestran los abonos anteriores para no repetir
+    uno ya registrado.
     """
 
-    def __init__(self, parent, pendientes, total_pendiente, formas_pago, gestor):
+    def __init__(self, parent, cuenta, formas_pago, historial=None):
         self.resultado = None
-        self.pendientes = pendientes
-        self.total_pendiente = total_pendiente
-        self.gestor = gestor
+        self.cuenta = cuenta
+        self.historial = historial or []
 
         self.dialog = tk.Toplevel(parent)
-        self.dialog.title("Desembolso de la Clínica")
+        self.dialog.title("Registrar abono del paciente")
         self.dialog.configure(bg='white')
         self.dialog.grab_set()
         self.dialog.focus_set()
 
-        ancho, alto = 640, 620
+        ancho, alto = 560, 560
         x = (self.dialog.winfo_screenwidth() - ancho) // 2
         y = (self.dialog.winfo_screenheight() - alto) // 2
         self.dialog.geometry(f"{ancho}x{alto}+{x}+{y}")
@@ -2399,188 +2599,238 @@ class DialogoDesembolsoClinica:
         self.dialog.wait_window()
 
     def _crear_ui(self, formas_pago):
-        header = tk.Frame(self.dialog, bg=COLORS['warning'], height=50)
+        saldo = float(self.cuenta.get('SaldoPendiente') or 0)
+        monto_orig = float(self.cuenta.get('MontoOriginal') or 0)
+        abonado = float(self.cuenta.get('MontoCobrado') or 0)
+
+        header = tk.Frame(self.dialog, bg=COLORS['success'], height=50)
         header.pack(fill='x')
         header.pack_propagate(False)
-        tk.Label(header, text="🏥 Desembolso de la Clínica",
-                 font=('Segoe UI', 13, 'bold'),
-                 bg=COLORS['warning'], fg='white').pack(pady=12)
+        tk.Label(header, text="💵 Abono del paciente", font=('Segoe UI', 13, 'bold'),
+                 bg=COLORS['success'], fg='white').pack(pady=12)
 
         content = tk.Frame(self.dialog, bg='white')
         content.pack(fill='both', expand=True, padx=25, pady=12)
 
+        tk.Label(content, text=self.cuenta.get('NombrePaciente', 'N/A'),
+                 font=('Segoe UI', 13, 'bold'), bg='white',
+                 fg=COLORS['text']).pack(anchor='w')
         tk.Label(content,
-                 text=f"Pendiente de asegurados: ${self.total_pendiente:,.2f}"
-                      f"   ({len(self.pendientes)} cuenta(s))",
-                 font=('Segoe UI', 12, 'bold'),
-                 bg='white', fg=COLORS['warning']).pack(anchor='w', pady=(0, 2))
-        tk.Label(content,
-                 text="El importe se aplica de la deuda más antigua a la más reciente.",
+                 text=(f"Ingreso: {_fmt_fecha_corta(self.cuenta.get('FechaEmision'))}"
+                       f"    Solicitud: {self.cuenta.get('SolicitudID') or '—'}"),
                  font=('Segoe UI', 9), bg='white',
-                 fg=COLORS['text_light']).pack(anchor='w', pady=(0, 10))
+                 fg=COLORS['text_light']).pack(anchor='w', pady=(0, 8))
 
+        cifras = tk.Frame(content, bg='white')
+        cifras.pack(fill='x', pady=(0, 10))
+        for etiqueta, valor, color in (
+                ("Monto", monto_orig, COLORS['text']),
+                ("Ya abonado", abonado, COLORS['success']),
+                ("Debe", saldo, COLORS['warning'])):
+            col = tk.Frame(cifras, bg='white')
+            col.pack(side='left', padx=(0, 28))
+            tk.Label(col, text=etiqueta, font=('Segoe UI', 9), bg='white',
+                     fg=COLORS['text_light']).pack(anchor='w')
+            tk.Label(col, text=f"${valor:,.2f}", font=('Segoe UI', 12, 'bold'),
+                     bg='white', fg=color).pack(anchor='w')
+
+        tk.Label(content, text="Importe que desembolsa la clínica por este paciente ($):",
+                 font=('Segoe UI', 10), bg='white').pack(anchor='w', pady=(0, 3))
         fila = tk.Frame(content, bg='white')
         fila.pack(fill='x', pady=(0, 8))
-
-        izq = tk.Frame(fila, bg='white')
-        izq.pack(side='left')
-        tk.Label(izq, text="Monto recibido ($):", font=('Segoe UI', 11),
-                 bg='white').pack(anchor='w')
-        self.entry_monto = ttk.Entry(izq, font=('Segoe UI', 12), width=18)
-        self.entry_monto.pack(anchor='w', pady=(2, 0))
-        self.entry_monto.insert(0, f"{self.total_pendiente:.2f}")
-        self.entry_monto.bind('<KeyRelease>', lambda e: self._previsualizar())
+        self.entry_monto = ttk.Entry(fila, font=('Segoe UI', 13), width=16)
+        self.entry_monto.pack(side='left')
+        self.entry_monto.insert(0, f"{saldo:.2f}")
         self.entry_monto.focus_set()
+        self.entry_monto.select_range(0, 'end')
+        tk.Button(fila, text="Todo lo pendiente", font=('Segoe UI', 9),
+                  bg=COLORS['info'], fg='white', relief='flat', padx=10, pady=2,
+                  cursor='hand2',
+                  command=lambda: self._poner(saldo)).pack(side='left', padx=8)
 
-        der = tk.Frame(fila, bg='white')
-        der.pack(side='left', padx=(25, 0))
-        tk.Label(der, text="Forma de pago:", font=('Segoe UI', 11),
+        self.lbl_efecto = tk.Label(content, text="", font=('Segoe UI', 10, 'bold'),
+                                   bg='white', anchor='w')
+        self.lbl_efecto.pack(fill='x', pady=(0, 8))
+        self.entry_monto.bind('<KeyRelease>', lambda e: self._actualizar_efecto(saldo))
+
+        fila2 = tk.Frame(content, bg='white')
+        fila2.pack(fill='x', pady=(0, 8))
+        izq = tk.Frame(fila2, bg='white')
+        izq.pack(side='left')
+        tk.Label(izq, text="Forma de pago:", font=('Segoe UI', 10),
                  bg='white').pack(anchor='w')
-        nombres_fp = [f.get('Nombre', '') for f in formas_pago]
+        nombres = [f.get('Nombre', '') for f in formas_pago]
         self.formas_map = {f.get('Nombre', ''): f.get('FormaPagoID') for f in formas_pago}
-        self.combo_pago = ttk.Combobox(der, font=('Segoe UI', 11), width=22,
-                                       state='readonly', values=nombres_fp)
-        if nombres_fp:
-            self.combo_pago.set(nombres_fp[0])
+        self.combo_pago = ttk.Combobox(izq, font=('Segoe UI', 10), width=20,
+                                       state='readonly', values=nombres)
+        if nombres:
+            self.combo_pago.set(nombres[0])
         self.combo_pago.pack(anchor='w', pady=(2, 0))
 
-        tk.Label(content, text="Referencia (transferencia, cheque, lote):",
-                 font=('Segoe UI', 11), bg='white').pack(anchor='w', pady=(6, 2))
-        self.entry_ref = ttk.Entry(content, font=('Segoe UI', 11), width=52)
-        self.entry_ref.pack(anchor='w', pady=(0, 10))
+        der = tk.Frame(fila2, bg='white')
+        der.pack(side='left', padx=(20, 0))
+        tk.Label(der, text="Referencia (transferencia, cheque, lote):",
+                 font=('Segoe UI', 10), bg='white').pack(anchor='w')
+        self.entry_ref = ttk.Entry(der, font=('Segoe UI', 10), width=28)
+        self.entry_ref.pack(anchor='w', pady=(2, 0))
 
-        tk.Label(content, text="Se saldarían estas cuentas:",
-                 font=('Segoe UI', 11, 'bold'), bg='white',
-                 fg=COLORS['text']).pack(anchor='w', pady=(0, 4))
-
-        tabla_frame = tk.Frame(content, bg='white')
-        tabla_frame.pack(fill='both', expand=True)
-
-        cols = ('Paciente', 'Deuda', 'Se aplica', 'Queda', 'Estado')
-        self.tree = ttk.Treeview(tabla_frame, columns=cols, show='headings', height=9)
-        for c, w in zip(cols, (210, 90, 90, 90, 95)):
-            self.tree.heading(c, text=c)
-            self.tree.column(c, width=w,
-                             anchor='w' if c == 'Paciente' else 'e')
-        vsb = ttk.Scrollbar(tabla_frame, orient='vertical', command=self.tree.yview)
-        self.tree.configure(yscrollcommand=vsb.set)
-        self.tree.pack(side='left', fill='both', expand=True)
-        vsb.pack(side='right', fill='y')
-
-        self.lbl_resumen = tk.Label(content, text="", font=('Segoe UI', 10, 'bold'),
-                                    bg='white', fg=COLORS['text'], anchor='w',
-                                    justify='left', wraplength=560)
-        self.lbl_resumen.pack(fill='x', pady=(8, 0))
+        if self.historial:
+            tk.Label(content, text="Abonos anteriores:", font=('Segoe UI', 10, 'bold'),
+                     bg='white', fg=COLORS['text']).pack(anchor='w', pady=(6, 3))
+            caja = tk.Frame(content, bg='white')
+            caja.pack(fill='both', expand=True)
+            tree = ttk.Treeview(caja, columns=('Fecha', 'Monto', 'Ref'),
+                                show='headings', height=4)
+            for c, w in zip(('Fecha', 'Monto', 'Ref'), (95, 90, 200)):
+                tree.heading(c, text=c)
+                tree.column(c, width=w, anchor='w' if c == 'Ref' else 'center')
+            for a in self.historial:
+                tree.insert('', 'end', values=(
+                    _fmt_fecha_corta(a.get('FechaAbono')),
+                    f"${float(a.get('Monto') or 0):,.2f}",
+                    a.get('Referencia', '') or '—'))
+            tree.pack(fill='both', expand=True)
 
         btn_frame = tk.Frame(self.dialog, bg='white')
         btn_frame.pack(side='bottom', fill='x', padx=25, pady=12)
-
-        self.btn_aplicar = tk.Button(btn_frame, text="✅ Aplicar desembolso",
-                                     font=('Segoe UI', 11, 'bold'),
-                                     bg=COLORS['success'], fg='white', relief='flat',
-                                     padx=20, pady=8, cursor='hand2',
-                                     command=self._guardar)
-        self.btn_aplicar.pack(side='left', padx=5)
+        tk.Button(btn_frame, text="✅ Registrar abono", font=('Segoe UI', 11, 'bold'),
+                  bg=COLORS['success'], fg='white', relief='flat', padx=20, pady=8,
+                  cursor='hand2', command=self._guardar).pack(side='left', padx=5)
         tk.Button(btn_frame, text="❌ Cancelar", font=('Segoe UI', 11),
                   bg=COLORS['text_light'], fg='white', relief='flat', padx=20, pady=8,
                   cursor='hand2', command=self.dialog.destroy).pack(side='right', padx=5)
 
-        self._previsualizar()
+        self._actualizar_efecto(saldo)
 
-    def _leer_monto(self):
-        """Lee el importe admitiendo 1.500,50 y 1500.50, como el resto del sistema."""
-        texto = (self.entry_monto.get() or '').strip()
-        if not texto:
-            return 0.0
-        limpio = texto.replace(' ', '')
-        if ',' in limpio and '.' in limpio:
-            limpio = limpio.replace('.', '').replace(',', '.')
-        elif ',' in limpio:
-            limpio = limpio.replace(',', '.')
-        try:
-            return float(limpio)
-        except ValueError:
-            return None
+    def _poner(self, valor):
+        self.entry_monto.delete(0, 'end')
+        self.entry_monto.insert(0, f"{valor:.2f}")
+        self._actualizar_efecto(valor)
 
-    def _previsualizar(self):
-        """Muestra el reparto sin escribir nada todavia."""
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-
-        monto = self._leer_monto()
+    def _actualizar_efecto(self, saldo):
+        """Dice antes de confirmar si el paciente queda liberado o sigue debiendo."""
+        monto = _leer_importe(self.entry_monto.get())
         if monto is None:
-            self.lbl_resumen.config(text="El monto no se entiende. Escriba solo cifras.",
-                                    fg=COLORS['danger'])
+            self.lbl_efecto.config(text="El importe no se entiende.",
+                                   fg=COLORS['danger'])
             return
         if monto <= 0:
-            self.lbl_resumen.config(text="Escriba el importe recibido de la clínica.",
-                                    fg=COLORS['text_light'])
+            self.lbl_efecto.config(text="El importe debe ser mayor que cero.",
+                                   fg=COLORS['danger'])
             return
-
-        from modulos.desembolsos_clinica import repartir_desembolso
-        aplicaciones, sobrante = repartir_desembolso(monto, self.pendientes)
-
-        for ap in aplicaciones:
-            self.tree.insert('', 'end', values=(
-                ap['paciente'],
-                f"${ap['saldo_anterior']:,.2f}",
-                f"${ap['monto']:,.2f}",
-                f"${ap['saldo_nuevo']:,.2f}",
-                'Saldada' if ap['salda'] else 'Abonada',
-            ))
-
-        aplicado = round(sum(a['monto'] for a in aplicaciones), 2)
-        saldadas = sum(1 for a in aplicaciones if a['salda'])
-        queda = round(self.total_pendiente - aplicado, 2)
-
-        texto = (f"Se aplican ${aplicado:,.2f} a {len(aplicaciones)} cuenta(s): "
-                 f"{saldadas} quedarían saldadas. "
-                 f"Pendiente después: ${queda:,.2f}.")
-        color = COLORS['text']
-        if sobrante > 0.001:
-            texto += (f"\nSobran ${sobrante:,.2f} que no se aplican: "
-                      f"no hay más deuda de asegurados que cubrir.")
-            color = COLORS['warning']
-        self.lbl_resumen.config(text=texto, fg=color)
+        if monto > saldo + 0.001:
+            self.lbl_efecto.config(
+                text=f"Excede lo que se le debe (${saldo:,.2f}).",
+                fg=COLORS['danger'])
+            return
+        resto = round(saldo - monto, 2)
+        if resto <= 0.001:
+            self.lbl_efecto.config(text="→ El paciente queda LIBERADO.",
+                                   fg=COLORS['success'])
+        else:
+            self.lbl_efecto.config(text=f"→ Seguirá debiendo ${resto:,.2f}.",
+                                   fg=COLORS['warning'])
 
     def _guardar(self):
-        monto = self._leer_monto()
+        saldo = float(self.cuenta.get('SaldoPendiente') or 0)
+        monto = _leer_importe(self.entry_monto.get())
         if monto is None:
-            messagebox.showerror("Monto inválido",
+            messagebox.showerror("Importe inválido",
                                  "Escriba un importe válido (por ejemplo 1.500,50).",
                                  parent=self.dialog)
             return
         if monto <= 0:
-            messagebox.showerror("Monto inválido",
+            messagebox.showerror("Importe inválido",
                                  "El importe debe ser mayor que cero.",
                                  parent=self.dialog)
             return
-
-        from modulos.desembolsos_clinica import repartir_desembolso
-        aplicaciones, sobrante = repartir_desembolso(monto, self.pendientes)
-        if not aplicaciones:
-            messagebox.showwarning("Sin efecto",
-                                   "Ese importe no alcanza a cubrir ninguna cuenta.",
-                                   parent=self.dialog)
-            return
-
-        aplicado = round(sum(a['monto'] for a in aplicaciones), 2)
-        saldadas = sum(1 for a in aplicaciones if a['salda'])
-        aviso = (f"Se aplicarán ${aplicado:,.2f} sobre {len(aplicaciones)} cuenta(s)"
-                 f" y {saldadas} quedarán saldadas.")
-        if sobrante > 0.001:
-            aviso += f"\n\nSobran ${sobrante:,.2f}, que no se aplicarán a nada."
-        aviso += "\n\nEsta operación no se deshace sola. ¿Confirma?"
-
-        if not messagebox.askyesno("Confirmar desembolso", aviso, parent=self.dialog):
+        if monto > saldo + 0.001:
+            messagebox.showerror(
+                "Importe excesivo",
+                f"El importe (${monto:,.2f}) supera lo que se le debe a este "
+                f"paciente (${saldo:,.2f}).\n\nSi la clínica envió más dinero, "
+                f"el excedente corresponde a otro paciente y debe registrarse "
+                f"en su propia cuenta.",
+                parent=self.dialog)
             return
 
         self.resultado = {
             'monto': monto,
             'forma_pago_id': self.formas_map.get(self.combo_pago.get()),
             'referencia': self.entry_ref.get().strip(),
+            'observaciones': '',
         }
         self.dialog.destroy()
+
+
+class DialogoHistorialAbonos:
+    """Muestra como se ha ido pagando un paciente, abono por abono."""
+
+    def __init__(self, parent, cuenta, historial):
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("Historial de abonos")
+        self.dialog.configure(bg='white')
+        self.dialog.grab_set()
+
+        ancho, alto = 620, 460
+        x = (self.dialog.winfo_screenwidth() - ancho) // 2
+        y = (self.dialog.winfo_screenheight() - alto) // 2
+        self.dialog.geometry(f"{ancho}x{alto}+{x}+{y}")
+
+        cuenta = cuenta or {}
+        header = tk.Frame(self.dialog, bg=COLORS['info'], height=50)
+        header.pack(fill='x')
+        header.pack_propagate(False)
+        tk.Label(header, text="📜 Historial de abonos", font=('Segoe UI', 13, 'bold'),
+                 bg=COLORS['info'], fg='white').pack(pady=12)
+
+        content = tk.Frame(self.dialog, bg='white')
+        content.pack(fill='both', expand=True, padx=22, pady=12)
+
+        tk.Label(content, text=cuenta.get('NombrePaciente', 'N/A'),
+                 font=('Segoe UI', 12, 'bold'), bg='white').pack(anchor='w')
+
+        saldo = float(cuenta.get('SaldoPendiente') or 0)
+        estado = 'LIBERADO' if saldo <= 0.001 else f"Debe ${saldo:,.2f}"
+        tk.Label(content,
+                 text=(f"Ingreso: {_fmt_fecha_corta(cuenta.get('FechaEmision'))}    "
+                       f"Liberación: {_fmt_fecha_corta(cuenta.get('FechaLiberacion'))}    "
+                       f"{estado}"),
+                 font=('Segoe UI', 10), bg='white',
+                 fg=COLORS['text']).pack(anchor='w', pady=(2, 10))
+
+        if not historial:
+            tk.Label(content, text="Todavía no se ha registrado ningún abono.",
+                     font=('Segoe UI', 10), bg='white',
+                     fg=COLORS['text_light']).pack(anchor='w', pady=20)
+        else:
+            cols = ('Fecha', 'Monto', 'Saldo antes', 'Saldo después', 'Referencia')
+            tree = ttk.Treeview(content, columns=cols, show='headings', height=11)
+            for c, w in zip(cols, (95, 90, 95, 100, 180)):
+                tree.heading(c, text=c)
+                tree.column(c, width=w,
+                            anchor='w' if c == 'Referencia' else 'center')
+            for a in historial:
+                tree.insert('', 'end', values=(
+                    _fmt_fecha_corta(a.get('FechaAbono')),
+                    f"${float(a.get('Monto') or 0):,.2f}",
+                    f"${float(a.get('SaldoAnterior') or 0):,.2f}",
+                    f"${float(a.get('SaldoPosterior') or 0):,.2f}",
+                    a.get('Referencia', '') or '—'))
+            tree.pack(fill='both', expand=True)
+
+            total = sum(float(a.get('Monto') or 0) for a in historial)
+            tk.Label(content,
+                     text=f"Total abonado en {len(historial)} pago(s): ${total:,.2f}",
+                     font=('Segoe UI', 10, 'bold'), bg='white',
+                     fg=COLORS['success']).pack(anchor='w', pady=(8, 0))
+
+        tk.Button(self.dialog, text="Cerrar", font=('Segoe UI', 11),
+                  bg=COLORS['text_light'], fg='white', relief='flat',
+                  padx=20, pady=8, cursor='hand2',
+                  command=self.dialog.destroy).pack(side='bottom', pady=12)
+
+        self.dialog.wait_window()
 
 
 class DialogoNuevaCxC:
