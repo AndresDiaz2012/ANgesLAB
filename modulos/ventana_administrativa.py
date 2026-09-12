@@ -741,9 +741,53 @@ class VentanaAdministrativa:
                       bg=COLORS['info'], fg='white', relief='flat', padx=20, pady=8,
                       cursor='hand2', command=importar_solicitudes).pack(side='left', padx=5)
 
+            def desembolso_clinica():
+                """
+                Aplica lo que la clinica desembolsa a la cartera de asegurados.
+
+                La clinica cobra al seguro y paga al laboratorio por varias
+                atenciones a la vez, no cuenta por cuenta: por eso el importe
+                se reparte solo, de la deuda mas antigua a la mas reciente.
+                """
+                from modulos.desembolsos_clinica import crear_gestor_desembolsos
+                gestor = crear_gestor_desembolsos(self.db)
+
+                pendientes = gestor.listar_pendientes(solo_asegurados=True)
+                if not pendientes:
+                    messagebox.showinfo(
+                        "Desembolso de la clinica",
+                        "No hay cuentas de pacientes asegurados pendientes de cobro.")
+                    return
+
+                total = round(sum(float(c.get('SaldoPendiente', 0) or 0)
+                                  for c in pendientes), 2)
+                formas = self._obtener_formas_pago()
+                dialogo = DialogoDesembolsoClinica(app.root, pendientes, total,
+                                                   formas, gestor)
+                if not dialogo.resultado:
+                    return
+
+                exito, msg, _detalle = gestor.registrar_desembolso(
+                    monto=dialogo.resultado['monto'],
+                    usuario_id=(self.user or {}).get('UsuarioID', 1),
+                    referencia=dialogo.resultado.get('referencia', ''),
+                    forma_pago_id=dialogo.resultado.get('forma_pago_id'),
+                    solo_asegurados=True)
+
+                if exito:
+                    messagebox.showinfo("Desembolso aplicado", msg)
+                    self.show_cuentas_cobrar(app)
+                else:
+                    messagebox.showerror("Desembolso", msg)
+
             tk.Button(btn_frame, text="💵 Registrar Cobro", font=('Segoe UI', 11, 'bold'),
                       bg=COLORS['success'], fg='white', relief='flat', padx=20, pady=8,
                       cursor='hand2', command=registrar_cobro).pack(side='left', padx=5)
+
+            tk.Button(btn_frame, text="🏥 Desembolso de la Clínica",
+                      font=('Segoe UI', 11, 'bold'),
+                      bg=COLORS['warning'], fg='white', relief='flat', padx=20, pady=8,
+                      cursor='hand2', command=desembolso_clinica).pack(side='left', padx=5)
 
     # ==================================================================
     # VISTA 4: CUENTAS POR PAGAR
@@ -2317,6 +2361,223 @@ class DialogoRegistrarCobro:
         self.resultado = {
             'monto': monto,
             'forma_pago_id': self.formas_map.get(forma, 1),
+            'referencia': self.entry_ref.get().strip(),
+        }
+        self.dialog.destroy()
+
+
+class DialogoDesembolsoClinica:
+    """
+    Dialogo para aplicar un desembolso de la administracion de la clinica.
+
+    La clinica paga por varias atenciones a la vez, asi que en vez de pedir
+    cuenta por cuenta se escribe el importe recibido y el sistema lo reparte
+    de la deuda mas antigua a la mas reciente. Antes de confirmar se muestra
+    exactamente que cuentas quedarian saldadas, porque una vez aplicado el
+    reparto hay que deshacerlo a mano.
+    """
+
+    def __init__(self, parent, pendientes, total_pendiente, formas_pago, gestor):
+        self.resultado = None
+        self.pendientes = pendientes
+        self.total_pendiente = total_pendiente
+        self.gestor = gestor
+
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("Desembolso de la Clínica")
+        self.dialog.configure(bg='white')
+        self.dialog.grab_set()
+        self.dialog.focus_set()
+
+        ancho, alto = 640, 620
+        x = (self.dialog.winfo_screenwidth() - ancho) // 2
+        y = (self.dialog.winfo_screenheight() - alto) // 2
+        self.dialog.geometry(f"{ancho}x{alto}+{x}+{y}")
+        self.dialog.resizable(False, False)
+
+        self._crear_ui(formas_pago)
+        self.dialog.wait_window()
+
+    def _crear_ui(self, formas_pago):
+        header = tk.Frame(self.dialog, bg=COLORS['warning'], height=50)
+        header.pack(fill='x')
+        header.pack_propagate(False)
+        tk.Label(header, text="🏥 Desembolso de la Clínica",
+                 font=('Segoe UI', 13, 'bold'),
+                 bg=COLORS['warning'], fg='white').pack(pady=12)
+
+        content = tk.Frame(self.dialog, bg='white')
+        content.pack(fill='both', expand=True, padx=25, pady=12)
+
+        tk.Label(content,
+                 text=f"Pendiente de asegurados: ${self.total_pendiente:,.2f}"
+                      f"   ({len(self.pendientes)} cuenta(s))",
+                 font=('Segoe UI', 12, 'bold'),
+                 bg='white', fg=COLORS['warning']).pack(anchor='w', pady=(0, 2))
+        tk.Label(content,
+                 text="El importe se aplica de la deuda más antigua a la más reciente.",
+                 font=('Segoe UI', 9), bg='white',
+                 fg=COLORS['text_light']).pack(anchor='w', pady=(0, 10))
+
+        fila = tk.Frame(content, bg='white')
+        fila.pack(fill='x', pady=(0, 8))
+
+        izq = tk.Frame(fila, bg='white')
+        izq.pack(side='left')
+        tk.Label(izq, text="Monto recibido ($):", font=('Segoe UI', 11),
+                 bg='white').pack(anchor='w')
+        self.entry_monto = ttk.Entry(izq, font=('Segoe UI', 12), width=18)
+        self.entry_monto.pack(anchor='w', pady=(2, 0))
+        self.entry_monto.insert(0, f"{self.total_pendiente:.2f}")
+        self.entry_monto.bind('<KeyRelease>', lambda e: self._previsualizar())
+        self.entry_monto.focus_set()
+
+        der = tk.Frame(fila, bg='white')
+        der.pack(side='left', padx=(25, 0))
+        tk.Label(der, text="Forma de pago:", font=('Segoe UI', 11),
+                 bg='white').pack(anchor='w')
+        nombres_fp = [f.get('Nombre', '') for f in formas_pago]
+        self.formas_map = {f.get('Nombre', ''): f.get('FormaPagoID') for f in formas_pago}
+        self.combo_pago = ttk.Combobox(der, font=('Segoe UI', 11), width=22,
+                                       state='readonly', values=nombres_fp)
+        if nombres_fp:
+            self.combo_pago.set(nombres_fp[0])
+        self.combo_pago.pack(anchor='w', pady=(2, 0))
+
+        tk.Label(content, text="Referencia (transferencia, cheque, lote):",
+                 font=('Segoe UI', 11), bg='white').pack(anchor='w', pady=(6, 2))
+        self.entry_ref = ttk.Entry(content, font=('Segoe UI', 11), width=52)
+        self.entry_ref.pack(anchor='w', pady=(0, 10))
+
+        tk.Label(content, text="Se saldarían estas cuentas:",
+                 font=('Segoe UI', 11, 'bold'), bg='white',
+                 fg=COLORS['text']).pack(anchor='w', pady=(0, 4))
+
+        tabla_frame = tk.Frame(content, bg='white')
+        tabla_frame.pack(fill='both', expand=True)
+
+        cols = ('Paciente', 'Deuda', 'Se aplica', 'Queda', 'Estado')
+        self.tree = ttk.Treeview(tabla_frame, columns=cols, show='headings', height=9)
+        for c, w in zip(cols, (210, 90, 90, 90, 95)):
+            self.tree.heading(c, text=c)
+            self.tree.column(c, width=w,
+                             anchor='w' if c == 'Paciente' else 'e')
+        vsb = ttk.Scrollbar(tabla_frame, orient='vertical', command=self.tree.yview)
+        self.tree.configure(yscrollcommand=vsb.set)
+        self.tree.pack(side='left', fill='both', expand=True)
+        vsb.pack(side='right', fill='y')
+
+        self.lbl_resumen = tk.Label(content, text="", font=('Segoe UI', 10, 'bold'),
+                                    bg='white', fg=COLORS['text'], anchor='w',
+                                    justify='left', wraplength=560)
+        self.lbl_resumen.pack(fill='x', pady=(8, 0))
+
+        btn_frame = tk.Frame(self.dialog, bg='white')
+        btn_frame.pack(side='bottom', fill='x', padx=25, pady=12)
+
+        self.btn_aplicar = tk.Button(btn_frame, text="✅ Aplicar desembolso",
+                                     font=('Segoe UI', 11, 'bold'),
+                                     bg=COLORS['success'], fg='white', relief='flat',
+                                     padx=20, pady=8, cursor='hand2',
+                                     command=self._guardar)
+        self.btn_aplicar.pack(side='left', padx=5)
+        tk.Button(btn_frame, text="❌ Cancelar", font=('Segoe UI', 11),
+                  bg=COLORS['text_light'], fg='white', relief='flat', padx=20, pady=8,
+                  cursor='hand2', command=self.dialog.destroy).pack(side='right', padx=5)
+
+        self._previsualizar()
+
+    def _leer_monto(self):
+        """Lee el importe admitiendo 1.500,50 y 1500.50, como el resto del sistema."""
+        texto = (self.entry_monto.get() or '').strip()
+        if not texto:
+            return 0.0
+        limpio = texto.replace(' ', '')
+        if ',' in limpio and '.' in limpio:
+            limpio = limpio.replace('.', '').replace(',', '.')
+        elif ',' in limpio:
+            limpio = limpio.replace(',', '.')
+        try:
+            return float(limpio)
+        except ValueError:
+            return None
+
+    def _previsualizar(self):
+        """Muestra el reparto sin escribir nada todavia."""
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+
+        monto = self._leer_monto()
+        if monto is None:
+            self.lbl_resumen.config(text="El monto no se entiende. Escriba solo cifras.",
+                                    fg=COLORS['danger'])
+            return
+        if monto <= 0:
+            self.lbl_resumen.config(text="Escriba el importe recibido de la clínica.",
+                                    fg=COLORS['text_light'])
+            return
+
+        from modulos.desembolsos_clinica import repartir_desembolso
+        aplicaciones, sobrante = repartir_desembolso(monto, self.pendientes)
+
+        for ap in aplicaciones:
+            self.tree.insert('', 'end', values=(
+                ap['paciente'],
+                f"${ap['saldo_anterior']:,.2f}",
+                f"${ap['monto']:,.2f}",
+                f"${ap['saldo_nuevo']:,.2f}",
+                'Saldada' if ap['salda'] else 'Abonada',
+            ))
+
+        aplicado = round(sum(a['monto'] for a in aplicaciones), 2)
+        saldadas = sum(1 for a in aplicaciones if a['salda'])
+        queda = round(self.total_pendiente - aplicado, 2)
+
+        texto = (f"Se aplican ${aplicado:,.2f} a {len(aplicaciones)} cuenta(s): "
+                 f"{saldadas} quedarían saldadas. "
+                 f"Pendiente después: ${queda:,.2f}.")
+        color = COLORS['text']
+        if sobrante > 0.001:
+            texto += (f"\nSobran ${sobrante:,.2f} que no se aplican: "
+                      f"no hay más deuda de asegurados que cubrir.")
+            color = COLORS['warning']
+        self.lbl_resumen.config(text=texto, fg=color)
+
+    def _guardar(self):
+        monto = self._leer_monto()
+        if monto is None:
+            messagebox.showerror("Monto inválido",
+                                 "Escriba un importe válido (por ejemplo 1.500,50).",
+                                 parent=self.dialog)
+            return
+        if monto <= 0:
+            messagebox.showerror("Monto inválido",
+                                 "El importe debe ser mayor que cero.",
+                                 parent=self.dialog)
+            return
+
+        from modulos.desembolsos_clinica import repartir_desembolso
+        aplicaciones, sobrante = repartir_desembolso(monto, self.pendientes)
+        if not aplicaciones:
+            messagebox.showwarning("Sin efecto",
+                                   "Ese importe no alcanza a cubrir ninguna cuenta.",
+                                   parent=self.dialog)
+            return
+
+        aplicado = round(sum(a['monto'] for a in aplicaciones), 2)
+        saldadas = sum(1 for a in aplicaciones if a['salda'])
+        aviso = (f"Se aplicarán ${aplicado:,.2f} sobre {len(aplicaciones)} cuenta(s)"
+                 f" y {saldadas} quedarán saldadas.")
+        if sobrante > 0.001:
+            aviso += f"\n\nSobran ${sobrante:,.2f}, que no se aplicarán a nada."
+        aviso += "\n\nEsta operación no se deshace sola. ¿Confirma?"
+
+        if not messagebox.askyesno("Confirmar desembolso", aviso, parent=self.dialog):
+            return
+
+        self.resultado = {
+            'monto': monto,
+            'forma_pago_id': self.formas_map.get(self.combo_pago.get()),
             'referencia': self.entry_ref.get().strip(),
         }
         self.dialog.destroy()

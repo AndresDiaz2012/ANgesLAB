@@ -284,6 +284,7 @@ SOLICITUDES_TIENE_GESTANTE = False
 # procedencia (ver _asegurar_columnas_cobro).
 SOLICITUDES_TIENE_MONTO_COBRADO = False
 CXC_TIENE_SOLICITUD_ID = False
+CXC_TIENE_PROCEDENCIA = False
 
 # Importar módulo de envío por WhatsApp con adjunto automático
 try:
@@ -2238,8 +2239,15 @@ class MainApplication:
             De que solicitud viene la deuda. Antes se guardaba el ID de la
             solicitud dentro de la columna FacturaID, mezclando dos
             numeraciones distintas en un mismo campo.
+
+        CuentasPorCobrar.TipoProcedencia
+            Con que procedencia entro el paciente. Es lo que permite separar
+            la cartera que le corresponde desembolsar a la clinica de la que
+            se le cobra al propio paciente, sin tener que adivinarlo leyendo
+            el texto de las observaciones.
         """
         global SOLICITUDES_TIENE_MONTO_COBRADO, CXC_TIENE_SOLICITUD_ID
+        global CXC_TIENE_PROCEDENCIA
 
         try:
             db.query_one("SELECT TOP 1 MontoCobrado FROM Solicitudes")
@@ -2265,6 +2273,18 @@ class MainApplication:
             except Exception as e:
                 CXC_TIENE_SOLICITUD_ID = False
                 _log.warning("No se pudo crear CuentasPorCobrar.SolicitudID: %s", e)
+
+        try:
+            db.query_one("SELECT TOP 1 TipoProcedencia FROM CuentasPorCobrar")
+            CXC_TIENE_PROCEDENCIA = True
+        except Exception:
+            try:
+                db.execute("ALTER TABLE CuentasPorCobrar ADD COLUMN TipoProcedencia TEXT(50)")
+                CXC_TIENE_PROCEDENCIA = True
+                _log.info("Columna CuentasPorCobrar.TipoProcedencia creada")
+            except Exception as e:
+                CXC_TIENE_PROCEDENCIA = False
+                _log.warning("No se pudo crear CuentasPorCobrar.TipoProcedencia: %s", e)
 
     def _asegurar_areas_clinicas(self):
         """
@@ -7602,22 +7622,24 @@ class MainApplication:
         fe = emision.strftime('#%m/%d/%Y %H:%M:%S#')
         fv = vence.strftime('#%m/%d/%Y#')
 
-        if CXC_TIENE_SOLICITUD_ID:
-            cols = ("SolicitudID, PacienteID, NombrePaciente, FechaEmision, "
-                    "FechaVencimiento, MontoOriginal, MontoCobrado, SaldoPendiente, "
-                    "DiasVencida, Estado, Observaciones")
-            vals = f"{sol_id}, {pac_id}, '{nombre}', {fe}, {fv}, "
-        else:
-            # Base antigua: sin columna propia, no se vincula la solicitud
-            # para no volver a mezclarla con la numeracion de facturas.
-            cols = ("PacienteID, NombrePaciente, FechaEmision, "
-                    "FechaVencimiento, MontoOriginal, MontoCobrado, SaldoPendiente, "
-                    "DiasVencida, Estado, Observaciones")
-            vals = f"{pac_id}, '{nombre}', {fe}, {fv}, "
+        cols = ["PacienteID", "NombrePaciente", "FechaEmision", "FechaVencimiento",
+                "MontoOriginal", "MontoCobrado", "SaldoPendiente", "DiasVencida",
+                "Estado", "Observaciones"]
+        vals = [f"{pac_id}", f"'{nombre}'", fe, fv,
+                f"{saldo}", "0", f"{saldo}", "0", "'Pendiente'", f"'{obs}'"]
 
-        db.execute(
-            f"INSERT INTO [CuentasPorCobrar] ({cols}) VALUES ("
-            f"{vals}{saldo}, 0, {saldo}, 0, 'Pendiente', '{obs}')")
+        # En bases antiguas estas columnas pueden no existir todavia; se omiten
+        # en vez de romper el guardado de la solicitud.
+        if CXC_TIENE_SOLICITUD_ID:
+            cols.insert(0, "SolicitudID")
+            vals.insert(0, f"{sol_id}")
+        if CXC_TIENE_PROCEDENCIA:
+            proc_safe = str(tipo_servicio or '').replace("'", "''")[:50]
+            cols.append("TipoProcedencia")
+            vals.append(f"'{proc_safe}'")
+
+        db.execute(f"INSERT INTO [CuentasPorCobrar] ({', '.join(cols)}) "
+                   f"VALUES ({', '.join(vals)})")
 
     def _guardar_nueva_solicitud(self, win, pruebas, total, desc_pct, iva_pct, abonado=0):
         """Crea una nueva solicitud usando el gestor"""
