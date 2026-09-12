@@ -11,6 +11,7 @@ Las graficas muestran la evolucion temporal de cada parametro con:
 
 import io
 import re
+import logging
 from datetime import datetime
 
 # Matplotlib con guard - si no esta instalado, se deshabilita la funcionalidad
@@ -469,7 +470,7 @@ class GraficasHistorial:
 
             return widget, canvas
         except Exception as e:
-            print(f"[GraficasHistorial] Error al incrustar grafica: {e}")
+            logging.getLogger("angeslab.graficas_historial").warning("[GraficasHistorial] Error al incrustar grafica: %s", e)
             return None, None
 
     # ----------------------------------------------------------
@@ -497,7 +498,7 @@ class GraficasHistorial:
             buf.seek(0)
             return buf.read()
         except Exception as e:
-            print(f"[GraficasHistorial] Error al exportar figura: {e}")
+            logging.getLogger("angeslab.graficas_historial").warning("[GraficasHistorial] Error al exportar figura: %s", e)
             return None
 
     # ----------------------------------------------------------
@@ -518,7 +519,7 @@ class GraficasHistorial:
                            bbox_inches='tight', facecolor=COLOR_FONDO)
             return True
         except Exception as e:
-            print(f"[GraficasHistorial] Error al exportar PNG: {e}")
+            logging.getLogger("angeslab.graficas_historial").warning("[GraficasHistorial] Error al exportar PNG: %s", e)
             return False
 
 
