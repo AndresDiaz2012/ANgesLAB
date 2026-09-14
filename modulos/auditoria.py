@@ -65,6 +65,8 @@ class AuditoriaActiva:
             pass  # Ya existe
 
         # HistorialResultados (versionado de resultados clinicos)
+        # Los campos de valor van como MEMO: Access no admite TEXT mayor de
+        # 255, y con TEXT(500) la tabla nunca llegaba a crearse.
         try:
             self._db.execute("""
                 CREATE TABLE HistorialResultados (
@@ -73,16 +75,19 @@ class AuditoriaActiva:
                     UsuarioID INTEGER,
                     DetalleID INTEGER,
                     ParametroID INTEGER,
-                    ValorAnterior TEXT(500),
-                    ValorNuevo TEXT(500),
+                    ValorAnterior MEMO,
+                    ValorNuevo MEMO,
                     EstadoAnterior TEXT(50),
                     EstadoNuevo TEXT(50),
                     Accion TEXT(50),
-                    Observacion TEXT(500)
+                    Observacion MEMO
                 )
             """)
-        except Exception:
-            pass  # Ya existe
+        except Exception as e:
+            # Solo se ignora si ya existe; cualquier otro fallo se deja en el log
+            if 'ya existe' not in str(e).lower() and 'already exists' not in str(e).lower():
+                log_evento(f"No se pudo crear HistorialResultados: {e}",
+                           nivel='error', modulo='auditoria')
 
         self._tabla_ok = True
 

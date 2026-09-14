@@ -9,6 +9,8 @@ ANgesLAB_Demo.accdb
 config_ia.json
 db_config.json
 backup_config.json
+config_portal.json
+config_whatsapp.json
 
 # Lock files de Access
 *.laccdb
@@ -25,6 +27,10 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+.pytest_cache/
+
+# Instaladores compilados (se publican como GitHub Release, no en el repo)
+*.exe
 
 # IDE
 .vscode/

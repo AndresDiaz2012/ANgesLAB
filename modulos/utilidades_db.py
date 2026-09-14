@@ -14,9 +14,12 @@ Autor: Sistema ANgesLAB
 """
 
 import os
+import logging
 import shutil
 from datetime import datetime, timedelta
 import json
+
+_log_util = logging.getLogger('angeslab.utilidades_db')
 
 # ============================================================================
 # CONFIGURACION
@@ -287,7 +290,8 @@ class UtilidadesDB:
                 AND ParametroID NOT IN ({','.join(map(str, ids_correctos))})
             """)
             return len(ids_correctos)
-        except:
+        except Exception as e:
+            _log_util.warning("Error limpiando relaciones area %s: %s", area_id, e)
             return 0
 
     def archivar_datos_antiguos(self, dias=365):
@@ -313,12 +317,12 @@ class UtilidadesDB:
             try:
                 # Verificar si existe la tabla de archivo
                 self.db.query(f"SELECT TOP 1 * FROM {tabla_archivo}")
-            except:
+            except Exception:
                 # Crear tabla de archivo
                 try:
                     self.db.execute(f"SELECT * INTO {tabla_archivo} FROM {tabla_origen} WHERE 1=0")
-                except:
-                    pass
+                except Exception as e:
+                    _log_util.warning("No se pudo crear tabla %s: %s", tabla_archivo, e)
 
         # Archivar solicitudes antiguas
         archivadas = 0
@@ -361,7 +365,7 @@ class UtilidadesDB:
                 archivadas += 1
 
         except Exception as e:
-            print(f"Error archivando: {e}")
+            _log_util.error("Error archivando datos: %s", e)
 
         return archivadas
 
@@ -408,8 +412,8 @@ class UtilidadesDB:
         try:
             unidades = self.db.query("SELECT * FROM Unidades")
             catalogo['unidades'] = [dict(u) for u in unidades]
-        except:
-            pass
+        except Exception:
+            catalogo['unidades'] = []
 
         # Escribir archivo
         with open(ruta_archivo, 'w', encoding='utf-8') as f:
@@ -445,8 +449,8 @@ class UtilidadesDB:
                                 {area.get('Secuencia', 0)}, True)
                     """)
                     importados['areas'] += 1
-            except:
-                pass
+            except Exception as e:
+                _log_util.warning("Importar area '%s' fallo: %s", area.get('CodigoArea'), e)
 
         # Importar pruebas
         for prueba in catalogo.get('pruebas', []):
@@ -459,8 +463,8 @@ class UtilidadesDB:
                                 {prueba.get('AreaID')}, {prueba.get('PrecioBase', 0)}, True)
                     """)
                     importados['pruebas'] += 1
-            except:
-                pass
+            except Exception as e:
+                _log_util.warning("Importar prueba '%s' fallo: %s", prueba.get('CodigoPrueba'), e)
 
         # Importar parametros
         for param in catalogo.get('parametros', []):
@@ -481,8 +485,8 @@ class UtilidadesDB:
                                 {unidad_id}, '{valor_ref}', True)
                     """)
                     importados['parametros'] += 1
-            except:
-                pass
+            except Exception as e:
+                _log_util.warning("Importar parametro '%s' fallo: %s", param.get('CodigoParametro'), e)
 
         return importados
 
@@ -574,8 +578,8 @@ class UtilidadesDB:
                     )
                 if len(mezclas) > 5:
                     problemas.append(f"... y {len(mezclas) - 5} mas")
-        except:
-            pass
+        except Exception as e:
+            _log_util.warning("Error verificando mezcla areas: %s", e)
 
         # 6. Facturas sin solicitud
         try:
