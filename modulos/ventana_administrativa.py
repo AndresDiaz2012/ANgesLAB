@@ -961,6 +961,237 @@ class VentanaAdministrativa:
                   command=ver_historial).pack(side='left', padx=5)
 
     # ==================================================================
+    # VISTA 3c: CORTE DE ADEUDADO POR AREA
+    # ==================================================================
+    def show_corte_adeudado(self, app):
+        """
+        Corte de lo que adeuda la clinica, por area y listo para imprimir.
+
+        Es el papel que se le lleva a la administracion de la clinica para
+        cobrar, asi que sale por la impresora asignada a la funcion "Cortes
+        de adeudado" en Configuracion, no por el visor de PDF.
+        """
+        if not self._puede_registrar_movimientos():
+            messagebox.showwarning("Acceso Denegado",
+                                   "No tiene permisos para esta seccion.")
+            return
+
+        from modulos.corte_adeudado import ETIQUETAS_AREA, crear_corte
+        from modulos.procedencia import AREAS_CLINICA
+
+        corte = crear_corte(self.db)
+
+        app.clear_content()
+        app.set_title("🧾 Corte de Adeudado")
+        scrollable = app.setup_scrollable_content()
+
+        main_frame = tk.Frame(scrollable, bg=COLORS['bg'])
+        main_frame.pack(fill='both', expand=True, padx=20, pady=10)
+
+        tk.Label(main_frame,
+                 text="Lo que adeuda la clínica por área. Dentro de cada una se "
+                      "separa lo asegurado (lo desembolsa la clínica) de lo "
+                      "particular (lo debe el paciente).",
+                 font=('Segoe UI', 9), bg=COLORS['bg'],
+                 fg=COLORS['text_light']).pack(anchor='w', pady=(0, 8))
+
+        # ── Periodo ────────────────────────────────────────────────────
+        filtro = tk.LabelFrame(main_frame, text="  Período (por fecha de ingreso)  ",
+                               font=('Segoe UI', 10, 'bold'),
+                               bg=COLORS['bg'], fg=COLORS['text'])
+        filtro.pack(fill='x', pady=(0, 10))
+        fi = tk.Frame(filtro, bg=COLORS['bg'])
+        fi.pack(fill='x', padx=10, pady=8)
+
+        tk.Label(fi, text="Desde:", font=('Segoe UI', 10),
+                 bg=COLORS['bg']).pack(side='left')
+        entry_desde = ttk.Entry(fi, font=('Segoe UI', 10), width=12)
+        entry_desde.pack(side='left', padx=(5, 15))
+        tk.Label(fi, text="Hasta:", font=('Segoe UI', 10),
+                 bg=COLORS['bg']).pack(side='left')
+        entry_hasta = ttk.Entry(fi, font=('Segoe UI', 10), width=12)
+        entry_hasta.pack(side='left', padx=(5, 15))
+        tk.Label(fi, text="(dd/mm/aaaa — en blanco = todo lo pendiente)",
+                 font=('Segoe UI', 9), bg=COLORS['bg'],
+                 fg=COLORS['text_light']).pack(side='left')
+
+        # ── Tabla resumen ──────────────────────────────────────────────
+        tabla_frame = tk.Frame(main_frame, bg=COLORS['bg'])
+        tabla_frame.pack(fill='both', expand=True, pady=(0, 8))
+
+        cols = ('Área', 'Pacientes', 'Asegurado', 'Particular', 'Total')
+        tree = ttk.Treeview(tabla_frame, columns=cols, show='headings', height=6)
+        for c, w in zip(cols, (200, 100, 130, 130, 140)):
+            tree.heading(c, text=c)
+            tree.column(c, width=w, anchor='w' if c == 'Área' else 'e')
+        tree.pack(fill='both', expand=True)
+        tree.tag_configure('total', background='#e2e8f0')
+
+        lbl_estado = tk.Label(main_frame, text="", font=('Segoe UI', 10),
+                              bg=COLORS['bg'], fg=COLORS['text'],
+                              anchor='w', justify='left', wraplength=700)
+        lbl_estado.pack(fill='x', pady=(0, 6))
+
+        estado = {'datos': None}
+
+        def leer_fecha(entry, fin_del_dia=False):
+            """dd/mm/aaaa a datetime, o None si esta vacia. False si no se entiende."""
+            texto = (entry.get() or '').strip()
+            if not texto:
+                return None
+            for formato in ('%d/%m/%Y', '%d-%m-%Y', '%Y-%m-%d'):
+                try:
+                    f = datetime.strptime(texto, formato)
+                    if fin_del_dia:
+                        return f.replace(hour=23, minute=59, second=59)
+                    return f
+                except ValueError:
+                    continue
+            return False
+
+        def cargar():
+            desde = leer_fecha(entry_desde)
+            hasta = leer_fecha(entry_hasta, fin_del_dia=True)
+            if desde is False or hasta is False:
+                messagebox.showerror(
+                    "Fecha inválida",
+                    "Escriba las fechas como dd/mm/aaaa, o déjelas en blanco.")
+                return
+            if desde and hasta and desde > hasta:
+                messagebox.showerror("Período inválido",
+                                     "La fecha inicial es posterior a la final.")
+                return
+
+            datos = corte.obtener_datos(desde=desde, hasta=hasta)
+            estado['datos'] = datos
+
+            for i in tree.get_children():
+                tree.delete(i)
+            for area in AREAS_CLINICA:
+                d = datos['areas'][area]
+                tree.insert('', 'end', values=(
+                    ETIQUETAS_AREA.get(area, area),
+                    d['n_pacientes'],
+                    f"${d['total_asegurado']:,.2f}",
+                    f"${d['total_particular']:,.2f}",
+                    f"${d['total']:,.2f}"))
+            tree.insert('', 'end', values=(
+                'TOTAL', datos['n_pacientes'],
+                f"${datos['total_asegurado']:,.2f}",
+                f"${datos['total_particular']:,.2f}",
+                f"${datos['total_general']:,.2f}"), tags=('total',))
+
+            texto = (f"Adeudado total: ${datos['total_general']:,.2f} "
+                     f"en {datos['n_pacientes']} paciente(s).")
+            if datos['fuera_del_corte'] > 0.01:
+                texto += (f"  Aparte hay ${datos['fuera_del_corte']:,.2f} de "
+                          f"ambulatorios, que no entran en este corte.")
+            lbl_estado.config(text=texto)
+
+        tk.Button(fi, text="🔄 Calcular", font=('Segoe UI', 10),
+                  bg=COLORS['primary'], fg='white', relief='flat',
+                  padx=12, pady=3, cursor='hand2',
+                  command=cargar).pack(side='left', padx=10)
+
+        # ── Acciones ───────────────────────────────────────────────────
+        def generar(imprimir):
+            if estado['datos'] is None:
+                cargar()
+            datos = estado['datos']
+            if datos is None:
+                return
+            if datos['n_pacientes'] == 0:
+                messagebox.showinfo(
+                    "Sin deuda",
+                    "No hay saldos pendientes en hospitalización, emergencia "
+                    "ni cirugía para ese período.")
+                return
+
+            import os
+            import tempfile
+            nombre = ("Corte_adeudado_"
+                      + datetime.now().strftime('%Y%m%d_%H%M%S') + ".pdf")
+            ruta = os.path.join(tempfile.gettempdir(), nombre)
+
+            try:
+                config_lab = self.db.query_one(
+                    "SELECT TOP 1 NombreLaboratorio FROM ConfiguracionLaboratorio")
+            except Exception:
+                config_lab = None
+
+            usuario = ((self.user or {}).get('NombreCompleto')
+                       or (self.user or {}).get('NombreUsuario') or '')
+
+            generado = corte.generar_pdf(ruta, datos=datos,
+                                         config_lab=config_lab, usuario=usuario)
+            if not generado:
+                messagebox.showerror(
+                    "No se pudo generar",
+                    "No se pudo crear el PDF del corte.\n\n"
+                    "Revise que ReportLab esté instalado "
+                    "(pip install reportlab).")
+                return
+
+            if not imprimir:
+                try:
+                    os.startfile(generado)
+                except Exception:
+                    messagebox.showinfo("Corte generado",
+                                        f"El corte quedó en:\n{generado}")
+                return
+
+            # Sale por la impresora de la funcion "Cortes de adeudado"
+            try:
+                from modulos.impresoras import (ABIERTO, FALLO_IMPRESION,
+                                                IMPRESO, SIN_IMPRESORA,
+                                                imprimir_documento)
+            except ImportError:
+                try:
+                    os.startfile(generado)
+                except Exception:
+                    pass
+                return
+
+            detalle = {}
+            res = imprimir_documento(self.db, generado, 'cortes',
+                                     titulo="Corte de adeudado",
+                                     detalle=detalle)
+            if res == IMPRESO:
+                messagebox.showinfo(
+                    "Corte impreso",
+                    "El corte salió por "
+                    f"{detalle.get('impresora') or 'la impresora asignada'}.")
+            elif res == SIN_IMPRESORA:
+                messagebox.showwarning(
+                    "Sin impresora asignada",
+                    "La función «Cortes de adeudado» no tiene impresora "
+                    "asignada, así que el corte se abrió en pantalla.\n\n"
+                    "Para que salga en papel, asígnele una en "
+                    "Configuración → Impresión.")
+            elif res in (FALLO_IMPRESION, ABIERTO):
+                messagebox.showwarning(
+                    "No se pudo imprimir",
+                    "El corte se abrió en pantalla porque la impresora no "
+                    "aceptó el trabajo.\n\n"
+                    f"{detalle.get('error', '')}")
+            else:
+                messagebox.showerror(
+                    "Error", "No se pudo abrir ni imprimir el corte.")
+
+        btns = tk.Frame(main_frame, bg=COLORS['bg'])
+        btns.pack(fill='x', pady=8)
+        tk.Button(btns, text="🖨️ Imprimir corte", font=('Segoe UI', 11, 'bold'),
+                  bg=COLORS['success'], fg='white', relief='flat',
+                  padx=20, pady=8, cursor='hand2',
+                  command=lambda: generar(True)).pack(side='left', padx=5)
+        tk.Button(btns, text="👁️ Ver en pantalla", font=('Segoe UI', 11),
+                  bg=COLORS['info'], fg='white', relief='flat',
+                  padx=20, pady=8, cursor='hand2',
+                  command=lambda: generar(False)).pack(side='left', padx=5)
+
+        cargar()
+
+    # ==================================================================
     # VISTA 4: CUENTAS POR PAGAR
     # ==================================================================
     def show_cuentas_pagar(self, app):

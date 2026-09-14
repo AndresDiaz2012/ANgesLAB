@@ -1650,6 +1650,7 @@ class MainApplication:
                     ("📊", "Dashboard Financiero", self.show_dashboard_financiero),
                     ("💳", "Cuentas por Cobrar", self.show_cuentas_cobrar),
                     ("🏥", "Cartera Asegurados", self.show_cartera_asegurados),
+                    ("🧾", "Corte de Adeudado", self.show_corte_adeudado),
                     ("📋", "Cuentas por Pagar", self.show_cuentas_pagar),
                     ("💸", "Gastos", self.show_gastos),
                     ("🩺", "Comisiones Médicos", self.show_comisiones_medico),
@@ -5485,8 +5486,16 @@ class MainApplication:
         self.combo_estado.pack(side='left', padx=(0, 25))
         tk.Label(row2, text="Procedencia:", font=('Segoe UI', 9, 'bold'), bg=S['frame'], fg=S['label'], width=12, anchor='w').pack(side='left')
         self.combo_tipo = ttk.Combobox(row2, font=('Segoe UI', 9), width=28, state='readonly')
-        self.combo_tipo['values'] = ['Ambulatorio', 'Hospitalizado Particular', 'Hospitalizado Asegurado',
-                                     'Emergencia Particular', 'Emergencia Asegurado', 'Asegurado']
+        # La lista sale del modulo de procedencia: ahi es donde se decide si
+        # cada una se cobra al seguro y a que area de la clinica pertenece.
+        # Teniendola escrita tambien aqui, anadir una opcion en un sitio y
+        # olvidarla en el otro la dejaria sin clasificar en silencio.
+        self.combo_tipo['values'] = (list(procedencia_cobro.PROCEDENCIAS)
+                                     if PROCEDENCIA_DISPONIBLE else
+                                     ['Ambulatorio', 'Hospitalizado Particular',
+                                      'Hospitalizado Asegurado', 'Emergencia Particular',
+                                      'Emergencia Asegurado', 'Cirugia Particular',
+                                      'Cirugia Asegurado', 'Asegurado'])
         self.combo_tipo.set('Ambulatorio')
         self.combo_tipo.pack(side='left')
         # De la procedencia depende quien paga, y por tanto el abono propuesto
@@ -19517,6 +19526,14 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
                                 "Ejecute: scripts/crear_tablas_administrativo.py")
             return
         self.ventana_admin.show_cartera_asegurados(self)
+
+    def show_corte_adeudado(self):
+        """Corte de lo adeudado por area: hospitalizacion, emergencia y cirugia"""
+        if not self.ventana_admin:
+            messagebox.showerror("Error", "Módulo administrativo no disponible.\n"
+                                "Ejecute: scripts/crear_tablas_administrativo.py")
+            return
+        self.ventana_admin.show_corte_adeudado(self)
 
     def show_cuentas_pagar(self):
         """Cuentas por Pagar"""

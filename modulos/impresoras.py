@@ -80,6 +80,14 @@ ROLES = {
         'directo_defecto': True,
         'papel': 'hoja',
     },
+    'cortes': {
+        'etiqueta': 'Cortes de adeudado',
+        'ayuda': 'Corte de lo que adeuda la clínica por área: hospitalización, emergencia y cirugía',
+        'columna': 'ImpresoraCortes',
+        'columna_directo': 'ImpresoraCortesDirecto',
+        'directo_defecto': True,
+        'papel': 'hoja',
+    },
     'cotizaciones': {
         'etiqueta': 'Cotizaciones',
         'ayuda': 'Cotizaciones y presupuestos para el paciente',
@@ -115,7 +123,7 @@ ROLES = {
 }
 
 # Orden estable para la interfaz de configuración
-ORDEN_ROLES = ('resultados', 'hojas_trabajo', 'cotizaciones',
+ORDEN_ROLES = ('resultados', 'hojas_trabajo', 'cortes', 'cotizaciones',
                'facturacion', 'recibos', 'etiquetas')
 
 # Nombres alternativos que usan las llamadas existentes del sistema
@@ -134,6 +142,10 @@ ALIAS_ROLES = {
     'nota_debito': 'facturacion',
     'recibo': 'recibos',
     'etiqueta': 'etiquetas',
+    'corte': 'cortes',
+    'corte_adeudado': 'cortes',
+    'adeudado': 'cortes',
+    'cuentas_clinica': 'cortes',
     'hoja_trabajo': 'hojas_trabajo',
     'hoja de trabajo': 'hojas_trabajo',
     'hojas de trabajo': 'hojas_trabajo',
@@ -165,6 +177,10 @@ COLUMNA_ROL_COTIZACIONES = 'RolCotizaciones'
 # que ese es su respaldo natural.
 ROLES_RESPALDO = {
     'hojas_trabajo': ('resultados',),
+    # El corte es un documento administrativo en hoja; mientras no tenga
+    # impresora propia sale por la de facturación, y si tampoco la hay, por
+    # la de resultados, que es la que todo laboratorio tiene asignada.
+    'cortes': ('facturacion', 'resultados'),
 }
 
 

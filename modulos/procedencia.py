@@ -32,6 +32,7 @@ PROCEDENCIAS_CREDITO = {
     'Asegurado',
     'Hospitalizado Asegurado',
     'Emergencia Asegurado',
+    'Cirugia Asegurado',
 }
 
 # Valores que ofrece el combo de la pantalla de solicitud.
@@ -41,8 +42,82 @@ PROCEDENCIAS = [
     'Hospitalizado Asegurado',
     'Emergencia Particular',
     'Emergencia Asegurado',
+    'Cirugia Particular',
+    'Cirugia Asegurado',
     'Asegurado',
 ]
+
+# ---------------------------------------------------------------------------
+# Areas de servicio de la clinica
+# ---------------------------------------------------------------------------
+# Una cosa es QUIEN paga (particular o seguro) y otra DE DONDE viene el
+# paciente. El corte de adeudado que se le reporta a la clinica va por area,
+# con el asegurado y el particular separados dentro de cada una, asi que las
+# dos clasificaciones tienen que poder consultarse por separado.
+
+AREA_HOSPITALIZACION = 'Hospitalizacion'
+AREA_EMERGENCIA = 'Emergencia'
+AREA_CIRUGIA = 'Cirugia'
+AREA_AMBULATORIO = 'Ambulatorio'
+
+# Areas que entran en el corte que se le presenta a la clinica. El paciente
+# de calle no forma parte de ese corte.
+AREAS_CLINICA = (AREA_HOSPITALIZACION, AREA_EMERGENCIA, AREA_CIRUGIA)
+
+_AREAS_POR_PROCEDENCIA = {
+    'hospitalizado particular': AREA_HOSPITALIZACION,
+    'hospitalizado asegurado': AREA_HOSPITALIZACION,
+    'emergencia particular': AREA_EMERGENCIA,
+    'emergencia asegurado': AREA_EMERGENCIA,
+    'cirugia particular': AREA_CIRUGIA,
+    'cirugia asegurado': AREA_CIRUGIA,
+    'ambulatorio': AREA_AMBULATORIO,
+    'asegurado': AREA_AMBULATORIO,
+}
+
+
+def area_servicio(tipo_servicio):
+    """
+    De donde viene el paciente: hospitalizacion, emergencia, cirugia o
+    ambulatorio. Es independiente de quien pague.
+
+    'Asegurado' a secas se cuenta como ambulatorio: es el asegurado que
+    llega por su pie, sin pasar por ninguna de las areas de la clinica.
+
+    Una procedencia que no se reconozca cae en ambulatorio, para que nunca
+    se cuele en el corte de la clinica algo que no le corresponde cobrar.
+    """
+    return _AREAS_POR_PROCEDENCIA.get(_normalizar(tipo_servicio),
+                                      AREA_AMBULATORIO)
+
+
+def detectar_procedencia(texto):
+    """
+    Encuentra la procedencia nombrada dentro de un texto libre.
+
+    Las cuentas por cobrar creadas antes de que existiera la columna
+    TipoProcedencia llevan la procedencia dentro de las observaciones, con
+    la forma "Asegurado - Emergencia Asegurado - Solicitud S-1". Sin esto,
+    esas cuentas no se reconocerian y quedarian fuera del corte que se le
+    cobra a la clinica.
+
+    Devuelve '' si no reconoce ninguna.
+    """
+    objetivo = _normalizar(texto)
+    if not objetivo:
+        return ''
+    # De la mas larga a la mas corta: "Asegurado" esta contenido dentro de
+    # "Emergencia Asegurado", y quedarse con la corta daria el area
+    # equivocada.
+    for candidata in sorted(PROCEDENCIAS, key=len, reverse=True):
+        if _normalizar(candidata) in objetivo:
+            return candidata
+    return ''
+
+
+def es_area_clinica(tipo_servicio):
+    """True si la solicitud entra en el corte que se le reporta a la clinica."""
+    return area_servicio(tipo_servicio) in AREAS_CLINICA
 
 # Dias de plazo para cobrarle al seguro.
 DIAS_CREDITO_SEGURO = 30
