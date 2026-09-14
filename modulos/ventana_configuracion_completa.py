@@ -294,6 +294,14 @@ class VentanaConfiguracionCompleta:
                   command=lambda: self._aplicar_porcentaje_precios('descuento'),
                   width=22).pack(side=tk.LEFT, padx=5)
 
+        ttk.Button(btn_frame, text="🤝 Tarifas de Convenio",
+                  command=self._editar_tarifas_convenio,
+                  width=22).pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(btn_frame, text="🖨️ Baremo",
+                  command=self._generar_baremo,
+                  width=14).pack(side=tk.LEFT, padx=5)
+
         # Tasas con las que se convierten los precios.
         # El precio vive en dólares en la base; Bs y COP son esa misma cifra
         # convertida. Sin la tasa a la vista la columna en bolívares no se
@@ -320,7 +328,12 @@ class VentanaConfiguracionCompleta:
         tree_frame = ttk.Frame(frame)
         tree_frame.pack(fill='both', expand=True, pady=(0, 10))
 
-        cols = ('Código', 'Prueba', 'Área', 'Precio', 'PrecioBs', 'PrecioCOP')
+        # Ambulatorio es lo que paga el paciente de calle; Clinica lo que la
+        # clinica le cobra al de hospitalizacion, emergencia o cirugia; y
+        # Convenio lo que la clinica le paga al laboratorio, que es el ingreso
+        # real de esos casos. Ver modulos/tarifas.py.
+        cols = ('Código', 'Prueba', 'Área', 'Precio', 'Clinica', 'Convenio',
+                'Comision', 'PrecioBs', 'PrecioCOP')
         self.tree_precios = ttk.Treeview(tree_frame, columns=cols, show='headings',
                                           height=20, selectmode='extended')
 
@@ -328,19 +341,28 @@ class VentanaConfiguracionCompleta:
         self.tree_precios.heading('Código', text='Código')
         self.tree_precios.heading('Prueba', text='Nombre de la Prueba')
         self.tree_precios.heading('Área', text='Área')
-        self.tree_precios.heading('Precio', text='Precio (USD)')
-        self.tree_precios.heading('PrecioBs', text='Precio (Bs)')
-        self.tree_precios.heading('PrecioCOP', text='Precio (COP)')
+        self.tree_precios.heading('Precio', text='Ambulatorio')
+        self.tree_precios.heading('Clinica', text='Clínica cobra')
+        self.tree_precios.heading('Convenio', text='Nos pagan')
+        self.tree_precios.heading('Comision', text='Comisión')
+        self.tree_precios.heading('PrecioBs', text='Ambul. (Bs)')
+        self.tree_precios.heading('PrecioCOP', text='Ambul. (COP)')
 
-        self.tree_precios.column('Código', width=90, anchor='center')
-        self.tree_precios.column('Prueba', width=280, anchor='w')
-        self.tree_precios.column('Área', width=120, anchor='w')
-        self.tree_precios.column('Precio', width=100, anchor='e')
-        self.tree_precios.column('PrecioBs', width=120, anchor='e')
-        self.tree_precios.column('PrecioCOP', width=120, anchor='e')
+        self.tree_precios.column('Código', width=80, anchor='center')
+        self.tree_precios.column('Prueba', width=230, anchor='w')
+        self.tree_precios.column('Área', width=105, anchor='w')
+        self.tree_precios.column('Precio', width=92, anchor='e')
+        self.tree_precios.column('Clinica', width=92, anchor='e')
+        self.tree_precios.column('Convenio', width=92, anchor='e')
+        self.tree_precios.column('Comision', width=88, anchor='e')
+        self.tree_precios.column('PrecioBs', width=105, anchor='e')
+        self.tree_precios.column('PrecioCOP', width=110, anchor='e')
 
         # Las pruebas sin precio se resaltan: son las que hay que atender
         self.tree_precios.tag_configure('sin_precio', foreground='#b45309')
+        # Sin convenio se le cobra a la clinica el precio ambulatorio, o sea
+        # de menos; conviene que salte a la vista
+        self.tree_precios.tag_configure('sin_convenio', foreground='#7c3aed')
 
         # Scrollbar
         scrollbar_precios = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree_precios.yview)
@@ -1616,6 +1638,247 @@ class VentanaConfiguracionCompleta:
         except Exception:
             pass
 
+    def _prueba_seleccionada_precios(self):
+        """PruebaID de la fila marcada en la lista de precios, o None."""
+        sel = self.tree_precios.selection()
+        if not sel:
+            messagebox.showwarning("Seleccione",
+                                   "Seleccione una prueba de la lista.",
+                                   parent=self.win)
+            return None
+        try:
+            return int(str(sel[0]).lstrip('p'))
+        except ValueError:
+            return None
+
+    def _editar_tarifas_convenio(self):
+        """
+        Edita las tres tarifas de una prueba.
+
+        Se editan juntas a proposito: la comision solo tiene sentido viendo
+        a la vez lo que cobra la clinica y lo que nos paga.
+        """
+        prueba_id = self._prueba_seleccionada_precios()
+        if prueba_id is None:
+            return
+
+        try:
+            from modulos.tarifas import (COL_CLINICA, COL_CONVENIO,
+                                         crear_gestor_tarifas)
+        except ImportError:
+            messagebox.showerror("No disponible",
+                                 "Falta el módulo de tarifas.", parent=self.win)
+            return
+
+        gestor = crear_gestor_tarifas(self.db)
+        gestor.asegurar_columnas()
+        prueba = gestor.obtener_prueba(prueba_id)
+        if not prueba:
+            messagebox.showerror("Error", "No se encontró la prueba.",
+                                 parent=self.win)
+            return
+
+        dlg = tk.Toplevel(self.win)
+        dlg.title("Tarifas de convenio")
+        dlg.configure(bg='white')
+        dlg.grab_set()
+        dlg.resizable(False, False)
+        ancho, alto = 480, 430
+        x = (dlg.winfo_screenwidth() - ancho) // 2
+        y = (dlg.winfo_screenheight() - alto) // 2
+        dlg.geometry(f"{ancho}x{alto}+{x}+{y}")
+
+        tk.Label(dlg, text="🤝 Tarifas de convenio", font=('Segoe UI', 13, 'bold'),
+                 bg='#0891b2', fg='white', pady=12).pack(fill='x')
+
+        cont = tk.Frame(dlg, bg='white')
+        cont.pack(fill='both', expand=True, padx=24, pady=14)
+
+        tk.Label(cont, text=str(prueba.get('NombrePrueba') or ''),
+                 font=('Segoe UI', 12, 'bold'), bg='white',
+                 wraplength=420, justify='left').pack(anchor='w')
+        tk.Label(cont, text=f"Código: {prueba.get('CodigoPrueba') or '—'}",
+                 font=('Segoe UI', 9), bg='white', fg='#64748b').pack(anchor='w',
+                                                                     pady=(0, 12))
+
+        def campo(texto, ayuda, valor):
+            tk.Label(cont, text=texto, font=('Segoe UI', 10, 'bold'),
+                     bg='white').pack(anchor='w')
+            tk.Label(cont, text=ayuda, font=('Segoe UI', 8), bg='white',
+                     fg='#64748b', wraplength=420,
+                     justify='left').pack(anchor='w')
+            e = ttk.Entry(cont, font=('Segoe UI', 12), width=18)
+            e.pack(anchor='w', pady=(2, 10))
+            e.insert(0, f"{float(valor or 0):.2f}")
+            return e
+
+        e_base = campo("Precio ambulatorio",
+                       "Lo paga el paciente que viene por su cuenta. Entra a la caja.",
+                       prueba.get('Precio'))
+        e_clinica = campo("Precio que la clínica cobra al paciente",
+                          "Informativo: ese dinero lo cobra la clínica, no el laboratorio.",
+                          prueba.get(COL_CLINICA))
+        e_convenio = campo("Precio que la clínica nos paga",
+                           "Lo que percibe el laboratorio por hospitalización, "
+                           "emergencia y cirugía. Es lo que se factura y se reclama.",
+                           prueba.get(COL_CONVENIO))
+
+        lbl_comision = tk.Label(cont, text="", font=('Segoe UI', 10, 'bold'),
+                                bg='white', anchor='w')
+        lbl_comision.pack(fill='x', pady=(2, 0))
+
+        def leer(entry):
+            try:
+                return float((entry.get() or '0').replace(',', '.'))
+            except ValueError:
+                return None
+
+        def actualizar_comision(*_):
+            c, v = leer(e_clinica), leer(e_convenio)
+            if c is None or v is None:
+                lbl_comision.config(text="Importe no válido.", fg='#dc2626')
+                return
+            if not c or not v:
+                lbl_comision.config(text="Falta alguna tarifa de convenio.",
+                                    fg='#b45309')
+                return
+            dif = round(c - v, 2)
+            if dif < 0:
+                lbl_comision.config(
+                    text=f"La clínica cobraría menos de lo que nos paga ({dif:,.2f}).",
+                    fg='#dc2626')
+            else:
+                pct = (dif / c * 100) if c else 0
+                lbl_comision.config(
+                    text=f"Comisión de la clínica: {dif:,.2f}  ({pct:.0f}%)",
+                    fg='#059669')
+
+        for e in (e_clinica, e_convenio):
+            e.bind('<KeyRelease>', actualizar_comision)
+        actualizar_comision()
+
+        def guardar():
+            valores = {}
+            for nombre, entry in (('precio', e_base), ('precio_clinica', e_clinica),
+                                  ('precio_convenio', e_convenio)):
+                v = leer(entry)
+                if v is None:
+                    messagebox.showerror("Importe inválido",
+                                         "Escriba importes válidos.", parent=dlg)
+                    return
+                if v < 0:
+                    messagebox.showerror("Importe inválido",
+                                         "Los precios no pueden ser negativos.",
+                                         parent=dlg)
+                    return
+                valores[nombre] = v
+
+            if valores['precio_clinica'] and valores['precio_convenio'] \
+                    and valores['precio_clinica'] < valores['precio_convenio']:
+                if not messagebox.askyesno(
+                        "Revisar",
+                        "La clínica cobraría al paciente menos de lo que le paga "
+                        "al laboratorio. ¿Guardar de todas formas?", parent=dlg):
+                    return
+
+            ok, msg = gestor.guardar_precios(prueba_id, **valores)
+            if ok:
+                dlg.destroy()
+                self._cargar_precios()
+            else:
+                messagebox.showerror("Error", msg, parent=dlg)
+
+        botones = tk.Frame(dlg, bg='white')
+        botones.pack(side='bottom', fill='x', padx=24, pady=12)
+        tk.Button(botones, text="✅ Guardar", font=('Segoe UI', 11, 'bold'),
+                  bg='#059669', fg='white', relief='flat', padx=20, pady=7,
+                  cursor='hand2', command=guardar).pack(side='left')
+        tk.Button(botones, text="❌ Cancelar", font=('Segoe UI', 11),
+                  bg='#94a3b8', fg='white', relief='flat', padx=20, pady=7,
+                  cursor='hand2', command=dlg.destroy).pack(side='right')
+
+        e_base.focus_set()
+
+    def _generar_baremo(self):
+        """
+        Saca el baremo informativo de precios en papel.
+
+        Sale por la impresora asignada a la función «Baremo de precios» en
+        la pestaña Impresión.
+        """
+        try:
+            from modulos.baremo_pdf import generar_baremo_pdf
+            from modulos.tarifas import crear_gestor_tarifas
+        except ImportError:
+            messagebox.showerror("No disponible",
+                                 "Falta el módulo del baremo.", parent=self.win)
+            return
+
+        gestor = crear_gestor_tarifas(self.db)
+        gestor.asegurar_columnas()
+
+        area_id = None
+        idx = self.combo_filtro_area.current()
+        if idx > 0 and idx <= len(self._areas_precios):
+            area_id = self._areas_precios[idx - 1][0]
+
+        filas = gestor.listar_baremo(
+            solo_activas=True, area_id=area_id,
+            texto=(self.var_buscar_precio.get() or '').strip() or None)
+        if not filas:
+            messagebox.showinfo("Baremo", "No hay pruebas que listar con esos filtros.",
+                                parent=self.win)
+            return
+
+        import os
+        import tempfile
+        ruta = os.path.join(
+            tempfile.gettempdir(),
+            "Baremo_precios_" + datetime.now().strftime('%Y%m%d_%H%M%S') + ".pdf")
+
+        try:
+            cfg = self.db.query_one(
+                "SELECT TOP 1 NombreLaboratorio FROM ConfiguracionLaboratorio")
+        except Exception:
+            cfg = None
+
+        generado = generar_baremo_pdf(ruta, filas, config_lab=cfg,
+                                      usuario=(self.user or {}).get('NombreUsuario', ''))
+        if not generado:
+            messagebox.showerror("No se pudo generar",
+                                 "No se pudo crear el PDF del baremo.\n\n"
+                                 "Revise que ReportLab esté instalado.",
+                                 parent=self.win)
+            return
+
+        try:
+            from modulos.impresoras import (ABIERTO, FALLO_IMPRESION, IMPRESO,
+                                            SIN_IMPRESORA, imprimir_documento)
+        except ImportError:
+            os.startfile(generado)
+            return
+
+        detalle = {}
+        res = imprimir_documento(self.db, generado, 'baremo',
+                                 titulo="Baremo de precios", detalle=detalle)
+        if res == IMPRESO:
+            messagebox.showinfo(
+                "Baremo impreso",
+                f"Salió por {detalle.get('impresora') or 'la impresora asignada'}.",
+                parent=self.win)
+        elif res == SIN_IMPRESORA:
+            messagebox.showwarning(
+                "Sin impresora asignada",
+                "La función «Baremo de precios» no tiene impresora asignada, "
+                "así que el baremo se abrió en pantalla.\n\n"
+                "Para que salga en papel, asígnele una en la pestaña Impresión.",
+                parent=self.win)
+        elif res in (FALLO_IMPRESION, ABIERTO):
+            messagebox.showwarning(
+                "No se pudo imprimir",
+                "El baremo se abrió en pantalla porque la impresora no aceptó "
+                f"el trabajo.\n\n{detalle.get('error', '')}", parent=self.win)
+
     def _cargar_precios(self):
         """Carga las pruebas con su precio, aplicando los filtros en pantalla."""
         # Conservar dónde estaba el usuario: recargar y perder el sitio en una
@@ -1636,10 +1899,23 @@ class VentanaConfiguracionCompleta:
             area_id = self._areas_precios[filtro_idx - 1][0]
             where_area = f" WHERE p.AreaID = {area_id}"
 
+        # Las columnas de convenio se crean la primera vez que se abre esta
+        # pestana, para que una instalacion antigua quede al dia sola.
+        tiene_tarifas = False
+        try:
+            from modulos.tarifas import (COL_CLINICA, COL_CONVENIO,
+                                         crear_gestor_tarifas)
+            crear_gestor_tarifas(self.db).asegurar_columnas()
+            self.db.query_one(f'SELECT TOP 1 {COL_CONVENIO} FROM Pruebas')
+            tiene_tarifas = True
+        except Exception:
+            COL_CLINICA, COL_CONVENIO = 'PrecioClinica', 'PrecioConvenio'
+
+        extra = f', p.{COL_CLINICA}, p.{COL_CONVENIO}' if tiene_tarifas else ''
         try:
             pruebas = self.db.query(f"""
                 SELECT p.PruebaID, p.CodigoPrueba, p.NombrePrueba, p.Precio,
-                       a.NombreArea
+                       a.NombreArea{extra}
                 FROM Pruebas p LEFT JOIN Areas a ON p.AreaID = a.AreaID
                 {where_area}
                 ORDER BY p.NombrePrueba
@@ -1662,6 +1938,7 @@ class VentanaConfiguracionCompleta:
         busqueda = (self.var_buscar_precio.get() or '').strip().lower()
         solo_sin_precio = bool(self.var_solo_sin_precio.get())
         total_sin_precio = 0
+        total_sin_convenio = 0
         mostradas = 0
 
         for p in pruebas:
@@ -1679,19 +1956,41 @@ class VentanaConfiguracionCompleta:
 
             # El identificador de la fila es el PruebaID: actualizar por código
             # fallaba en silencio con los códigos vacíos o repetidos
+            p_clinica = self._precio_a_float(p.get(COL_CLINICA)) if tiene_tarifas else 0
+            p_convenio = self._precio_a_float(p.get(COL_CONVENIO)) if tiene_tarifas else 0
+            comision = round(p_clinica - p_convenio, 2) if (p_clinica and p_convenio) else 0
+            falta_convenio = bool(tiene_tarifas and precio and not p_convenio)
+            if falta_convenio:
+                total_sin_convenio += 1
+
+            # Un guion en vez de 0,00 deja ver de un vistazo lo que falta
+            def _imp(v):
+                return f"${v:,.2f}" if v else '—'
+
+            if not precio:
+                etiquetas = ('sin_precio',)
+            elif falta_convenio:
+                etiquetas = ('sin_convenio',)
+            else:
+                etiquetas = ()
+
             iid = f"p{p['PruebaID']}"
             self.tree_precios.insert(
                 '', 'end', iid=iid,
                 values=(codigo or '—', nombre,
                         p.get('NombreArea') or 'Sin área', f"${precio:.2f}",
+                        _imp(p_clinica), _imp(p_convenio), _imp(comision),
                         self._precio_en_bs(precio, tasa_bs),
                         self._precio_en_cop(precio, tasa_cop)),
-                tags=('sin_precio',) if not precio else ())
+                tags=etiquetas)
             mostradas += 1
 
         resumen = f"{mostradas} prueba(s) en la lista"
         if total_sin_precio:
             resumen += f"  ·  {total_sin_precio} sin precio asignado"
+        if total_sin_convenio:
+            resumen += (f"  ·  {total_sin_convenio} sin precio de convenio "
+                        f"(se le cobran a la clínica al precio ambulatorio)")
         self.lbl_resumen_precios.config(text=resumen)
 
         # Restaurar selección y posición

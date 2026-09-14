@@ -191,6 +191,14 @@ except ImportError:
     PROCEDENCIA_DISPONIBLE = False
     procedencia_cobro = None
 
+# Tarifas: que precio se aplica segun de donde venga el paciente
+try:
+    from modulos import tarifas as tarifas_mod
+    TARIFAS_DISPONIBLE = True
+except ImportError:
+    TARIFAS_DISPONIBLE = False
+    tarifas_mod = None
+
 # Importar módulo veterinario
 try:
     from modulos.veterinario import GestorVeterinario, crear_gestor_veterinario, ESPECIES, RAZAS, VALORES_REFERENCIA
@@ -6140,10 +6148,15 @@ class MainApplication:
 
     def _al_cambiar_procedencia(self):
         """
-        Cambiar la procedencia cambia quien paga, asi que el abono propuesto
-        deja de valer: se vuelve a proponer segun la nueva.
+        Cambiar la procedencia cambia la tarifa y quien paga.
+
+        Se repinta la lista para que las pruebas pasen al precio que toca
+        (ambulatorio o convenio) y se vuelve a proponer el abono, que sale
+        del total ya reprecificado.
         """
         self._abono_editado_a_mano = False
+        if hasattr(self, 'tree_pruebas_sel'):
+            self._refrescar_lista_seleccionadas()
         self.calcular_totales()
 
     def calcular_totales(self):
@@ -7184,8 +7197,79 @@ class MainApplication:
             _log.warning("No se pudo resolver el area de las pruebas: %s", e)
         return mapa
 
+    def _aplicar_tarifa_por_procedencia(self):
+        """
+        Pone a cada prueba el precio que le toca segun la procedencia.
+
+        El paciente que entra por hospitalizacion, emergencia o cirugia se
+        factura al precio de convenio, que es lo que la clinica le paga al
+        laboratorio; el que llega por su pie, al precio ambulatorio. Antes se
+        cobraba el ambulatorio a todo el mundo, asi que de cada caso de
+        clinica se reclamaba de menos.
+
+        Se llama al repintar la lista, que es por donde pasa cualquier cambio
+        de pruebas o de procedencia.
+        """
+        if not (TARIFAS_DISPONIBLE and self.sol_pruebas_seleccionadas):
+            return
+        tipo = self.combo_tipo.get() if hasattr(self, 'combo_tipo') else ''
+
+        ids = []
+        for p in self.sol_pruebas_seleccionadas:
+            try:
+                ids.append(int(p.get('id')))
+            except (TypeError, ValueError):
+                continue
+        if not ids:
+            return
+
+        # Se leen de una vez: repintar la lista no puede costar una consulta
+        # por prueba.
+        campos = "PruebaID, Precio"
+        try:
+            db.query_one(f"SELECT TOP 1 {tarifas_mod.COL_CONVENIO} FROM Pruebas")
+            campos += f", {tarifas_mod.COL_CLINICA}, {tarifas_mod.COL_CONVENIO}"
+        except Exception:
+            # Sin columnas de convenio no hay nada que ajustar
+            return
+
+        try:
+            filas = db.query(f"SELECT {campos} FROM Pruebas "
+                             f"WHERE PruebaID IN ({', '.join(str(i) for i in ids)})") or []
+        except Exception as e:
+            _log.warning("No se pudieron leer las tarifas: %s", e)
+            return
+
+        mapa = {f.get('PruebaID'): f for f in filas}
+        sin_convenio = []
+        for p in self.sol_pruebas_seleccionadas:
+            fila = mapa.get(p.get('id'))
+            if not fila:
+                continue
+            detalle = tarifas_mod.precio_detalle(fila, tipo)
+            p['precio'] = detalle['precio']
+            if detalle['sin_convenio']:
+                sin_convenio.append(p.get('nombre') or p.get('codigo') or '')
+
+        # Avisar una sola vez por combinacion, no en cada repintado
+        clave = (tipo, tuple(sorted(sin_convenio)))
+        if sin_convenio and getattr(self, '_aviso_sin_convenio', None) != clave:
+            self._aviso_sin_convenio = clave
+            faltan = ', '.join(sin_convenio[:6])
+            if len(sin_convenio) > 6:
+                faltan += f" y {len(sin_convenio) - 6} más"
+            messagebox.showwarning(
+                "Sin precio de convenio",
+                f"Estas pruebas no tienen precio de convenio cargado, así que "
+                f"se están cobrando al precio ambulatorio:\n\n{faltan}\n\n"
+                f"Revise el baremo en Configuración → Precios para no "
+                f"reclamarle de menos a la clínica.")
+        elif not sin_convenio:
+            self._aviso_sin_convenio = None
+
     def _refrescar_lista_seleccionadas(self):
         """Reconstruye el treeview unico de pruebas seleccionadas."""
+        self._aplicar_tarifa_por_procedencia()
         for item in self.tree_pruebas_sel.get_children():
             self.tree_pruebas_sel.delete(item)
         areas = self._codigo_area_por_prueba(

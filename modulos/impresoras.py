@@ -88,6 +88,14 @@ ROLES = {
         'directo_defecto': True,
         'papel': 'hoja',
     },
+    'baremo': {
+        'etiqueta': 'Baremo de precios',
+        'ayuda': 'Lista informativa de precios: ambulatorio, clínica, convenio y comisión',
+        'columna': 'ImpresoraBaremo',
+        'columna_directo': 'ImpresoraBaremoDirecto',
+        'directo_defecto': True,
+        'papel': 'hoja',
+    },
     'cotizaciones': {
         'etiqueta': 'Cotizaciones',
         'ayuda': 'Cotizaciones y presupuestos para el paciente',
@@ -123,8 +131,8 @@ ROLES = {
 }
 
 # Orden estable para la interfaz de configuración
-ORDEN_ROLES = ('resultados', 'hojas_trabajo', 'cortes', 'cotizaciones',
-               'facturacion', 'recibos', 'etiquetas')
+ORDEN_ROLES = ('resultados', 'hojas_trabajo', 'cortes', 'baremo',
+               'cotizaciones', 'facturacion', 'recibos', 'etiquetas')
 
 # Nombres alternativos que usan las llamadas existentes del sistema
 ALIAS_ROLES = {
@@ -142,6 +150,9 @@ ALIAS_ROLES = {
     'nota_debito': 'facturacion',
     'recibo': 'recibos',
     'etiqueta': 'etiquetas',
+    'lista_precios': 'baremo',
+    'precios': 'baremo',
+    'tarifas': 'baremo',
     'corte': 'cortes',
     'corte_adeudado': 'cortes',
     'adeudado': 'cortes',
@@ -181,6 +192,10 @@ ROLES_RESPALDO = {
     # impresora propia sale por la de facturación, y si tampoco la hay, por
     # la de resultados, que es la que todo laboratorio tiene asignada.
     'cortes': ('facturacion', 'resultados'),
+    # El baremo es una lista en hoja; mientras no tenga impresora propia sale
+    # por la del corte, que es el otro documento administrativo, y si no por
+    # la de resultados.
+    'baremo': ('cortes', 'facturacion', 'resultados'),
 }
 
 
