@@ -5489,6 +5489,9 @@ class MainApplication:
                                      'Emergencia Particular', 'Emergencia Asegurado', 'Asegurado']
         self.combo_tipo.set('Ambulatorio')
         self.combo_tipo.pack(side='left')
+        # De la procedencia depende quien paga, y por tanto el abono propuesto
+        self.combo_tipo.bind('<<ComboboxSelected>>',
+                             lambda e: self._al_cambiar_procedencia())
 
         # ==============================================================
         # SECCION 2: INFORMACION DEL PACIENTE
@@ -5859,7 +5862,12 @@ class MainApplication:
         self.entry_abonado = tk.Entry(row_abono, font=('Segoe UI', 9), width=10, relief='solid', bg=S['input'], bd=1, justify='right')
         self.entry_abonado.pack(side='right', ipady=2)
         self.entry_abonado.insert(0, '0.00')
-        self.entry_abonado.bind('<KeyRelease>', lambda e: self.calcular_totales())
+        # Mientras nadie escriba en la casilla, la mantiene al dia el propio
+        # sistema: con el total si se cobra de contado, en cero si paga el
+        # seguro. Asi un cero solo aparece cuando se pone a proposito, y lo
+        # abonado puede tomarse al pie de la letra.
+        self._abono_editado_a_mano = False
+        self.entry_abonado.bind('<KeyRelease>', lambda e: self._al_escribir_abono())
 
         # Saldo
         row_saldo = tk.Frame(fact_frame, bg=S['frame'])
@@ -6082,6 +6090,53 @@ class MainApplication:
         self.entry_tasa_cop.delete(0, 'end')
         self.entry_tasa_cop.insert(0, f"{tasa_cop_usd:.2f}" if tasa_cop_usd else '1.00')
 
+    def _al_escribir_abono(self):
+        """
+        Alguien escribio en la casilla del abono: a partir de ahi manda lo que
+        puso y el sistema deja de rellenarla, aunque cambien las pruebas.
+        """
+        self._abono_editado_a_mano = True
+        self.calcular_totales()
+
+    def _sincronizar_abono(self, total_usd):
+        """
+        Mantiene la casilla del abono acorde con la procedencia, mientras
+        nadie la haya escrito a mano.
+
+        De contado se propone el total, que es el caso corriente: el paciente
+        paga lo suyo en el mostrador. Por seguro se pone en cero y se
+        bloquea, porque quien paga es la clinica y ese importe se descarga
+        despues en la cartera de asegurados.
+
+        El objetivo es que el cero de la casilla signifique siempre lo mismo:
+        que no se abono nada.
+        """
+        if getattr(self, '_abono_editado_a_mano', False):
+            return
+        if not hasattr(self, 'entry_abonado'):
+            return
+
+        tipo = self.combo_tipo.get() if hasattr(self, 'combo_tipo') else ''
+        es_seguro = (procedencia_cobro.es_credito(tipo)
+                     if PROCEDENCIA_DISPONIBLE else False)
+        propuesto = 0.0 if es_seguro else float(total_usd or 0)
+
+        estado_previo = str(self.entry_abonado.cget('state'))
+        if estado_previo != 'normal':
+            self.entry_abonado.config(state='normal')
+        self.entry_abonado.delete(0, 'end')
+        self.entry_abonado.insert(0, f"{propuesto:.2f}")
+        # Por seguro la casilla no se toca: el importe no lo pone el paciente
+        self.entry_abonado.config(state='readonly' if es_seguro else 'normal')
+
+    def _al_cambiar_procedencia(self):
+        """
+        Cambiar la procedencia cambia quien paga, asi que el abono propuesto
+        deja de valer: se vuelve a proponer segun la nueva.
+        """
+        self._abono_editado_a_mano = False
+        self.calcular_totales()
+
     def calcular_totales(self):
         """Calcula subtotal, descuento, IVA, total y saldo"""
         # Subtotal = suma de precios de pruebas (convertir a float para evitar errores con Decimal)
@@ -6128,6 +6183,7 @@ class MainApplication:
         self.lbl_total_cop.config(text=f"${total_cop:,.0f} COP")
 
         # Abonado y Saldo (en USD)
+        self._sincronizar_abono(total_usd)
         abonado = _numero_usuario(self.entry_abonado.get(), 0)
         saldo = total_usd - abonado
         self.lbl_saldo.config(text=f"${saldo:,.2f}")
@@ -7450,7 +7506,7 @@ class MainApplication:
         self.cargar_solicitudes()
         return True
 
-    def _calcular_cobro(self, total, abonado, tipo_servicio):
+    def _calcular_cobro(self, total, abonado, tipo_servicio, hay_documento=True):
         """
         Cuanto se cobra ahora y cuanto queda a deber. Ver modulos/procedencia.
 
@@ -7458,7 +7514,8 @@ class MainApplication:
         historico (cobrar el total) para no dejar la caja sin registrar.
         """
         if PROCEDENCIA_DISPONIBLE:
-            return procedencia_cobro.calcular_cobro(total, abonado, tipo_servicio)
+            return procedencia_cobro.calcular_cobro(total, abonado, tipo_servicio,
+                                                    hay_documento)
         try:
             total = float(total or 0)
         except (TypeError, ValueError):
@@ -7478,6 +7535,9 @@ class MainApplication:
         if cobro['es_credito']:
             partes.append(f"\nPor seguro: no entra a caja. "
                           f"Cuenta por cobrar de ${cobro['saldo']:,.2f}.")
+        elif not cobro.get('hay_documento', True):
+            partes.append(f"\nSin documento: no se asienta cobro. "
+                          f"Queda por cobrar ${cobro['saldo']:,.2f}.")
         else:
             if cobro['en_caja']:
                 partes.append(f"\nCobrado en caja: ${cobro['cobrado']:,.2f}.")
@@ -7517,9 +7577,12 @@ class MainApplication:
         """
         es_credito = (procedencia_cobro.es_credito(tipo_servicio)
                       if PROCEDENCIA_DISPONIBLE else False)
-        cobrado, saldo = self._calcular_cobro(total, abonado, tipo_servicio)
+        hay_documento = bool(doc_result and doc_result.get('exito'))
+        cobrado, saldo = self._calcular_cobro(total, abonado, tipo_servicio,
+                                              hay_documento)
         resumen = {
             'es_credito': es_credito,
+            'hay_documento': hay_documento,
             'cobrado': cobrado,
             'saldo': saldo,
             'en_caja': False,
@@ -7726,17 +7789,21 @@ class MainApplication:
             else:
                 doc_mensaje = f"\nAdvertencia factura: {doc_result['mensaje']}"
 
-        # Asentar el cobro segun la procedencia y lo realmente abonado
-        cobro = None
-        if doc_result and doc_result.get('exito'):
-            cobro = self._liquidar_cobro_solicitud(
-                sol_id=sol_id,
-                numero=numero,
-                total=total,
-                abonado=abonado,
-                tipo_servicio=tipo_servicio,
-                doc_result=doc_result,
-                forma_pago_texto=dialogo.forma_pago)
+        # Asentar el cobro segun la procedencia y lo realmente abonado.
+        #
+        # Se liquida siempre, tambien cuando se guarda sin documento: el
+        # derecho de cobro nace de haber prestado el servicio, no de que se
+        # imprima un papel. Antes esto colgaba de que hubiera documento, asi
+        # que una solicitud guardada "sin documento" no dejaba rastro de la
+        # deuda y un asegurado registrado asi desaparecia de la cartera.
+        cobro = self._liquidar_cobro_solicitud(
+            sol_id=sol_id,
+            numero=numero,
+            total=total,
+            abonado=abonado,
+            tipo_servicio=tipo_servicio,
+            doc_result=doc_result if (doc_result and doc_result.get('exito')) else None,
+            forma_pago_texto=dialogo.forma_pago)
 
         # Mostrar mensaje de éxito con opcion de imprimir etiquetas.
         # Lo abonado que se muestra es lo que quedo asentado, no lo tecleado:
@@ -7896,13 +7963,12 @@ class MainApplication:
                     doc_legacy = {'exito': True, 'numero_factura': num_factura}
 
             # Esta via de respaldo no asentaba el cobro en ningun sitio: la
-            # solicitud quedaba guardada y el dinero sin registrar.
-            cobro = None
-            if doc_legacy:
-                cobro = self._liquidar_cobro_solicitud(
-                    sol_id=sol_id, numero=numero, total=total, abonado=abonado,
-                    tipo_servicio=data.get('TipoServicio', ''),
-                    doc_result=doc_legacy, forma_pago_texto='Efectivo')
+            # solicitud quedaba guardada y el dinero sin registrar. Se liquida
+            # siempre, con documento o sin el, igual que la via principal.
+            cobro = self._liquidar_cobro_solicitud(
+                sol_id=sol_id, numero=numero, total=total, abonado=abonado,
+                tipo_servicio=data.get('TipoServicio', ''),
+                doc_result=doc_legacy, forma_pago_texto='Efectivo')
 
         abonado_real = cobro['cobrado'] if cobro else abonado
         messagebox.showinfo(

@@ -75,16 +75,23 @@ def etiqueta_cobro(tipo_servicio):
     return 'Credito (seguro)' if es_credito(tipo_servicio) else 'Contado'
 
 
-def calcular_cobro(total, abonado, tipo_servicio):
+def calcular_cobro(total, abonado, tipo_servicio, hay_documento=True):
     """
     Reparte el importe de una solicitud entre lo cobrado y lo que queda a deber.
 
     Devuelve la tupla (cobrado, saldo), ambos redondeados a dos decimales.
 
-    Un abono en cero sobre una solicitud de contado se toma como pago
-    completo: la casilla de la pantalla arranca en 0,00 y no se rellena
-    cuando el paciente paga todo, que es el caso corriente. Para registrar a
-    quien no paga en el momento esta la procedencia asegurada.
+    Lo abonado se toma al pie de la letra: si dice cero, se cobro cero. La
+    pantalla rellena esa casilla con el total en cuanto la procedencia es de
+    contado, de modo que el cero solo aparece cuando alguien lo escribe a
+    proposito. Antes se interpretaba un cero como pago completo para que un
+    descuido no dejara la caja vacia, pero eso hacia que el mismo valor
+    significara dos cosas distintas y que no hubiera forma de registrar a un
+    particular que se lleva el examen sin pagar.
+
+    Sin documento emitido no hay cobro: un recibo o una factura son el
+    comprobante de que el dinero entro, y sin comprobante no se puede
+    asentar un ingreso de caja. Lo que no se cobra queda como saldo.
 
     Es el unico calculo de cobro del sistema: el recibo, la caja y la cuenta
     por cobrar salen todos de aqui, de modo que no puedan contradecirse.
@@ -104,10 +111,8 @@ def calcular_cobro(total, abonado, tipo_servicio):
     total = max(0.0, total)
     abonado = max(0.0, abonado)
 
-    if es_credito(tipo_servicio):
+    if es_credito(tipo_servicio) or not hay_documento:
         cobrado = 0.0
-    elif abonado <= 0:
-        cobrado = total
     else:
         cobrado = min(abonado, total)
 

@@ -73,11 +73,32 @@ class TestCalculoDeCobro(unittest.TestCase):
         self.assertEqual(cobrado, 0.0)
         self.assertEqual(saldo, 100.0)
 
-    def test_contado_sin_abono_indicado_cobra_el_total(self):
-        # La casilla arranca en 0,00 y no se rellena cuando se paga todo.
+    def test_contado_con_abono_cero_no_cobra_nada(self):
+        # El cero se toma al pie de la letra: la pantalla rellena la casilla
+        # con el total, asi que un cero solo llega si se escribio a proposito.
+        # Es lo que permite registrar a quien se lleva el examen sin pagar.
         cobrado, saldo = calcular_cobro(80.0, 0, 'Ambulatorio')
+        self.assertEqual(cobrado, 0.0)
+        self.assertEqual(saldo, 80.0)
+
+    def test_contado_pagando_todo(self):
+        cobrado, saldo = calcular_cobro(80.0, 80.0, 'Ambulatorio')
         self.assertEqual(cobrado, 80.0)
         self.assertEqual(saldo, 0.0)
+
+    def test_sin_documento_no_hay_cobro(self):
+        # Un recibo o una factura son el comprobante de que el dinero entro;
+        # sin comprobante no se asienta ingreso, aunque se teclee un abono.
+        cobrado, saldo = calcular_cobro(100.0, 100.0, 'Ambulatorio',
+                                        hay_documento=False)
+        self.assertEqual(cobrado, 0.0)
+        self.assertEqual(saldo, 100.0)
+
+    def test_sin_documento_tampoco_cobra_a_un_asegurado(self):
+        cobrado, saldo = calcular_cobro(100.0, 0, 'Asegurado',
+                                        hay_documento=False)
+        self.assertEqual(cobrado, 0.0)
+        self.assertEqual(saldo, 100.0)
 
     def test_abono_parcial_cobra_solo_lo_abonado(self):
         cobrado, saldo = calcular_cobro(100.0, 20.0, 'Ambulatorio')
@@ -92,6 +113,7 @@ class TestCalculoDeCobro(unittest.TestCase):
     def test_cobrado_mas_saldo_siempre_es_el_total(self):
         casos = [
             (100.0, 0, 'Ambulatorio'),
+            (100.0, 100.0, 'Ambulatorio'),
             (100.0, 33.33, 'Ambulatorio'),
             (100.0, 100.0, 'Asegurado'),
             (0.0, 0, 'Ambulatorio'),
