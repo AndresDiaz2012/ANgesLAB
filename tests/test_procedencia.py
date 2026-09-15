@@ -59,6 +59,28 @@ class TestClasificacion(unittest.TestCase):
         self.assertTrue(es_contado('Convenio Empresa X'))
 
 
+class TestCabenEnLaBase(unittest.TestCase):
+    """
+    Solicitudes.TipoServicio era TEXT(20) y tres procedencias no cabian:
+    guardar una solicitud de hospitalizacion fallaba con "el campo es
+    demasiado pequeno". La columna se amplia a 50 al arrancar; esta prueba
+    vigila que no se agregue una procedencia que vuelva a no caber.
+    """
+
+    LIMITE = 50
+
+    def test_ninguna_procedencia_supera_el_limite(self):
+        for p in PROCEDENCIAS:
+            self.assertLessEqual(
+                len(p), self.LIMITE,
+                f"'{p}' tiene {len(p)} caracteres y no cabria en TipoServicio")
+
+    def test_las_largas_siguen_siendo_las_conocidas(self):
+        # Si alguna crece, conviene revisar el ancho de la columna
+        largas = sorted((len(p), p) for p in PROCEDENCIAS)[-1]
+        self.assertLessEqual(largas[0], 30)
+
+
 class TestCalculoDeCobro(unittest.TestCase):
     """El reparto entre lo que entra a caja y lo que queda a deber."""
 

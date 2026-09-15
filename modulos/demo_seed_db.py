@@ -326,7 +326,7 @@ def seed_solicitudes(conn, pac_ids):
             'HoraSolicitud': '08:30:00',
             'PacienteID': pac_id,
             'MedicoID': med_id,
-            'TipoServicio': 'Particular',
+            'TipoServicio': 'Ambulatorio',
             'EstadoSolicitud': estado,
             'PorcentajeDescuento': 0,
             'MontoDescuento': 0,

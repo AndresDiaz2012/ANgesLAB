@@ -406,7 +406,11 @@ class GestorSolicitudes:
                 'HoraSolicitud': datetime.now().strftime('%H:%M:%S'),
                 'PacienteID': datos_solicitud['PacienteID'],
                 'MedicoID': datos_solicitud.get('MedicoID'),
-                'TipoServicio': datos_solicitud.get('TipoServicio', 'Particular'),
+                # Por defecto Ambulatorio, que es una procedencia real del
+                # sistema: 'Particular' no esta en el combo y no la reconoce
+                # area_servicio(), asi que esas solicitudes no entraban en
+                # ningun area al hacer el corte.
+                'TipoServicio': datos_solicitud.get('TipoServicio') or 'Ambulatorio',
                 'EstadoSolicitud': 'Pendiente',
                 'DiagnosticoPresuntivo': datos_solicitud.get('DiagnosticoPresuntivo', ''),
                 'Observaciones': datos_solicitud.get('Observaciones', ''),

@@ -377,7 +377,11 @@ class GestorCotizaciones:
                 'PacienteID':         pac_id,
                 'FechaSolicitud':     ahora,
                 'HoraSolicitud':      ahora.strftime('%H:%M:%S'),
-                'TipoServicio':       'Particular',
+                # 'Particular' no es una procedencia valida del sistema:
+                # no esta en el combo y area_servicio() no la reconoce. Una
+                # cotizacion la pide el paciente por su cuenta, asi que la
+                # procedencia que le corresponde es Ambulatorio.
+                'TipoServicio':       'Ambulatorio',
                 'EstadoSolicitud':    'Pendiente',
                 'PorcentajeDescuento': 0,
                 'MontoDescuento':     descuento,

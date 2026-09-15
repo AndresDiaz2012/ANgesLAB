@@ -199,6 +199,14 @@ except ImportError:
     TARIFAS_DISPONIBLE = False
     tarifas_mod = None
 
+# Liquidacion: que entra a caja y que queda por cobrar
+try:
+    from modulos.liquidacion import crear_liquidador
+    LIQUIDACION_DISPONIBLE = True
+except ImportError:
+    LIQUIDACION_DISPONIBLE = False
+    crear_liquidador = None
+
 # Importar módulo veterinario
 try:
     from modulos.veterinario import GestorVeterinario, crear_gestor_veterinario, ESPECIES, RAZAS, VALORES_REFERENCIA
@@ -2258,6 +2266,20 @@ class MainApplication:
         """
         global SOLICITUDES_TIENE_MONTO_COBRADO, CXC_TIENE_SOLICITUD_ID
         global CXC_TIENE_PROCEDENCIA
+
+        # Solicitudes.TipoServicio nacio como TEXT(20) y tres procedencias
+        # no caben: "Hospitalizado Particular" (24), "Hospitalizado
+        # Asegurado" (23) y "Emergencia Particular" (21). Guardar una de esas
+        # solicitudes fallaba con "el campo es demasiado pequeno", asi que un
+        # paciente de hospitalizacion no se podia registrar.
+        try:
+            fila = db.query_one("SELECT TOP 1 TipoServicio FROM Solicitudes")
+            if fila is not None:
+                db.execute("ALTER TABLE Solicitudes "
+                           "ALTER COLUMN TipoServicio TEXT(50)")
+                _log.info("Columna Solicitudes.TipoServicio ampliada a 50")
+        except Exception as e:
+            _log.warning("No se pudo ampliar Solicitudes.TipoServicio: %s", e)
 
         try:
             db.query_one("SELECT TOP 1 MontoCobrado FROM Solicitudes")
@@ -6146,6 +6168,40 @@ class MainApplication:
         # Por seguro la casilla no se toca: el importe no lo pone el paciente
         self.entry_abonado.config(state='readonly' if es_seguro else 'normal')
 
+    def _adoptar_procedencia_existente(self):
+        """
+        Pone en pantalla la procedencia de la solicitud a la que se agrega.
+
+        Una solicitud no puede tener dos tarifas: las pruebas que se le
+        anaden se cobran igual que las que ya tenia. Por eso el combo queda
+        ademas bloqueado mientras se esta agregando.
+        """
+        if not (self.solicitud_existente_id and hasattr(self, 'combo_tipo')):
+            return
+        try:
+            fila = db.query_one(
+                f"SELECT TipoServicio FROM Solicitudes "
+                f"WHERE SolicitudID = {int(self.solicitud_existente_id)}")
+        except Exception as e:
+            _log.warning("No se pudo leer la procedencia de la solicitud %s: %s",
+                         self.solicitud_existente_id, e)
+            return
+
+        tipo = (fila or {}).get('TipoServicio')
+        if not tipo:
+            return
+
+        valores = list(self.combo_tipo['values'])
+        if tipo not in valores:
+            # Procedencia de una version anterior: se muestra igual, para no
+            # cambiarle la tarifa a la solicitud por su cuenta.
+            self.combo_tipo['values'] = valores + [tipo]
+        self.combo_tipo.set(tipo)
+        self.combo_tipo.config(state='disabled')
+        self._abono_editado_a_mano = False
+        if hasattr(self, 'tree_pruebas_sel'):
+            self._refrescar_lista_seleccionadas()
+
     def _al_cambiar_procedencia(self):
         """
         Cambiar la procedencia cambia la tarifa y quien paga.
@@ -7344,6 +7400,12 @@ class MainApplication:
                 num_sol = dialogo.solicitud_seleccionada.get('NumeroSolicitud', '')
                 self.lbl_numero.config(text=f"Agregando a: {num_sol}", fg='#f39c12')
 
+                # La procedencia es la de la solicitud a la que se agrega, no
+                # la que quedo en pantalla. Sin esto, anadirle pruebas a un
+                # paciente de hospitalizacion las cobraba al precio
+                # ambulatorio, y la misma solicitud acababa con dos tarifas.
+                self._adoptar_procedencia_existente()
+
                 # Mostrar pruebas existentes en el status
                 pruebas_existentes = self.gestor_solicitudes.obtener_pruebas_solicitud(
                     self.solicitud_existente_id
@@ -7356,6 +7418,8 @@ class MainApplication:
                 self.modo_solicitud = 'nueva'
                 self.solicitud_existente_id = None
                 self.lbl_numero.config(text="(Se generará al guardar)", fg='#7f8c8d')
+                if hasattr(self, 'combo_tipo'):
+                    self.combo_tipo.config(state='readonly')
             else:
                 # Canceló — limpiar
                 self._limpiar_campos_paciente()
@@ -7637,6 +7701,9 @@ class MainApplication:
             if cobro['saldo'] > 0.01:
                 partes.append(f" Saldo por cobrar: ${cobro['saldo']:,.2f}.")
 
+        if cobro.get('cuenta') == 'actualizada':
+            partes.append(" (se actualizó la cuenta por cobrar existente)")
+
         for aviso in cobro.get('avisos', []):
             partes.append(f"\n\nATENCION: {aviso}")
 
@@ -7645,158 +7712,27 @@ class MainApplication:
     def _liquidar_cobro_solicitud(self, sol_id, numero, total, abonado,
                                   tipo_servicio, doc_result, forma_pago_texto):
         """
-        Asienta el cobro de una solicitud segun su procedencia.
+        Asienta el cobro de la solicitud. La logica vive en modulos/liquidacion.
 
-        Es el unico sitio donde se decide si entra dinero a la caja. Antes
-        cada punto de guardado registraba el total como ingreso con solo
-        emitir el documento, de modo que un paciente por seguro aparecia como
-        dinero cobrado el mismo dia de la toma de muestra.
-
-        Reglas:
-
-          Asegurado    No toca la caja. Se abre una cuenta por cobrar por el
-                       total, que se salda cuando el seguro liquide.
-
-          Contado      Entra a la caja lo efectivamente abonado. Si el abono
-                       cubre menos que el total, el resto queda como cuenta
-                       por cobrar a nombre del paciente.
-
-        Un abono en cero se interpreta como pago completo, que es como venia
-        comportandose el sistema: la casilla arranca en 0,00 y casi nadie la
-        rellena cuando el paciente paga todo. Para registrar a alguien que no
-        paga nada esta la procedencia asegurada.
-
-        Devuelve un dict con lo asentado, para poder informarlo al usuario.
+        Se saco de aqui para poder probarla y, sobre todo, para que no se
+        duplicara la cuenta por cobrar al liquidar dos veces la misma
+        solicitud (agregarle pruebas, por ejemplo).
         """
-        es_credito = (procedencia_cobro.es_credito(tipo_servicio)
-                      if PROCEDENCIA_DISPONIBLE else False)
-        hay_documento = bool(doc_result and doc_result.get('exito'))
-        cobrado, saldo = self._calcular_cobro(total, abonado, tipo_servicio,
-                                              hay_documento)
-        resumen = {
-            'es_credito': es_credito,
-            'hay_documento': hay_documento,
-            'cobrado': cobrado,
-            'saldo': saldo,
-            'en_caja': False,
-            'cuenta_creada': False,
-            'avisos': [],
-        }
-
-        # Dejar constancia en la solicitud de cuanto se cobro
-        if SOLICITUDES_TIENE_MONTO_COBRADO:
-            try:
-                db.execute(f"UPDATE [Solicitudes] SET MontoCobrado={cobrado} "
-                           f"WHERE SolicitudID={sol_id}")
-            except Exception as e:
-                _log.warning("No se pudo guardar MontoCobrado de %s: %s", numero, e)
-
-        # Ingreso de caja: solo por lo realmente cobrado y solo si es contado
-        if cobrado > 0:
-            if not VENTANA_ADMIN_DISPONIBLE:
-                resumen['avisos'].append(
-                    "El modulo administrativo no esta disponible: "
-                    "el ingreso no se registro en caja.")
-            else:
-                try:
-                    from modulos.modulo_administrativo import GestorCajaChica
-                    _gc = GestorCajaChica(db)
-                    _caja = _gc.obtener_caja_abierta()
-                    if not _caja:
-                        # Antes esto se ignoraba en silencio y el dinero
-                        # simplemente no quedaba registrado en ningun lado.
-                        resumen['avisos'].append(
-                            f"No hay una caja abierta: el ingreso de "
-                            f"{cobrado:,.2f} NO quedo registrado. Abra la caja "
-                            f"en el modulo administrativo y registrelo a mano.")
-                        _log.warning("Solicitud %s: cobro de %.2f sin caja abierta",
-                                     numero, cobrado)
-                    else:
-                        _fp_texto = forma_pago_texto or 'Efectivo'
-                        _fp_safe = str(_fp_texto).replace("'", "''")
-                        _fp = db.query_one(
-                            f"SELECT FormaPagoID FROM [FormasPago] "
-                            f"WHERE Nombre LIKE '%{_fp_safe}%' AND Activo=True")
-                        _fp_id = _fp['FormaPagoID'] if _fp else 'Null'
-                        _doc_num = (doc_result.get('numero_recibo')
-                                    or doc_result.get('numero_factura', '')) if doc_result else ''
-                        _doc_tipo = 'Recibo' if (doc_result or {}).get('numero_recibo') else 'Factura'
-                        _gc.registrar_movimiento(_caja['CajaID'], {
-                            'Tipo': 'Ingreso',
-                            'Categoria': 'Pago de solicitud',
-                            'Descripcion': f'{_doc_tipo} {_doc_num}'.strip(),
-                            'Monto': cobrado,
-                            'FormaPagoID': _fp_id,
-                            'Referencia': _doc_num or numero,
-                            'FacturaID': (doc_result or {}).get('factura_id', 'Null'),
-                        }, self.user.get('UsuarioID', 1))
-                        resumen['en_caja'] = True
-                except Exception as e:
-                    _log.error("Solicitud %s: fallo al registrar en caja: %s", numero, e)
-                    resumen['avisos'].append(
-                        f"No se pudo registrar el ingreso en caja: {e}")
-
-        # Cuenta por cobrar por lo que queda debiendose
-        if saldo > 0.01:
-            try:
-                self._crear_cuenta_por_cobrar(sol_id, numero, saldo,
-                                              tipo_servicio, es_credito)
-                resumen['cuenta_creada'] = True
-            except Exception as e:
-                _log.error("Solicitud %s: fallo al crear cuenta por cobrar: %s", numero, e)
-                resumen['avisos'].append(
-                    f"No se pudo crear la cuenta por cobrar de {saldo:,.2f}: {e}")
-
-        return resumen
-
-    def _crear_cuenta_por_cobrar(self, sol_id, numero, saldo, tipo_servicio, es_credito):
-        """
-        Abre la cuenta por cobrar de una solicitud con saldo.
-
-        El seguro paga a plazo; el saldo de un particular se considera vencido
-        de inmediato, porque se esperaba el pago en el mostrador.
-        """
-        paciente = db.query_one(
-            f"SELECT p.PacienteID, p.Nombres & ' ' & p.Apellidos AS NombreCompleto "
-            f"FROM Solicitudes s LEFT JOIN Pacientes p ON s.PacienteID = p.PacienteID "
-            f"WHERE s.SolicitudID = {sol_id}")
-
-        pac_id = (paciente or {}).get('PacienteID') or 'Null'
-        nombre = str((paciente or {}).get('NombreCompleto') or '').strip() or 'Sin nombre'
-        nombre = nombre.replace("'", "''")
-
-        dias = (procedencia_cobro.DIAS_CREDITO_SEGURO
-                if (PROCEDENCIA_DISPONIBLE and es_credito) else 0)
-        emision = datetime.now()
-        vence = emision + timedelta(days=dias)
-
-        if PROCEDENCIA_DISPONIBLE:
-            obs = procedencia_cobro.descripcion_cuenta(tipo_servicio, numero)
-        else:
-            obs = f"Solicitud {numero}"
-        obs = obs.replace("'", "''")
-
-        fe = emision.strftime('#%m/%d/%Y %H:%M:%S#')
-        fv = vence.strftime('#%m/%d/%Y#')
-
-        cols = ["PacienteID", "NombrePaciente", "FechaEmision", "FechaVencimiento",
-                "MontoOriginal", "MontoCobrado", "SaldoPendiente", "DiasVencida",
-                "Estado", "Observaciones"]
-        vals = [f"{pac_id}", f"'{nombre}'", fe, fv,
-                f"{saldo}", "0", f"{saldo}", "0", "'Pendiente'", f"'{obs}'"]
-
-        # En bases antiguas estas columnas pueden no existir todavia; se omiten
-        # en vez de romper el guardado de la solicitud.
-        if CXC_TIENE_SOLICITUD_ID:
-            cols.insert(0, "SolicitudID")
-            vals.insert(0, f"{sol_id}")
-        if CXC_TIENE_PROCEDENCIA:
-            proc_safe = str(tipo_servicio or '').replace("'", "''")[:50]
-            cols.append("TipoProcedencia")
-            vals.append(f"'{proc_safe}'")
-
-        db.execute(f"INSERT INTO [CuentasPorCobrar] ({', '.join(cols)}) "
-                   f"VALUES ({', '.join(vals)})")
+        if not LIQUIDACION_DISPONIBLE:
+            _log.error("Modulo de liquidacion no disponible: el cobro de la "
+                       "solicitud %s no se asento", numero)
+            return None
+        try:
+            return crear_liquidador(db, self.user).liquidar(
+                sol_id=sol_id, numero=numero, total=total, abonado=abonado,
+                tipo_servicio=tipo_servicio, doc_result=doc_result,
+                forma_pago_texto=forma_pago_texto)
+        except Exception as e:
+            _log.error("Solicitud %s: fallo al liquidar: %s", numero, e)
+            messagebox.showwarning(
+                "Cobro no asentado",
+                f"La solicitud se guardó, pero el cobro no pudo asentarse:\n\n{e}")
+            return None
 
     def _guardar_nueva_solicitud(self, win, pruebas, total, desc_pct, iva_pct, abonado=0):
         """Crea una nueva solicitud usando el gestor"""
