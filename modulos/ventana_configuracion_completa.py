@@ -1708,15 +1708,73 @@ class VentanaConfiguracionCompleta:
                  font=('Segoe UI', 9), bg='white', fg='#64748b').pack(anchor='w',
                                                                      pady=(0, 12))
 
+        # ── Moneda de captura ──────────────────────────────────────────
+        # Los precios viven en dolares en la base, pero el convenio se
+        # negocia en pesos. Obligar a convertir a mano invita a errores, asi
+        # que se teclea en la moneda que se tenga y el sistema convierte.
+        tasa_bs, tasa_cop = self._tasas_precios(refrescar=True)
+
+        monedas = ['USD']
+        if tasa_cop:
+            monedas.append('COP')
+        if tasa_bs:
+            monedas.append('Bs')
+
+        fila_mon = tk.Frame(cont, bg='white')
+        fila_mon.pack(fill='x', pady=(0, 10))
+        tk.Label(fila_mon, text="Introducir importes en:",
+                 font=('Segoe UI', 10, 'bold'), bg='white').pack(side='left')
+        combo_moneda = ttk.Combobox(fila_mon, values=monedas, state='readonly',
+                                    width=7, font=('Segoe UI', 10))
+        # Se arranca en la moneda mas comoda de las disponibles: si hay tasa
+        # de pesos, el convenio se negocia en pesos.
+        combo_moneda.set('COP' if tasa_cop else 'USD')
+        combo_moneda.pack(side='left', padx=8)
+
+        lbl_tasa = tk.Label(fila_mon, text="", font=('Segoe UI', 8),
+                            bg='white', fg='#64748b')
+        lbl_tasa.pack(side='left', padx=6)
+
+        if not tasa_cop and not tasa_bs:
+            tk.Label(cont,
+                     text="Sin tasas cargadas solo se puede escribir en dólares. "
+                          "Cárguelas en Configuración → Financiera.",
+                     font=('Segoe UI', 8), bg='white', fg='#b45309',
+                     wraplength=420, justify='left').pack(anchor='w', pady=(0, 6))
+
+        def factor():
+            """Cuantas unidades de la moneda elegida vale un dolar."""
+            m = combo_moneda.get()
+            if m == 'COP' and tasa_cop:
+                return float(tasa_cop)
+            if m == 'Bs' and tasa_bs:
+                return float(tasa_bs)
+            return 1.0
+
+        def a_usd(valor_en_moneda):
+            from modulos.tarifas import convertir_a_usd
+            return convertir_a_usd(valor_en_moneda, factor())
+
+        def desde_usd(valor_usd):
+            from modulos.tarifas import convertir_desde_usd
+            return convertir_desde_usd(valor_usd, factor())
+
+        campos_tarifa = []
+
         def campo(texto, ayuda, valor):
             tk.Label(cont, text=texto, font=('Segoe UI', 10, 'bold'),
                      bg='white').pack(anchor='w')
             tk.Label(cont, text=ayuda, font=('Segoe UI', 8), bg='white',
                      fg='#64748b', wraplength=420,
                      justify='left').pack(anchor='w')
-            e = ttk.Entry(cont, font=('Segoe UI', 12), width=18)
-            e.pack(anchor='w', pady=(2, 10))
-            e.insert(0, f"{float(valor or 0):.2f}")
+            linea = tk.Frame(cont, bg='white')
+            linea.pack(anchor='w', fill='x', pady=(2, 10))
+            e = ttk.Entry(linea, font=('Segoe UI', 12), width=16)
+            e.pack(side='left')
+            eq = tk.Label(linea, text="", font=('Segoe UI', 9), bg='white',
+                          fg='#64748b')
+            eq.pack(side='left', padx=8)
+            campos_tarifa.append((e, eq, float(valor or 0)))
             return e
 
         e_base = campo("Precio ambulatorio",
@@ -1735,12 +1793,64 @@ class VentanaConfiguracionCompleta:
         lbl_comision.pack(fill='x', pady=(2, 0))
 
         def leer(entry):
-            try:
-                return float((entry.get() or '0').replace(',', '.'))
-            except ValueError:
-                return None
+            """
+            Importe tal como se tecleo. Ver tarifas.leer_importe().
+
+            En dolares un punto suele ser decimal; en pesos, separador de
+            miles. Por eso se le dice en que moneda se esta escribiendo.
+            """
+            from modulos.tarifas import leer_importe
+            return leer_importe(entry.get(),
+                                separador_miles=(combo_moneda.get() != 'USD'))
+
+        def formato_moneda(valor_usd):
+            """El importe en la moneda elegida, con los decimales que tocan."""
+            m = combo_moneda.get()
+            v = desde_usd(valor_usd)
+            if m == 'COP':
+                return '{:,.0f}'.format(v)
+            return '{:,.2f}'.format(v)
+
+        def refrescar_equivalencias(*_):
+            """Muestra al lado de cada casilla el equivalente en las otras monedas."""
+            m = combo_moneda.get()
+            if m == 'USD':
+                lbl_tasa.config(text="")
+            elif m == 'COP':
+                lbl_tasa.config(text=f"tasa: {tasa_cop:,.2f} COP por USD")
+            else:
+                lbl_tasa.config(text=f"tasa: {tasa_bs:,.2f} Bs por USD")
+
+            for entry, etiqueta, _ in campos_tarifa:
+                v = leer(entry)
+                if v is None:
+                    etiqueta.config(text="importe no válido", fg='#dc2626')
+                    continue
+                if not v:
+                    etiqueta.config(text="", fg='#64748b')
+                    continue
+                usd = a_usd(v)
+                partes = []
+                if m != 'USD':
+                    partes.append(f"${usd:,.2f} USD")
+                if m != 'COP' and tasa_cop:
+                    partes.append(f"{usd * float(tasa_cop):,.0f} COP")
+                if m != 'Bs' and tasa_bs:
+                    partes.append(f"Bs {usd * float(tasa_bs):,.2f}")
+                etiqueta.config(text="  ".join(partes), fg='#64748b')
+
+        def cambiar_moneda(*_):
+            """Reescribe las casillas en la moneda recien elegida."""
+            for entry, _etq, valor_usd in campos_tarifa:
+                entry.delete(0, 'end')
+                entry.insert(0, formato_moneda(valor_usd) if valor_usd else '0')
+            refrescar_equivalencias()
+            actualizar_comision()
+
+        combo_moneda.bind('<<ComboboxSelected>>', cambiar_moneda)
 
         def actualizar_comision(*_):
+            refrescar_equivalencias()
             c, v = leer(e_clinica), leer(e_convenio)
             if c is None or v is None:
                 lbl_comision.config(text="Importe no válido.", fg='#dc2626')
@@ -1750,21 +1860,22 @@ class VentanaConfiguracionCompleta:
                                     fg='#b45309')
                 return
             dif = round(c - v, 2)
+            m = combo_moneda.get()
+            dec = 0 if m == 'COP' else 2
             if dif < 0:
                 lbl_comision.config(
-                    text=f"La clínica cobraría menos de lo que nos paga ({dif:,.2f}).",
+                    text=f"La clínica cobraría menos de lo que nos paga "
+                         f"({dif:,.{dec}f} {m}).",
                     fg='#dc2626')
             else:
                 pct = (dif / c * 100) if c else 0
                 lbl_comision.config(
-                    text=f"Comisión de la clínica: {dif:,.2f}  ({pct:.0f}%)",
+                    text=f"Comisión de la clínica: {dif:,.{dec}f} {m}  ({pct:.0f}%)",
                     fg='#059669')
 
-        for e in (e_clinica, e_convenio):
-            e.bind('<KeyRelease>', actualizar_comision)
-        actualizar_comision()
-
         def guardar():
+            # Se teclea en la moneda elegida, pero en la base los precios
+            # viven en dolares: se convierte aqui, en un solo sitio.
             valores = {}
             for nombre, entry in (('precio', e_base), ('precio_clinica', e_clinica),
                                   ('precio_convenio', e_convenio)):
@@ -1778,7 +1889,7 @@ class VentanaConfiguracionCompleta:
                                          "Los precios no pueden ser negativos.",
                                          parent=dlg)
                     return
-                valores[nombre] = v
+                valores[nombre] = a_usd(v)
 
             if valores['precio_clinica'] and valores['precio_convenio'] \
                     and valores['precio_clinica'] < valores['precio_convenio']:
@@ -1804,6 +1915,9 @@ class VentanaConfiguracionCompleta:
                   bg='#94a3b8', fg='white', relief='flat', padx=20, pady=7,
                   cursor='hand2', command=dlg.destroy).pack(side='right')
 
+        for _entry, _etq, _v in campos_tarifa:
+            _entry.bind('<KeyRelease>', actualizar_comision)
+        cambiar_moneda()
         e_base.focus_set()
 
     def _generar_baremo(self):

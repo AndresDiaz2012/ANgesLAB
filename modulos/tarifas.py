@@ -70,6 +70,86 @@ def _f(valor):
         return 0.0
 
 
+def leer_importe(texto, separador_miles=True):
+    """
+    Lee un importe tecleado a mano. Devuelve None si no se entiende.
+
+    El problema esta en el punto: en pesos "40.000" son cuarenta mil, pero en
+    dolares "40.00" son cuarenta. Se resuelve por el numero de cifras que
+    siguen al punto: tres significa separador de miles. Confundirlos
+    multiplica o divide un precio por mil sin que nadie lo note.
+
+    Args:
+        separador_miles: False cuando se teclea en una moneda con centavos
+            (dolares), donde un punto suele ser decimal.
+
+    Acepta 40.000,50 / 40000.50 / 40000,50 / 40 000.
+    """
+    if texto is None:
+        return None
+    limpio = str(texto).strip().replace(' ', '').replace('\u00a0', '')
+    if not limpio:
+        return 0.0
+
+    negativo = limpio.startswith('-')
+    if negativo:
+        limpio = limpio[1:]
+
+    if ',' in limpio and '.' in limpio:
+        # El ultimo separador que aparece es el decimal
+        if limpio.rfind(',') > limpio.rfind('.'):
+            limpio = limpio.replace('.', '').replace(',', '.')
+        else:
+            limpio = limpio.replace(',', '')
+    elif ',' in limpio:
+        # Una coma con tres cifras detras tambien puede ser de miles
+        ent, _, dec = limpio.rpartition(',')
+        limpio = (ent + dec) if (len(dec) == 3 and separador_miles and ent) \
+            else limpio.replace(',', '.')
+    elif limpio.count('.') > 1:
+        limpio = limpio.replace('.', '')
+    elif '.' in limpio:
+        ent, _, dec = limpio.partition('.')
+        if len(dec) == 3 and separador_miles and ent:
+            limpio = ent + dec
+
+    try:
+        valor = float(limpio)
+    except ValueError:
+        return None
+    return -valor if negativo else valor
+
+
+def convertir_a_usd(valor, tasa):
+    """
+    Pasa a dolares un importe tecleado en otra moneda.
+
+    La tasa es cuantas unidades de esa moneda vale un dolar. Sin tasa (o con
+    tasa cero) se devuelve el valor tal cual: es lo que corresponde cuando ya
+    venia en dolares.
+    """
+    try:
+        valor = float(valor)
+        tasa = float(tasa or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    if tasa <= 0:
+        return round(valor, 4)
+    # Cuatro decimales: con dos, un precio en pesos se desviaba hasta 20 COP
+    # al convertirlo y volverlo a leer.
+    return round(valor / tasa, 4)
+
+
+def convertir_desde_usd(valor_usd, tasa):
+    """Pasa un importe en dolares a la moneda de la tasa."""
+    try:
+        valor_usd = float(valor_usd)
+        tasa = float(tasa or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return round(valor_usd * tasa, 4) if tasa > 0 else round(valor_usd, 4)
+
+
 def tarifa_de(tipo_servicio):
     """
     Que tarifa corresponde a una procedencia.
@@ -262,7 +342,11 @@ class GestorTarifas:
             if valor is None:
                 continue
             try:
-                v = round(float(valor), 2)
+                # Cuatro decimales, no dos: un precio tecleado en pesos se
+                # guarda convertido a dolares, y redondear a dos centavos
+                # desviaba hasta 20 COP por prueba. El campo es CURRENCY, que
+                # guarda cuatro decimales exactos.
+                v = round(float(valor), 4)
             except (TypeError, ValueError):
                 return False, "El precio " + etiqueta + " no es un importe valido."
             if v < 0:
