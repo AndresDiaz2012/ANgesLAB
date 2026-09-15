@@ -175,10 +175,13 @@ def precio_aplicable(prueba, tipo_servicio):
     eso precio_detalle() lo marca como pendiente.
     """
     base = _f(prueba.get('Precio'))
+    # Cuatro decimales, los mismos con los que se guarda: redondear aqui a
+    # dos centavos de dolar desviaba el precio hasta 15 COP por prueba, y un
+    # cultivo cargado como 60.000 COP se facturaba a 59.985.
     if tarifa_de(tipo_servicio) == TARIFA_AMBULATORIO:
-        return round(base, 2)
+        return round(base, 4)
     convenio = _f(prueba.get(COL_CONVENIO))
-    return round(convenio if convenio > 0 else base, 2)
+    return round(convenio if convenio > 0 else base, 4)
 
 
 def precio_detalle(prueba, tipo_servicio):
@@ -197,9 +200,9 @@ def precio_detalle(prueba, tipo_servicio):
     if tarifa == TARIFA_AMBULATORIO:
         return {
             'tarifa': tarifa,
-            'precio': round(base, 2),
+            'precio': round(base, 4),
             'sin_convenio': False,
-            'precio_paciente': round(base, 2),
+            'precio_paciente': round(base, 4),
             'comision_clinica': 0.0,
         }
 
@@ -207,10 +210,10 @@ def precio_detalle(prueba, tipo_servicio):
     aplicado = base if sin_convenio else convenio
     return {
         'tarifa': tarifa,
-        'precio': round(aplicado, 2),
+        'precio': round(aplicado, 4),
         'sin_convenio': sin_convenio,
-        'precio_paciente': round(clinica if clinica > 0 else aplicado, 2),
-        'comision_clinica': round(max(0.0, clinica - aplicado), 2) if clinica > 0 else 0.0,
+        'precio_paciente': round(clinica if clinica > 0 else aplicado, 4),
+        'comision_clinica': round(max(0.0, clinica - aplicado), 4) if clinica > 0 else 0.0,
     }
 
 
@@ -220,7 +223,7 @@ def comision(prueba):
     convenio = _f(prueba.get(COL_CONVENIO))
     if clinica <= 0 or convenio <= 0:
         return 0.0
-    return round(max(0.0, clinica - convenio), 2)
+    return round(max(0.0, clinica - convenio), 4)
 
 
 def porcentaje_comision(prueba):

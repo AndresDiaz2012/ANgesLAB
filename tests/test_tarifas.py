@@ -96,6 +96,46 @@ class TestPrecioAplicable(unittest.TestCase):
         self.assertEqual(precio_aplicable(vieja, 'Emergencia Asegurado'), 15000.0)
 
 
+class TestSinDerivaEnPesos(unittest.TestCase):
+    """
+    Un precio cargado en pesos tiene que facturarse por esa misma cifra.
+
+    Los precios viven en dolares: redondear al facturar a dos centavos
+    desviaba el importe hasta 15 COP por prueba, y un cultivo cargado como
+    60.000 COP se facturaba a 59.985.
+    """
+
+    TASA = 3100.0
+
+    def _prueba_en_pesos(self, amb, cli, con):
+        from modulos.tarifas import convertir_a_usd
+        return {'Precio': convertir_a_usd(amb, self.TASA),
+                COL_CLINICA: convertir_a_usd(cli, self.TASA),
+                COL_CONVENIO: convertir_a_usd(con, self.TASA)}
+
+    def test_el_cultivo_se_factura_por_lo_cargado(self):
+        p = self._prueba_en_pesos(60000, 80000, 70000)
+        amb = precio_aplicable(p, 'Ambulatorio') * self.TASA
+        cli = precio_aplicable(p, 'Hospitalizado Asegurado') * self.TASA
+        self.assertLess(abs(amb - 60000), 1.0, f"ambulatorio salio {amb:,.0f}")
+        self.assertLess(abs(cli - 70000), 1.0, f"convenio salio {cli:,.0f}")
+
+    def test_la_comision_tampoco_se_desvia(self):
+        p = self._prueba_en_pesos(60000, 80000, 70000)
+        self.assertLess(abs(comision(p) * self.TASA - 10000), 1.0)
+
+    def test_varios_importes_en_pesos(self):
+        for amb, cli, con in ((20000, 40000, 30000), (60000, 80000, 70000),
+                              (12500, 25000, 18000), (8700, 15000, 11200)):
+            p = self._prueba_en_pesos(amb, cli, con)
+            self.assertLess(
+                abs(precio_aplicable(p, 'Ambulatorio') * self.TASA - amb), 1.0,
+                f"ambulatorio {amb}")
+            self.assertLess(
+                abs(precio_aplicable(p, 'Cirugia Asegurado') * self.TASA - con), 1.0,
+                f"convenio {con}")
+
+
 class TestComision(unittest.TestCase):
 
     def test_la_comision_es_la_diferencia(self):
