@@ -1689,14 +1689,22 @@ class VentanaConfiguracionCompleta:
         dlg.title("Tarifas de convenio")
         dlg.configure(bg='white')
         dlg.grab_set()
-        dlg.resizable(False, False)
-        ancho, alto = 480, 430
+        # Redimensionable: el alto depende de cuantas monedas haya con tasa
+        # y de las equivalencias que se muestran debajo de cada importe.
+        dlg.resizable(True, True)
+        ancho, alto = 520, 560
         x = (dlg.winfo_screenwidth() - ancho) // 2
         y = (dlg.winfo_screenheight() - alto) // 2
         dlg.geometry(f"{ancho}x{alto}+{x}+{y}")
 
         tk.Label(dlg, text="🤝 Tarifas de convenio", font=('Segoe UI', 13, 'bold'),
                  bg='#0891b2', fg='white', pady=12).pack(fill='x')
+
+        # La barra de botones se reserva su sitio ANTES que el contenido: en
+        # Tk el primero en empaquetarse manda, y con el contenido puesto en
+        # expand=True el boton de guardar se quedaba fuera de la ventana.
+        botones = tk.Frame(dlg, bg='white')
+        botones.pack(side='bottom', fill='x', padx=24, pady=12)
 
         cont = tk.Frame(dlg, bg='white')
         cont.pack(fill='both', expand=True, padx=24, pady=14)
@@ -1906,8 +1914,6 @@ class VentanaConfiguracionCompleta:
             else:
                 messagebox.showerror("Error", msg, parent=dlg)
 
-        botones = tk.Frame(dlg, bg='white')
-        botones.pack(side='bottom', fill='x', padx=24, pady=12)
         tk.Button(botones, text="✅ Guardar", font=('Segoe UI', 11, 'bold'),
                   bg='#059669', fg='white', relief='flat', padx=20, pady=7,
                   cursor='hand2', command=guardar).pack(side='left')
@@ -1918,6 +1924,16 @@ class VentanaConfiguracionCompleta:
         for _entry, _etq, _v in campos_tarifa:
             _entry.bind('<KeyRelease>', actualizar_comision)
         cambiar_moneda()
+
+        # El alto se ajusta a lo que el contenido pide de verdad, para que el
+        # boton de guardar nunca quede debajo del borde.
+        dlg.update_idletasks()
+        alto_necesario = dlg.winfo_reqheight()
+        if alto_necesario > alto:
+            y2 = max(0, (dlg.winfo_screenheight() - alto_necesario) // 2)
+            dlg.geometry(f"{max(ancho, dlg.winfo_reqwidth())}x{alto_necesario}+{x}+{y2}")
+        dlg.minsize(480, min(alto_necesario, 520))
+
         e_base.focus_set()
 
     def _generar_baremo(self):

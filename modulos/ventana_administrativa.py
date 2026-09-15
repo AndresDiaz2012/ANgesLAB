@@ -2820,13 +2820,22 @@ class DialogoAbonoPaciente:
         self.dialog.grab_set()
         self.dialog.focus_set()
 
-        ancho, alto = 560, 560
+        ancho, alto = 560, 600
         x = (self.dialog.winfo_screenwidth() - ancho) // 2
         y = (self.dialog.winfo_screenheight() - alto) // 2
         self.dialog.geometry(f"{ancho}x{alto}+{x}+{y}")
-        self.dialog.resizable(False, False)
+        self.dialog.resizable(True, True)
 
         self._crear_ui(formas_pago)
+
+        # El alto depende de cuantos abonos previos tenga el paciente
+        self.dialog.update_idletasks()
+        pedido = self.dialog.winfo_reqheight()
+        if pedido > alto:
+            self.dialog.geometry(
+                f"{ancho}x{min(pedido, self.dialog.winfo_screenheight() - 80)}+{x}+20")
+        self.dialog.minsize(520, 480)
+
         self.dialog.wait_window()
 
     def _crear_ui(self, formas_pago):
@@ -2839,6 +2848,12 @@ class DialogoAbonoPaciente:
         header.pack_propagate(False)
         tk.Label(header, text="💵 Abono del paciente", font=('Segoe UI', 13, 'bold'),
                  bg=COLORS['success'], fg='white').pack(pady=12)
+
+        # La barra de botones reserva su sitio antes que el contenido: con el
+        # contenido en expand=True, y creciendo segun cuantos abonos tenga el
+        # paciente, el boton de registrar acababa fuera de la ventana.
+        btn_frame = tk.Frame(self.dialog, bg='white')
+        btn_frame.pack(side='bottom', fill='x', padx=25, pady=12)
 
         content = tk.Frame(self.dialog, bg='white')
         content.pack(fill='both', expand=True, padx=25, pady=12)
@@ -2922,8 +2937,6 @@ class DialogoAbonoPaciente:
                     a.get('Referencia', '') or '—'))
             tree.pack(fill='both', expand=True)
 
-        btn_frame = tk.Frame(self.dialog, bg='white')
-        btn_frame.pack(side='bottom', fill='x', padx=25, pady=12)
         tk.Button(btn_frame, text="✅ Registrar abono", font=('Segoe UI', 11, 'bold'),
                   bg=COLORS['success'], fg='white', relief='flat', padx=20, pady=8,
                   cursor='hand2', command=self._guardar).pack(side='left', padx=5)
@@ -3003,10 +3016,18 @@ class DialogoHistorialAbonos:
         self.dialog.configure(bg='white')
         self.dialog.grab_set()
 
-        ancho, alto = 620, 460
+        ancho, alto = 620, 500
         x = (self.dialog.winfo_screenwidth() - ancho) // 2
         y = (self.dialog.winfo_screenheight() - alto) // 2
         self.dialog.geometry(f"{ancho}x{alto}+{x}+{y}")
+        self.dialog.minsize(560, 400)
+
+        # El boton de cerrar se reserva su sitio antes que la tabla, que
+        # crece con el numero de abonos.
+        tk.Button(self.dialog, text="Cerrar", font=('Segoe UI', 11),
+                  bg=COLORS['text_light'], fg='white', relief='flat',
+                  padx=20, pady=8, cursor='hand2',
+                  command=self.dialog.destroy).pack(side='bottom', pady=12)
 
         cuenta = cuenta or {}
         header = tk.Frame(self.dialog, bg=COLORS['info'], height=50)
@@ -3055,11 +3076,6 @@ class DialogoHistorialAbonos:
                      text=f"Total abonado en {len(historial)} pago(s): ${total:,.2f}",
                      font=('Segoe UI', 10, 'bold'), bg='white',
                      fg=COLORS['success']).pack(anchor='w', pady=(8, 0))
-
-        tk.Button(self.dialog, text="Cerrar", font=('Segoe UI', 11),
-                  bg=COLORS['text_light'], fg='white', relief='flat',
-                  padx=20, pady=8, cursor='hand2',
-                  command=self.dialog.destroy).pack(side='bottom', pady=12)
 
         self.dialog.wait_window()
 
