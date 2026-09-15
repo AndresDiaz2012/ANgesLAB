@@ -180,6 +180,87 @@ class TestBaremoPDF(unittest.TestCase):
             self.assertTrue(f.read(5).startswith(b'%PDF'))
         os.remove(ruta)
 
+    def _texto_del_pdf(self, ruta):
+        """El texto del PDF, para comprobar que no se filtro un importe."""
+        try:
+            import fitz  # PyMuPDF, ya es dependencia del sistema
+        except ImportError:
+            return None
+        doc = fitz.open(ruta)
+        try:
+            return "\n".join(pagina.get_text() for pagina in doc)
+        finally:
+            doc.close()
+
+    def _filas_ejemplo(self):
+        return [{
+            'CodigoPrueba': 'HEM001', 'NombrePrueba': 'HEMATOLOGIA COMPLETA',
+            'NombreArea': 'HEMATOLOGIA', 'Precio': 20000.0,
+            COL_CLINICA: 40000.0, COL_CONVENIO: 30000.0,
+            '_comision': 10000.0, '_pct_comision': 25.0, '_sin_convenio': False,
+        }]
+
+    def test_el_baremo_de_convenio_no_lleva_el_precio_ambulatorio(self):
+        # El precio del paciente de calle es interno: no puede viajar en el
+        # papel que se entrega en la clinica.
+        try:
+            import reportlab  # noqa: F401
+        except ImportError:
+            self.skipTest("ReportLab no disponible")
+
+        import tempfile
+        from modulos.baremo_pdf import generar_baremo_pdf
+
+        ruta = os.path.join(tempfile.gettempdir(), 'test_baremo_convenio.pdf')
+        generar_baremo_pdf(ruta, self._filas_ejemplo(),
+                           config_lab={'NombreLaboratorio': 'LAB'})
+        texto = self._texto_del_pdf(ruta)
+        os.remove(ruta)
+        if texto is None:
+            self.skipTest("PyMuPDF no disponible para leer el PDF")
+
+        self.assertNotIn('20,000.00', texto, "se filtro el precio ambulatorio")
+        self.assertNotIn('Ambulatorio', texto)
+        # Lo del convenio si tiene que estar
+        self.assertIn('40,000.00', texto)
+        self.assertIn('30,000.00', texto)
+
+    def test_la_version_interna_si_lo_incluye_y_se_rotula(self):
+        try:
+            import reportlab  # noqa: F401
+        except ImportError:
+            self.skipTest("ReportLab no disponible")
+
+        import tempfile
+        from modulos.baremo_pdf import generar_baremo_pdf
+
+        ruta = os.path.join(tempfile.gettempdir(), 'test_baremo_interno.pdf')
+        generar_baremo_pdf(ruta, self._filas_ejemplo(),
+                           config_lab={'NombreLaboratorio': 'LAB'},
+                           incluir_ambulatorio=True)
+        texto = self._texto_del_pdf(ruta)
+        os.remove(ruta)
+        if texto is None:
+            self.skipTest("PyMuPDF no disponible para leer el PDF")
+
+        self.assertIn('20,000.00', texto)
+        self.assertIn('USO INTERNO', texto.upper())
+
+    def test_ambas_versiones_se_generan(self):
+        try:
+            import reportlab  # noqa: F401
+        except ImportError:
+            self.skipTest("ReportLab no disponible")
+        import tempfile
+        from modulos.baremo_pdf import generar_baremo_pdf
+        for interno in (False, True):
+            ruta = os.path.join(tempfile.gettempdir(),
+                                'test_baremo_%s.pdf' % interno)
+            self.assertEqual(
+                generar_baremo_pdf(ruta, self._filas_ejemplo(),
+                                   incluir_ambulatorio=interno), ruta)
+            os.remove(ruta)
+
     def test_baremo_vacio_no_rompe(self):
         try:
             import reportlab  # noqa: F401

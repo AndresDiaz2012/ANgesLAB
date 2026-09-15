@@ -10,13 +10,21 @@ Es un documento INFORMATIVO: sirve para acordar el convenio con la clinica,
 para que recepcion sepa que se cobra en cada caso y para revisar que ninguna
 prueba se quedo sin precio de convenio. No factura nada por si mismo.
 
+El baremo se imprime SIN el precio ambulatorio. Lo que el laboratorio le
+cobra al paciente de calle es asunto suyo: no forma parte del convenio y no
+tiene por que viajar en un papel que se entrega en la clinica. Quien lo
+necesite para uso interno lo pide expresamente (incluir_ambulatorio=True), y
+entonces el documento sale rotulado como interno.
+
 Por columna:
 
-    Ambulatorio   lo que paga el paciente que viene por su cuenta
     Clinica       lo que la clinica le cobra al paciente que viene de
                   hospitalizacion, emergencia o cirugia
     Convenio      lo que la clinica le paga al laboratorio por esa prueba
     Comision      lo que se queda la clinica (clinica - convenio)
+
+    Ambulatorio   solo en la version interna: lo que paga el paciente que
+                  viene por su cuenta
 
 Ver modulos/tarifas.py para el detalle de cuando se aplica cada una.
 
@@ -54,13 +62,17 @@ def _importe(valor):
 
 
 def generar_baremo_pdf(ruta, filas, config_lab=None, usuario='',
-                       moneda='COP', solo_sin_convenio=False):
+                       moneda='COP', solo_sin_convenio=False,
+                       incluir_ambulatorio=False):
     """
     Escribe el baremo en ruta y la devuelve, o None si no se pudo.
 
     Args:
         filas: lo que devuelve GestorTarifas.listar_baremo().
         solo_sin_convenio: para sacar la lista de lo que falta por acordar.
+        incluir_ambulatorio: anade el precio del paciente de calle. Es dato
+            interno del laboratorio, asi que por defecto no sale y el
+            documento queda listo para entregar en la clinica.
     """
     try:
         from reportlab.lib import colors
@@ -99,8 +111,12 @@ def generar_baremo_pdf(ruta, filas, config_lab=None, usuario='',
 
     hist.append(Paragraph(str(cfg.get('NombreLaboratorio') or 'Laboratorio'),
                           st_titulo))
-    titulo = ("PRUEBAS SIN PRECIO DE CONVENIO" if solo_sin_convenio
-              else "BAREMO INFORMATIVO DE PRECIOS")
+    if solo_sin_convenio:
+        titulo = "PRUEBAS SIN PRECIO DE CONVENIO"
+    elif incluir_ambulatorio:
+        titulo = "BAREMO DE PRECIOS - USO INTERNO"
+    else:
+        titulo = "BAREMO INFORMATIVO DE PRECIOS - CONVENIO"
     hist.append(Paragraph(titulo, st_sub))
     pie = "Importes en " + str(moneda) + " - Generado el " \
           + datetime.now().strftime('%d/%m/%Y %H:%M')
@@ -109,12 +125,14 @@ def generar_baremo_pdf(ruta, filas, config_lab=None, usuario='',
     hist.append(Paragraph(pie, st_sub))
     hist.append(Spacer(1, 5))
 
-    hist.append(Paragraph(
-        "Ambulatorio: lo paga el paciente que viene por su cuenta. &nbsp; "
-        "Clinica: lo que la clinica le cobra al paciente de hospitalizacion, "
-        "emergencia o cirugia. &nbsp; Convenio: lo que la clinica le paga al "
-        "laboratorio. &nbsp; Comision: la diferencia, que se queda la clinica.",
-        st_nota))
+    leyenda = ("Clinica: lo que la clinica le cobra al paciente de "
+               "hospitalizacion, emergencia o cirugia. &nbsp; Convenio: lo que "
+               "la clinica le paga al laboratorio. &nbsp; Comision: la "
+               "diferencia, que se queda la clinica.")
+    if incluir_ambulatorio:
+        leyenda = ("Ambulatorio: lo paga el paciente que viene por su cuenta "
+                   "(dato interno del laboratorio). &nbsp; ") + leyenda
+    hist.append(Paragraph(leyenda, st_nota))
     hist.append(Spacer(1, 4))
     hist.append(HRFlowable(width="100%", thickness=1,
                            color=colors.HexColor('#cbd5e1')))
@@ -125,10 +143,20 @@ def generar_baremo_pdf(ruta, filas, config_lab=None, usuario='',
         area = f.get('NombreArea') or 'Sin área'
         por_area.setdefault(area, []).append(f)
 
-    cab = ['Código', 'Prueba', 'Ambulatorio', 'Clínica', 'Convenio',
-           'Comisión', '%']
-    anchos = [0.72 * inch, 2.5 * inch, 0.95 * inch, 0.85 * inch,
-              0.9 * inch, 0.85 * inch, 0.5 * inch]
+    # Sin el ambulatorio sobra una columna: el resto se ensancha en vez de
+    # dejar el documento descuadrado a la izquierda.
+    if incluir_ambulatorio:
+        cab = ['Código', 'Prueba', 'Ambulatorio', 'Clínica', 'Convenio',
+               'Comisión', '%']
+        anchos = [0.72 * inch, 2.5 * inch, 0.95 * inch, 0.85 * inch,
+                  0.9 * inch, 0.85 * inch, 0.5 * inch]
+        col_convenio = 4
+    else:
+        cab = ['Código', 'Prueba', 'Clínica cobra', 'Nos pagan',
+               'Comisión', '%']
+        anchos = [0.8 * inch, 3.1 * inch, 1.05 * inch, 1.05 * inch,
+                  1.0 * inch, 0.55 * inch]
+        col_convenio = 3
 
     comandos = [
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#e2e8f0')),
@@ -156,21 +184,24 @@ def generar_baremo_pdf(ruta, filas, config_lab=None, usuario='',
             if falta:
                 sin_convenio += 1
             pct = f.get('_pct_comision') or 0
-            datos.append([
-                str(f.get('CodigoPrueba') or ''),
-                Paragraph(str(f.get('NombrePrueba') or ''), st_celda),
-                _importe(f.get('Precio')),
+            fila = [str(f.get('CodigoPrueba') or ''),
+                    Paragraph(str(f.get('NombrePrueba') or ''), st_celda)]
+            if incluir_ambulatorio:
+                fila.append(_importe(f.get('Precio')))
+            fila += [
                 _importe(f.get(COL_CLINICA)),
                 _importe(f.get(COL_CONVENIO)),
                 _importe(f.get('_comision')),
                 ('{:.0f}%'.format(pct)) if pct else '—',
-            ])
+            ]
+            datos.append(fila)
         tabla = Table(datos, colWidths=anchos, repeatRows=1)
         estilo = TableStyle(comandos)
         # Marcar en ambar lo que aun no tiene convenio acordado
         for i, f in enumerate(pruebas, start=1):
             if f.get('_sin_convenio'):
-                estilo.add('BACKGROUND', (4, i), (4, i), colors.HexColor('#fef3c7'))
+                estilo.add('BACKGROUND', (col_convenio, i), (col_convenio, i),
+                           colors.HexColor('#fef3c7'))
         tabla.setStyle(estilo)
         hist.append(tabla)
 
@@ -193,10 +224,13 @@ def generar_baremo_pdf(ruta, filas, config_lab=None, usuario='',
     hist.append(Paragraph(resumen, st_nota))
 
     hist.append(Spacer(1, 8))
-    hist.append(Paragraph(
-        "Documento informativo. Los importes de la columna Clínica los cobra "
-        "la clínica al paciente; el laboratorio percibe la columna Convenio.",
-        st_nota))
+    pie_legal = ("Documento informativo. Los importes de la columna Clínica "
+                 "los cobra la clínica al paciente; el laboratorio percibe la "
+                 "columna Convenio.")
+    if incluir_ambulatorio:
+        pie_legal += (" USO INTERNO: incluye el precio ambulatorio, que no "
+                      "forma parte del convenio.")
+    hist.append(Paragraph(pie_legal, st_nota))
 
     try:
         doc.build(hist)

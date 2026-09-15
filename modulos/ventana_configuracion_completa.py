@@ -263,6 +263,13 @@ class VentanaConfiguracionCompleta:
                         variable=self.var_solo_sin_precio,
                         command=self._cargar_precios).pack(side=tk.LEFT, padx=15)
 
+        # El precio ambulatorio es interno del laboratorio: no viaja en el
+        # baremo que se entrega en la clinica salvo que se pida a proposito.
+        self.var_baremo_interno = tk.BooleanVar(value=False)
+        ttk.Checkbutton(filtro_frame,
+                        text="Baremo con precio ambulatorio (uso interno)",
+                        variable=self.var_baremo_interno).pack(side=tk.LEFT, padx=5)
+
         # Cargar áreas en el combobox
         self._areas_precios = []  # Lista de (AreaID, NombreArea)
         try:
@@ -1832,9 +1839,11 @@ class VentanaConfiguracionCompleta:
 
         import os
         import tempfile
+        sufijo = "interno" if self.var_baremo_interno.get() else "convenio"
         ruta = os.path.join(
             tempfile.gettempdir(),
-            "Baremo_precios_" + datetime.now().strftime('%Y%m%d_%H%M%S') + ".pdf")
+            "Baremo_" + sufijo + "_"
+            + datetime.now().strftime('%Y%m%d_%H%M%S') + ".pdf")
 
         try:
             cfg = self.db.query_one(
@@ -1842,8 +1851,11 @@ class VentanaConfiguracionCompleta:
         except Exception:
             cfg = None
 
-        generado = generar_baremo_pdf(ruta, filas, config_lab=cfg,
-                                      usuario=(self.user or {}).get('NombreUsuario', ''))
+        interno = bool(self.var_baremo_interno.get())
+        generado = generar_baremo_pdf(
+            ruta, filas, config_lab=cfg,
+            usuario=(self.user or {}).get('NombreUsuario', ''),
+            incluir_ambulatorio=interno)
         if not generado:
             messagebox.showerror("No se pudo generar",
                                  "No se pudo crear el PDF del baremo.\n\n"
@@ -1862,9 +1874,12 @@ class VentanaConfiguracionCompleta:
         res = imprimir_documento(self.db, generado, 'baremo',
                                  titulo="Baremo de precios", detalle=detalle)
         if res == IMPRESO:
+            que = ("Baremo interno (incluye el precio ambulatorio)" if interno
+                   else "Baremo de convenio (sin el precio ambulatorio)")
             messagebox.showinfo(
                 "Baremo impreso",
-                f"Salió por {detalle.get('impresora') or 'la impresora asignada'}.",
+                f"{que}.\n\nSalió por "
+                f"{detalle.get('impresora') or 'la impresora asignada'}.",
                 parent=self.win)
         elif res == SIN_IMPRESORA:
             messagebox.showwarning(
