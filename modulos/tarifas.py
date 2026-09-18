@@ -70,6 +70,28 @@ def _f(valor):
         return 0.0
 
 
+def _cargado(prueba, columna):
+    """
+    El importe si esta cargado, None si nunca se puso.
+
+    Un cero puesto a proposito no es lo mismo que un precio sin cargar. Hay
+    pruebas que se incluyen sin coste, como las relaciones que salen de
+    dividir dos resultados ya cobrados; sin esta distincion el sistema las
+    tomaria por pendientes de tarifar y avisaria cada vez que se pidieran.
+
+    En la base, sin cargar es NULL; gratis a proposito es 0.
+    """
+    if columna not in prueba:
+        return None
+    valor = prueba.get(columna)
+    if valor is None:
+        return None
+    try:
+        return float(valor)
+    except (TypeError, ValueError):
+        return None
+
+
 def leer_importe(texto, separador_miles=True):
     """
     Lee un importe tecleado a mano. Devuelve None si no se entiende.
@@ -173,6 +195,9 @@ def precio_aplicable(prueba, tipo_servicio):
     cargado se recurre al precio ambulatorio: es preferible cobrar de menos
     que dejar la prueba en cero y regalarla, pero conviene revisarlo, y por
     eso precio_detalle() lo marca como pendiente.
+
+    Un convenio puesto en cero SI se respeta: es una prueba que se incluye
+    sin coste, no una que falte por tarifar.
     """
     base = _f(prueba.get('Precio'))
     # Cuatro decimales, los mismos con los que se guarda: redondear aqui a
@@ -180,8 +205,8 @@ def precio_aplicable(prueba, tipo_servicio):
     # cultivo cargado como 60.000 COP se facturaba a 59.985.
     if tarifa_de(tipo_servicio) == TARIFA_AMBULATORIO:
         return round(base, 4)
-    convenio = _f(prueba.get(COL_CONVENIO))
-    return round(convenio if convenio > 0 else base, 4)
+    convenio = _cargado(prueba, COL_CONVENIO)
+    return round(base if convenio is None else convenio, 4)
 
 
 def precio_detalle(prueba, tipo_servicio):
@@ -206,8 +231,10 @@ def precio_detalle(prueba, tipo_servicio):
             'comision_clinica': 0.0,
         }
 
-    sin_convenio = convenio <= 0
-    aplicado = base if sin_convenio else convenio
+    # Pendiente de tarifar es no tener valor; un cero deliberado esta tarifado
+    convenio_cargado = _cargado(prueba, COL_CONVENIO)
+    sin_convenio = convenio_cargado is None
+    aplicado = base if sin_convenio else convenio_cargado
     return {
         'tarifa': tarifa,
         'precio': round(aplicado, 4),

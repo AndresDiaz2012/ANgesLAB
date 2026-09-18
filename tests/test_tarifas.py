@@ -68,13 +68,33 @@ class TestPrecioAplicable(unittest.TestCase):
         self.assertEqual(precio_aplicable(prueba(), 'Asegurado'), 20000.0)
 
     def test_sin_convenio_cae_al_ambulatorio_y_no_a_cero(self):
-        # Dejarlo en cero regalaria la prueba
-        sin = prueba(convenio=0)
+        # Sin cargar es None (NULL en la base), no cero. Dejarlo en cero por
+        # descuido regalaria la prueba, asi que se cobra el ambulatorio.
+        sin = prueba(convenio=None)
         self.assertEqual(precio_aplicable(sin, 'Cirugia Asegurado'), 20000.0)
 
     def test_sin_convenio_queda_marcado(self):
-        d = precio_detalle(prueba(convenio=0), 'Cirugia Asegurado')
+        d = precio_detalle(prueba(convenio=None), 'Cirugia Asegurado')
         self.assertTrue(d['sin_convenio'])
+
+    def test_columna_ausente_es_sin_convenio(self):
+        # Base antigua, sin la columna siquiera
+        d = precio_detalle({'Precio': 20000.0}, 'Cirugia Asegurado')
+        self.assertTrue(d['sin_convenio'])
+        self.assertEqual(d['precio'], 20000.0)
+
+    def test_un_cero_deliberado_se_respeta(self):
+        # Hay pruebas que se incluyen sin coste, como la relacion PSA, que
+        # sale de dividir dos resultados ya cobrados.
+        gratis = prueba(convenio=0)
+        self.assertEqual(precio_aplicable(gratis, 'Cirugia Asegurado'), 0.0)
+
+    def test_un_cero_deliberado_no_se_marca_como_pendiente(self):
+        # Si se marcara, el sistema avisaria de convenio faltante cada vez
+        # que se pidiera una prueba que es gratis a proposito.
+        d = precio_detalle(prueba(convenio=0), 'Hospitalizado Asegurado')
+        self.assertFalse(d['sin_convenio'])
+        self.assertEqual(d['precio'], 0.0)
 
     def test_con_convenio_no_queda_marcado(self):
         d = precio_detalle(prueba(), 'Cirugia Asegurado')
