@@ -1982,10 +1982,13 @@ class VentanaConfiguracionCompleta:
             cfg = None
 
         interno = bool(self.var_baremo_interno.get())
+        # Los precios se guardan en dolares; con la tasa el baremo los
+        # muestra tambien en pesos, que es como se acuerda el convenio.
+        _tasa_bs, tasa_cop = self._tasas_precios()
         generado = generar_baremo_pdf(
             ruta, filas, config_lab=cfg,
             usuario=(self.user or {}).get('NombreUsuario', ''),
-            incluir_ambulatorio=interno)
+            incluir_ambulatorio=interno, tasa_cop=tasa_cop)
         if not generado:
             messagebox.showerror("No se pudo generar",
                                  "No se pudo crear el PDF del baremo.\n\n"

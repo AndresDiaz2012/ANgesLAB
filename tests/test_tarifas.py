@@ -301,6 +301,65 @@ class TestBaremoPDF(unittest.TestCase):
                                    incluir_ambulatorio=interno), ruta)
             os.remove(ruta)
 
+    def test_el_baremo_muestra_pesos_y_dolares(self):
+        """
+        Con la tasa, cada importe sale en las dos monedas.
+
+        El baremo imprimia el valor en dolares bajo un encabezado que decia
+        "Importes en COP": el papel que se entrega en la clinica ponia 4,84
+        donde debia poner 15.000.
+        """
+        try:
+            import reportlab  # noqa: F401
+        except ImportError:
+            self.skipTest("ReportLab no disponible")
+
+        import tempfile
+        from modulos.baremo_pdf import generar_baremo_pdf
+
+        # 15.000 y 12.000 COP a 3.100 son 4,8387 y 3,871 USD
+        filas = [{
+            'CodigoPrueba': 'HEM001', 'NombrePrueba': 'HEMATOLOGIA',
+            'NombreArea': 'HEMATOLOGIA', 'Precio': 3.2258,
+            COL_CLINICA: 4.8387, COL_CONVENIO: 3.871,
+            '_comision': 0.9677, '_pct_comision': 20.0, '_sin_convenio': False,
+        }]
+        ruta = os.path.join(tempfile.gettempdir(), 'test_baremo_monedas.pdf')
+        generar_baremo_pdf(ruta, filas, config_lab={'NombreLaboratorio': 'LAB'},
+                           tasa_cop=3100.0)
+        texto = self._texto_del_pdf(ruta)
+        os.remove(ruta)
+        if texto is None:
+            self.skipTest("PyMuPDF no disponible")
+
+        self.assertIn('15,000', texto, "falta el importe en pesos")
+        self.assertIn('12,000', texto, "falta el convenio en pesos")
+        self.assertIn('$4.84', texto, "falta el equivalente en dolares")
+        self.assertIn('COP y USD', texto, "el encabezado no dice las monedas")
+
+    def test_sin_tasa_el_baremo_dice_que_son_dolares(self):
+        # Sin tasa no se puede convertir; lo que no puede pasar es decir que
+        # son pesos mostrando dolares.
+        try:
+            import reportlab  # noqa: F401
+        except ImportError:
+            self.skipTest("ReportLab no disponible")
+        import tempfile
+        from modulos.baremo_pdf import generar_baremo_pdf
+        filas = [{
+            'CodigoPrueba': 'X', 'NombrePrueba': 'PRUEBA', 'NombreArea': 'A',
+            'Precio': 3.2258, COL_CLINICA: 4.8387, COL_CONVENIO: 3.871,
+            '_comision': 0.9677, '_pct_comision': 20.0, '_sin_convenio': False,
+        }]
+        ruta = os.path.join(tempfile.gettempdir(), 'test_baremo_sin_tasa.pdf')
+        generar_baremo_pdf(ruta, filas)
+        texto = self._texto_del_pdf(ruta)
+        os.remove(ruta)
+        if texto is None:
+            self.skipTest("PyMuPDF no disponible")
+        self.assertIn('Importes en USD', texto)
+        self.assertNotIn('15,000', texto)
+
     def test_baremo_vacio_no_rompe(self):
         try:
             import reportlab  # noqa: F401

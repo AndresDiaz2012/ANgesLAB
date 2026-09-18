@@ -61,9 +61,30 @@ def _importe(valor):
     return '{:,.2f}'.format(v) if v > 0 else '—'
 
 
+def _importe_doble(valor_usd, tasa_cop, estilo_cop, estilo_usd):
+    """
+    El importe en las dos monedas: pesos arriba, dolares debajo.
+
+    Los precios se guardan en dolares, pero el convenio se acuerda en pesos,
+    asi que el peso manda y el dolar queda como referencia. Sin la tasa
+    cargada solo se puede mostrar el dolar: inventar una conversion seria
+    peor que no darla.
+    """
+    from reportlab.platypus import Paragraph
+
+    v = _f(valor_usd)
+    if v <= 0:
+        return Paragraph('—', estilo_cop)
+    if not tasa_cop:
+        return Paragraph('${:,.2f}'.format(v), estilo_cop)
+    return Paragraph(
+        '{:,.0f}<br/><font size="6">${:,.2f}</font>'.format(v * tasa_cop, v),
+        estilo_cop)
+
+
 def generar_baremo_pdf(ruta, filas, config_lab=None, usuario='',
                        moneda='COP', solo_sin_convenio=False,
-                       incluir_ambulatorio=False):
+                       incluir_ambulatorio=False, tasa_cop=None):
     """
     Escribe el baremo en ruta y la devuelve, o None si no se pudo.
 
@@ -73,6 +94,8 @@ def generar_baremo_pdf(ruta, filas, config_lab=None, usuario='',
         incluir_ambulatorio: anade el precio del paciente de calle. Es dato
             interno del laboratorio, asi que por defecto no sale y el
             documento queda listo para entregar en la clinica.
+        tasa_cop: pesos por dolar. Con ella cada importe sale en las dos
+            monedas; sin ella, solo en dolares.
     """
     try:
         from reportlab.lib import colors
@@ -99,6 +122,9 @@ def generar_baremo_pdf(ruta, filas, config_lab=None, usuario='',
     st_celda = ParagraphStyle('bc', parent=estilos['Normal'], fontSize=7.5)
     st_nota = ParagraphStyle('bn', parent=estilos['Normal'], fontSize=8,
                              textColor=colors.HexColor('#64748b'))
+    # Importe a la derecha, con el dolar en una segunda linea mas pequena
+    st_imp = ParagraphStyle('bi', parent=estilos['Normal'], fontSize=7.5,
+                            alignment=2, leading=8.5)
 
     if solo_sin_convenio:
         filas = [f for f in filas if f.get('_sin_convenio')]
@@ -118,8 +144,12 @@ def generar_baremo_pdf(ruta, filas, config_lab=None, usuario='',
     else:
         titulo = "BAREMO INFORMATIVO DE PRECIOS - CONVENIO"
     hist.append(Paragraph(titulo, st_sub))
-    pie = "Importes en " + str(moneda) + " - Generado el " \
-          + datetime.now().strftime('%d/%m/%Y %H:%M')
+    if tasa_cop:
+        pie = ("Importes en COP y USD (tasa {:,.2f} COP por USD)".format(tasa_cop)
+               + " - Generado el " + datetime.now().strftime('%d/%m/%Y %H:%M'))
+    else:
+        pie = ("Importes en USD - Generado el "
+               + datetime.now().strftime('%d/%m/%Y %H:%M'))
     if usuario:
         pie += " por " + str(usuario)
     hist.append(Paragraph(pie, st_sub))
@@ -132,6 +162,9 @@ def generar_baremo_pdf(ruta, filas, config_lab=None, usuario='',
     if incluir_ambulatorio:
         leyenda = ("Ambulatorio: lo paga el paciente que viene por su cuenta "
                    "(dato interno del laboratorio). &nbsp; ") + leyenda
+    if tasa_cop:
+        leyenda += (" &nbsp; En cada importe, la cifra grande son pesos y la "
+                    "pequena su equivalente en dolares.")
     hist.append(Paragraph(leyenda, st_nota))
     hist.append(Spacer(1, 4))
     hist.append(HRFlowable(width="100%", thickness=1,
@@ -145,17 +178,23 @@ def generar_baremo_pdf(ruta, filas, config_lab=None, usuario='',
 
     # Sin el ambulatorio sobra una columna: el resto se ensancha en vez de
     # dejar el documento descuadrado a la izquierda.
+    # Con las dos monedas cada celda lleva dos lineas y necesita mas ancho
+    doble = bool(tasa_cop)
     if incluir_ambulatorio:
         cab = ['Código', 'Prueba', 'Ambulatorio', 'Clínica', 'Convenio',
                'Comisión', '%']
-        anchos = [0.72 * inch, 2.5 * inch, 0.95 * inch, 0.85 * inch,
-                  0.9 * inch, 0.85 * inch, 0.5 * inch]
+        anchos = ([0.62 * inch, 2.05 * inch, 1.0 * inch, 1.0 * inch,
+                   1.0 * inch, 1.0 * inch, 0.45 * inch] if doble else
+                  [0.72 * inch, 2.5 * inch, 0.95 * inch, 0.85 * inch,
+                   0.9 * inch, 0.85 * inch, 0.5 * inch])
         col_convenio = 4
     else:
         cab = ['Código', 'Prueba', 'Clínica cobra', 'Nos pagan',
                'Comisión', '%']
-        anchos = [0.8 * inch, 3.1 * inch, 1.05 * inch, 1.05 * inch,
-                  1.0 * inch, 0.55 * inch]
+        anchos = ([0.7 * inch, 2.75 * inch, 1.15 * inch, 1.15 * inch,
+                   1.1 * inch, 0.5 * inch] if doble else
+                  [0.8 * inch, 3.1 * inch, 1.05 * inch, 1.05 * inch,
+                   1.0 * inch, 0.55 * inch])
         col_convenio = 3
 
     comandos = [
@@ -186,12 +225,18 @@ def generar_baremo_pdf(ruta, filas, config_lab=None, usuario='',
             pct = f.get('_pct_comision') or 0
             fila = [str(f.get('CodigoPrueba') or ''),
                     Paragraph(str(f.get('NombrePrueba') or ''), st_celda)]
+
+            def imp(valor):
+                if doble:
+                    return _importe_doble(valor, tasa_cop, st_imp, st_imp)
+                return _importe(valor)
+
             if incluir_ambulatorio:
-                fila.append(_importe(f.get('Precio')))
+                fila.append(imp(f.get('Precio')))
             fila += [
-                _importe(f.get(COL_CLINICA)),
-                _importe(f.get(COL_CONVENIO)),
-                _importe(f.get('_comision')),
+                imp(f.get(COL_CLINICA)),
+                imp(f.get(COL_CONVENIO)),
+                imp(f.get('_comision')),
                 ('{:.0f}%'.format(pct)) if pct else '—',
             ]
             datos.append(fila)
