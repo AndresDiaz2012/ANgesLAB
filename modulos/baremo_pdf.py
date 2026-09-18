@@ -212,7 +212,9 @@ def generar_baremo_pdf(ruta, filas, config_lab=None, usuario='',
 
     total_pruebas = 0
     sin_convenio = 0
-    for area in sorted(por_area):
+    # Los perfiles primero: es lo que mas se pide y lo que se negocia
+    orden = sorted(por_area, key=lambda a: (a != 'PERFILES', a))
+    for area in orden:
         pruebas = por_area[area]
         hist.append(Paragraph(str(area).upper() + " (" + str(len(pruebas)) + ")",
                               st_area))
@@ -223,8 +225,14 @@ def generar_baremo_pdf(ruta, filas, config_lab=None, usuario='',
             if falta:
                 sin_convenio += 1
             pct = f.get('_pct_comision') or 0
+            # Un perfil lleva dicho cuantas pruebas incluye: sin eso, su
+            # precio parece desproporcionado al lado de una prueba suelta.
+            nombre = str(f.get('NombrePrueba') or '')
+            if f.get('es_perfil') and f.get('n_pruebas'):
+                nombre += (' <font size="6" color="#64748b">(%d pruebas)</font>'
+                           % f['n_pruebas'])
             fila = [str(f.get('CodigoPrueba') or ''),
-                    Paragraph(str(f.get('NombrePrueba') or ''), st_celda)]
+                    Paragraph(nombre, st_celda)]
 
             def imp(valor):
                 if doble:

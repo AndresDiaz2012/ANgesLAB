@@ -186,6 +186,67 @@ class TestComision(unittest.TestCase):
         self.assertEqual(d['precio_paciente'], 20000.0)
 
 
+class TestPerfilesEnElBaremo(unittest.TestCase):
+    """
+    Los perfiles viven en otra tabla y no salian en el baremo.
+
+    El preoperatorio o el prenatal son de lo que mas se pide: un baremo que
+    se lleva a la clinica sin ellos esta incompleto.
+    """
+
+    class DBFalsa:
+        def __init__(self, con_columnas=True):
+            self.con_columnas = con_columnas
+
+        def query_one(self, sql):
+            if 'SELECT TOP 1' in sql and not self.con_columnas:
+                raise Exception('no existe')
+            return {'x': None}
+
+        def query(self, sql):
+            if 'FROM Perfiles' in sql:
+                return [{'PerfilID': 5, 'CodigoPerfil': 'PREOPX',
+                         'NombrePerfil': 'Perfil Preoperatorio',
+                         'Descripcion': ''}]
+            if 'PruebasEnPerfil' in sql:
+                # Tres pruebas: 10.000 + 8.000 + 8.000 de ambulatorio
+                return [
+                    {'Precio': 3.2258, COL_CLINICA: 4.8387, COL_CONVENIO: 3.871},
+                    {'Precio': 2.5806, COL_CLINICA: 4.8387, COL_CONVENIO: 3.871},
+                    {'Precio': 2.5806, COL_CLINICA: 4.8387, COL_CONVENIO: 3.871},
+                ]
+            return []
+
+    def _gestor(self, con_columnas=True):
+        from modulos.tarifas import GestorTarifas
+        return GestorTarifas(self.DBFalsa(con_columnas))
+
+    def test_el_perfil_aparece_con_su_precio_sumado(self):
+        filas = self._gestor().listar_perfiles()
+        self.assertEqual(len(filas), 1)
+        f = filas[0]
+        self.assertEqual(f['CodigoPrueba'], 'PREOPX')
+        self.assertEqual(f['n_pruebas'], 3)
+        # La suma de las tres, no el precio de una
+        self.assertAlmostEqual(f['Precio'], 3.2258 + 2.5806 + 2.5806, places=3)
+        self.assertAlmostEqual(f[COL_CONVENIO], 3.871 * 3, places=3)
+
+    def test_se_agrupa_bajo_PERFILES(self):
+        f = self._gestor().listar_perfiles()[0]
+        self.assertEqual(f['NombreArea'], 'PERFILES')
+        self.assertTrue(f['es_perfil'])
+
+    def test_la_comision_del_perfil_es_la_suma(self):
+        f = self._gestor().listar_perfiles()[0]
+        esperado = (4.8387 * 3) - (3.871 * 3)
+        self.assertAlmostEqual(f['_comision'], esperado, places=3)
+
+    def test_sin_columnas_de_convenio_no_rompe(self):
+        filas = self._gestor(con_columnas=False).listar_perfiles()
+        self.assertEqual(len(filas), 1)
+        self.assertTrue(filas[0]['_sin_convenio'])
+
+
 class TestRolDeImpresionBaremo(unittest.TestCase):
     """El baremo debe poder asignarse una impresora en Configuracion."""
 

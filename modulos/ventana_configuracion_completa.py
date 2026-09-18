@@ -1962,6 +1962,18 @@ class VentanaConfiguracionCompleta:
         filas = gestor.listar_baremo(
             solo_activas=True, area_id=area_id,
             texto=(self.var_buscar_precio.get() or '').strip() or None)
+
+        # Los perfiles van en el baremo aunque no esten en la tabla Pruebas:
+        # el preoperatorio o el prenatal son de lo que mas se pide, y sin
+        # ellos el documento que se lleva a la clinica queda incompleto. Solo
+        # se omiten si se esta filtrando por area o buscando algo concreto.
+        if not area_id and not (self.var_buscar_precio.get() or '').strip():
+            try:
+                filas = gestor.listar_perfiles(solo_activos=True) + filas
+            except Exception as e:
+                logging.getLogger(
+                    "angeslab.ventana_configuracion_completa").warning(
+                    "[BAREMO] No se pudieron incluir los perfiles: %s", e)
         if not filas:
             messagebox.showinfo("Baremo", "No hay pruebas que listar con esos filtros.",
                                 parent=self.win)

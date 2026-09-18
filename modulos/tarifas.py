@@ -355,6 +355,77 @@ class GestorTarifas:
             f['_sin_convenio'] = _f(f.get(COL_CONVENIO)) <= 0
         return filas
 
+    def listar_perfiles(self, solo_activos=True):
+        """
+        Los perfiles con el precio que suman sus pruebas.
+
+        Un perfil no tiene precio propio en la base: al pedirlo se expanden
+        sus pruebas y se cobra la suma de cada una. Por eso el precio se
+        calcula aqui y no se guarda: si manana cambia una prueba suelta, el
+        perfil la sigue.
+
+        Devuelve filas con la misma forma que listar_baremo(), para que el
+        baremo las pinte igual, mas n_pruebas y CodigoPerfil.
+        """
+        tiene = self.tiene_columnas()
+        campos = "p.Precio"
+        if tiene:
+            campos += ", p." + COL_CLINICA + ", p." + COL_CONVENIO
+
+        sql_perfiles = ("SELECT PerfilID, CodigoPerfil, NombrePerfil, Descripcion "
+                        "FROM Perfiles")
+        if solo_activos:
+            sql_perfiles += " WHERE Activo = True"
+        sql_perfiles += " ORDER BY NombrePerfil"
+
+        try:
+            perfiles = self.db.query(sql_perfiles) or []
+        except Exception as e:
+            _log.error("No se pudieron leer los perfiles: %s", e)
+            return []
+
+        filas = []
+        for perf in perfiles:
+            try:
+                pruebas = self.db.query(
+                    "SELECT " + campos + " FROM PruebasEnPerfil pp "
+                    "INNER JOIN Pruebas p ON pp.PruebaID = p.PruebaID "
+                    "WHERE pp.PerfilID = " + str(int(perf['PerfilID']))) or []
+            except Exception as e:
+                _log.warning("Perfil %s: no se pudieron leer sus pruebas: %s",
+                             perf.get('CodigoPerfil'), e)
+                continue
+            if not pruebas:
+                continue
+
+            base = sum(_f(x.get('Precio')) for x in pruebas)
+            clinica = sum(_f(x.get(COL_CLINICA)) for x in pruebas) if tiene else 0.0
+            # El convenio de cada prueba, con el respaldo al ambulatorio de
+            # las que no lo tengan: es lo que se facturaria de verdad.
+            convenio = sum(precio_aplicable(x, 'Hospitalizado Asegurado')
+                           for x in pruebas)
+            sin_conv = any(_cargado(x, COL_CONVENIO) is None for x in pruebas) \
+                if tiene else True
+
+            fila = {
+                'PruebaID': None,
+                'CodigoPrueba': perf.get('CodigoPerfil') or '',
+                'NombrePrueba': perf.get('NombrePerfil') or '',
+                'NombreArea': 'PERFILES',
+                'Precio': round(base, 4),
+                COL_CLINICA: round(clinica, 4),
+                COL_CONVENIO: round(convenio, 4),
+                'Activo': True,
+                'n_pruebas': len(pruebas),
+                'es_perfil': True,
+            }
+            fila['_comision'] = round(max(0.0, clinica - convenio), 4) if clinica else 0.0
+            fila['_pct_comision'] = (round(fila['_comision'] / clinica * 100, 1)
+                                     if clinica else 0.0)
+            fila['_sin_convenio'] = sin_conv
+            filas.append(fila)
+        return filas
+
     def guardar_precios(self, prueba_id, precio=None, precio_clinica=None,
                         precio_convenio=None):
         """
