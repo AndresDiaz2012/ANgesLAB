@@ -305,6 +305,10 @@ class VentanaConfiguracionCompleta:
                   command=self._editar_tarifas_convenio,
                   width=22).pack(side=tk.LEFT, padx=5)
 
+        ttk.Button(btn_frame, text="📦 Ofertas por Perfil",
+                  command=self._editar_ofertas_perfil,
+                  width=22).pack(side=tk.LEFT, padx=5)
+
         ttk.Button(btn_frame, text="🖨️ Baremo",
                   command=self._generar_baremo,
                   width=14).pack(side=tk.LEFT, padx=5)
@@ -1935,6 +1939,309 @@ class VentanaConfiguracionCompleta:
         dlg.minsize(480, min(alto_necesario, 520))
 
         e_base.focus_set()
+
+    def _editar_ofertas_perfil(self):
+        """
+        Carga el precio de paquete de los perfiles, todos en una pantalla.
+
+        Un perfil vale por defecto lo que suman sus pruebas, pero se ofertan
+        paquetes por debajo de esa suma. Aqui se cargan esos paquetes.
+
+        Se editan los diecinueve juntos y no de uno en uno porque las ofertas
+        se fijan comparandolas entre si, y porque abrir un dialogo por perfil
+        para teclear tres cifras es media hora de trabajo en vez de cinco
+        minutos. Al lado de cada casilla va lo que suman sus pruebas sueltas,
+        que es el numero contra el que se decide la oferta.
+
+        Dejar una casilla vacia o en cero borra esa oferta: el perfil vuelve
+        a costar la suma de sus pruebas.
+        """
+        try:
+            from modulos.tarifas import (COL_PERFIL_BASE, COL_PERFIL_CLINICA,
+                                         COL_PERFIL_CONVENIO, convertir_a_usd,
+                                         convertir_desde_usd,
+                                         crear_gestor_tarifas, leer_importe)
+        except ImportError:
+            messagebox.showerror("No disponible",
+                                 "Falta el modulo de tarifas.", parent=self.win)
+            return
+
+        gestor = crear_gestor_tarifas(self.db)
+        gestor.asegurar_columnas()
+        gestor.asegurar_columnas_perfiles()
+        perfiles = gestor.listar_perfiles(solo_activos=True)
+        if not perfiles:
+            messagebox.showinfo("Sin perfiles",
+                                "No hay perfiles activos con pruebas asignadas.",
+                                parent=self.win)
+            return
+
+        tasa_bs, tasa_cop = self._tasas_precios(refrescar=True)
+
+        dlg = tk.Toplevel(self.win)
+        dlg.title("Ofertas por perfil")
+        dlg.configure(bg='white')
+        dlg.grab_set()
+        ancho, alto = 1000, 700
+        x = max(0, (dlg.winfo_screenwidth() - ancho) // 2)
+        y = max(0, (dlg.winfo_screenheight() - alto) // 2)
+        dlg.geometry("%dx%d+%d+%d" % (ancho, alto, x, y))
+        dlg.minsize(860, 480)
+
+        tk.Label(dlg, text="\U0001f4e6 Ofertas por perfil",
+                 font=('Segoe UI', 13, 'bold'),
+                 bg='#7c3aed', fg='white', pady=12).pack(fill='x')
+
+        # La barra de botones se reserva su sitio antes que la tabla: con la
+        # tabla en expand=True, guardar se quedaria fuera de la ventana.
+        botones = tk.Frame(dlg, bg='white')
+        botones.pack(side='bottom', fill='x', padx=18, pady=10)
+
+        cabecera = tk.Frame(dlg, bg='white')
+        cabecera.pack(fill='x', padx=18, pady=(12, 4))
+
+        monedas = ['USD'] + (['COP'] if tasa_cop else []) + (['Bs'] if tasa_bs else [])
+        tk.Label(cabecera, text="Introducir importes en:",
+                 font=('Segoe UI', 10, 'bold'), bg='white').pack(side='left')
+        combo_moneda = ttk.Combobox(cabecera, values=monedas, state='readonly',
+                                    width=7, font=('Segoe UI', 10))
+        combo_moneda.set('COP' if tasa_cop else 'USD')
+        combo_moneda.pack(side='left', padx=8)
+        lbl_tasa = tk.Label(cabecera, text="", font=('Segoe UI', 8), bg='white',
+                            fg='#64748b')
+        lbl_tasa.pack(side='left', padx=6)
+
+        tk.Label(dlg,
+                 text="Deje una casilla vacia o en cero para que el perfil vuelva "
+                      "a costar la suma de sus pruebas. Debajo de cada oferta se "
+                      "indica lo que suman sueltas.",
+                 font=('Segoe UI', 8), bg='white', fg='#64748b',
+                 wraplength=940, justify='left').pack(anchor='w', padx=18,
+                                                      pady=(0, 6))
+
+        # -- Tabla con scroll ------------------------------------------
+        marco = tk.Frame(dlg, bg='white')
+        marco.pack(fill='both', expand=True, padx=18, pady=(0, 6))
+        lienzo = tk.Canvas(marco, bg='white', highlightthickness=0)
+        barra = ttk.Scrollbar(marco, orient='vertical', command=lienzo.yview)
+        tabla = tk.Frame(lienzo, bg='white')
+        tabla.bind('<Configure>',
+                   lambda e: lienzo.configure(scrollregion=lienzo.bbox('all')))
+        lienzo.create_window((0, 0), window=tabla, anchor='nw')
+        lienzo.configure(yscrollcommand=barra.set)
+        lienzo.pack(side='left', fill='both', expand=True)
+        barra.pack(side='right', fill='y')
+
+        def rueda(evento):
+            try:
+                lienzo.yview_scroll(int(-1 * (evento.delta / 120)), 'units')
+            except Exception:
+                pass
+        lienzo.bind_all('<MouseWheel>', rueda)
+
+        def soltar_rueda(evento):
+            if evento.widget is dlg:
+                try:
+                    lienzo.unbind_all('<MouseWheel>')
+                except Exception:
+                    pass
+        dlg.bind('<Destroy>', soltar_rueda)
+
+        ENC = ('Segoe UI', 9, 'bold')
+        for col, texto, an in ((0, 'Perfil', 34), (1, 'N', 4),
+                               (2, 'Ambulatorio', 14), (3, 'Clinica cobra', 14),
+                               (4, 'Nos pagan', 14), (5, 'Comision', 16)):
+            tk.Label(tabla, text=texto, font=ENC, bg='#f1f5f9', fg='#334155',
+                     width=an, anchor='w' if col == 0 else 'center',
+                     padx=4, pady=5).grid(row=0, column=col, sticky='ew',
+                                          padx=1, pady=(0, 3))
+
+        def factor():
+            m = combo_moneda.get()
+            if m == 'COP' and tasa_cop:
+                return float(tasa_cop)
+            if m == 'Bs' and tasa_bs:
+                return float(tasa_bs)
+            return 1.0
+
+        def fmt(valor_usd):
+            v = convertir_desde_usd(valor_usd, factor())
+            return ('{:,.0f}' if combo_moneda.get() == 'COP' else '{:,.2f}').format(v)
+
+        def leer(entry):
+            return leer_importe(entry.get(),
+                                separador_miles=(combo_moneda.get() != 'USD'))
+
+        filas = []
+        for i, perf in enumerate(perfiles, start=1):
+            fondo = 'white' if i % 2 else '#fafafa'
+            tk.Label(tabla, text=str(perf['NombrePrueba'])[:40],
+                     font=('Segoe UI', 9), bg=fondo, anchor='w',
+                     padx=4).grid(row=i * 2 - 1, column=0, sticky='ew')
+            tk.Label(tabla, text=str(perf['n_pruebas']), font=('Segoe UI', 9),
+                     bg=fondo, fg='#64748b').grid(row=i * 2 - 1, column=1)
+
+            entradas = []
+            for col in (2, 3, 4):
+                celda = tk.Frame(tabla, bg=fondo)
+                celda.grid(row=i * 2 - 1, column=col, sticky='ew', padx=2, pady=1)
+                e = ttk.Entry(celda, font=('Segoe UI', 10), width=13,
+                              justify='right')
+                e.pack()
+                entradas.append(e)
+
+            lbl_com = tk.Label(tabla, text="", font=('Segoe UI', 8), bg=fondo,
+                               fg='#64748b', width=18)
+            lbl_com.grid(row=i * 2 - 1, column=5, padx=2)
+
+            # Lo que suman las pruebas sueltas, justo debajo: es el numero
+            # contra el que se decide si la oferta tiene sentido
+            lbl_suma = tk.Label(tabla, text="", font=('Segoe UI', 8), bg=fondo,
+                                fg='#7c3aed', anchor='w', padx=6)
+            lbl_suma.grid(row=i * 2, column=0, columnspan=6, sticky='ew',
+                          pady=(0, 3))
+
+            # La oferta se lee de la base y no del baremo: el baremo ya trae
+            # el precio efectivo, que puede ser la suma de las pruebas.
+            crudo = gestor.obtener_perfil(perf['PerfilID']) or {}
+            filas.append({
+                'perfil': perf,
+                'entradas': entradas,
+                'lbl_com': lbl_com,
+                'lbl_suma': lbl_suma,
+                'usd': [float(crudo.get(c) or 0) for c in
+                        (COL_PERFIL_BASE, COL_PERFIL_CLINICA,
+                         COL_PERFIL_CONVENIO)],
+            })
+
+        def refrescar_fila(f, *_):
+            perf = f['perfil']
+            m = combo_moneda.get()
+            dec = 0 if m == 'COP' else 2
+            fac = factor()
+            patron = '{:,.%df}' % dec
+            suma = tuple(perf[k] * fac for k in
+                         ('suma_base', 'suma_clinica', 'suma_convenio'))
+            valores = [leer(e) for e in f['entradas']]
+            if any(v is None for v in valores):
+                f['lbl_com'].config(text="importe no valido", fg='#dc2626')
+            else:
+                cli, con = valores[1], valores[2]
+                if cli and con:
+                    dif = cli - con
+                    f['lbl_com'].config(
+                        text="%s (%.0f%%)" % (patron.format(dif), dif / cli * 100),
+                        fg='#dc2626' if dif < 0 else '#059669')
+                else:
+                    f['lbl_com'].config(text="-", fg='#94a3b8')
+
+            texto = "sueltas suman  %s / %s / %s %s" % (
+                patron.format(suma[0]), patron.format(suma[1]),
+                patron.format(suma[2]), m)
+            if not any(v is None for v in valores):
+                rebajas = []
+                if valores[0] and suma[0] > valores[0]:
+                    rebajas.append("ambulatorio -"
+                                   + patron.format(suma[0] - valores[0]))
+                if valores[2] and suma[2] > valores[2]:
+                    rebajas.append("convenio -"
+                                   + patron.format(suma[2] - valores[2]))
+                if rebajas:
+                    texto += "   ahorra " + ", ".join(rebajas)
+            f['lbl_suma'].config(text=texto)
+
+        def refrescar_todo(*_):
+            m = combo_moneda.get()
+            if m == 'USD':
+                lbl_tasa.config(text="")
+            elif m == 'COP':
+                lbl_tasa.config(text="tasa: {:,.2f} COP por USD".format(tasa_cop))
+            else:
+                lbl_tasa.config(text="tasa: {:,.2f} Bs por USD".format(tasa_bs))
+            for f in filas:
+                refrescar_fila(f)
+
+        def cambiar_moneda(*_):
+            for f in filas:
+                for e, v in zip(f['entradas'], f['usd']):
+                    e.delete(0, 'end')
+                    if v:
+                        e.insert(0, fmt(v))
+            refrescar_todo()
+
+        combo_moneda.bind('<<ComboboxSelected>>', cambiar_moneda)
+        for f in filas:
+            for e in f['entradas']:
+                e.bind('<KeyRelease>', lambda ev, ff=f: refrescar_fila(ff))
+
+        def guardar():
+            # Primero se valida todo y luego se escribe: guardar a medias
+            # dejaria unas ofertas cargadas y otras no, sin decir cuales.
+            pendientes = []
+            for f in filas:
+                valores = [leer(e) for e in f['entradas']]
+                if any(v is None for v in valores):
+                    messagebox.showerror(
+                        "Importe invalido",
+                        "Revise los importes de %s." % f['perfil']['NombrePrueba'],
+                        parent=dlg)
+                    return
+                if any(v < 0 for v in valores):
+                    messagebox.showerror(
+                        "Importe invalido",
+                        "Los precios no pueden ser negativos.", parent=dlg)
+                    return
+                en_usd = [convertir_a_usd(v, factor()) if v else 0.0
+                          for v in valores]
+                if [round(x, 4) for x in en_usd] == [round(x, 4) for x in f['usd']]:
+                    continue
+                pendientes.append((f, en_usd))
+
+            if not pendientes:
+                messagebox.showinfo("Sin cambios", "No hay nada que guardar.",
+                                    parent=dlg)
+                return
+
+            # Una oferta de convenio por encima de lo que la clinica le cobra
+            # al paciente deja a la clinica poniendo dinero: casi siempre es
+            # un dedazo, pero se pregunta en vez de decidir por el usuario.
+            raros = [f['perfil']['NombrePrueba'] for f, v in pendientes
+                     if v[1] and v[2] and v[1] < v[2]]
+            if raros and not messagebox.askyesno(
+                    "Revisar",
+                    "En estos perfiles la clinica cobraria menos de lo que nos "
+                    "paga:\n\n" + ", ".join(raros) + "\n\nGuardar igual?",
+                    parent=dlg):
+                return
+
+            errores = []
+            for f, en_usd in pendientes:
+                ok, msg = gestor.guardar_precios_perfil(
+                    f['perfil']['PerfilID'], precio=en_usd[0],
+                    precio_clinica=en_usd[1], precio_convenio=en_usd[2])
+                if ok:
+                    f['usd'] = en_usd
+                else:
+                    errores.append("%s: %s" % (f['perfil']['NombrePrueba'], msg))
+
+            if errores:
+                messagebox.showerror("Errores al guardar",
+                                     "\n".join(errores), parent=dlg)
+                return
+            messagebox.showinfo(
+                "Guardado",
+                "%d oferta(s) actualizada(s)." % len(pendientes), parent=dlg)
+            dlg.destroy()
+            self._cargar_precios()
+
+        tk.Button(botones, text="Guardar ofertas", font=('Segoe UI', 11, 'bold'),
+                  bg='#059669', fg='white', relief='flat', padx=20, pady=7,
+                  cursor='hand2', command=guardar).pack(side='left')
+        tk.Button(botones, text="Cerrar", font=('Segoe UI', 11),
+                  bg='#94a3b8', fg='white', relief='flat', padx=20, pady=7,
+                  cursor='hand2', command=dlg.destroy).pack(side='right')
+
+        cambiar_moneda()
 
     def _generar_baremo(self):
         """

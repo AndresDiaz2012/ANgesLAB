@@ -227,10 +227,16 @@ def generar_baremo_pdf(ruta, filas, config_lab=None, usuario='',
             pct = f.get('_pct_comision') or 0
             # Un perfil lleva dicho cuantas pruebas incluye: sin eso, su
             # precio parece desproporcionado al lado de una prueba suelta.
+            # Y si el precio es una oferta de paquete se dice tambien, porque
+            # quien sume las pruebas del baremo va a obtener otra cifra y sin
+            # este aviso pensaria que el documento se contradice.
             nombre = str(f.get('NombrePrueba') or '')
             if f.get('es_perfil') and f.get('n_pruebas'):
-                nombre += (' <font size="6" color="#64748b">(%d pruebas)</font>'
-                           % f['n_pruebas'])
+                detalle = '%d pruebas' % f['n_pruebas']
+                if f.get('es_oferta'):
+                    detalle += ' &#183; precio de paquete'
+                nombre += (' <font size="6" color="#64748b">(%s)</font>'
+                           % detalle)
             fila = [str(f.get('CodigoPrueba') or ''),
                     Paragraph(nombre, st_celda)]
 

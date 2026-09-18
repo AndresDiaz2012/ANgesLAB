@@ -161,10 +161,22 @@ class TestCalculoDeCobro(unittest.TestCase):
         self.assertEqual(cobrado, 0.0)
         self.assertEqual(saldo, 0.0)
 
-    def test_dos_decimales(self):
+    def test_se_redondea_con_la_precision_de_la_base(self):
+        # Cuatro decimales, los mismos que guarda el campo CURRENCY. Con dos
+        # una solicitud de 150.000 COP abria la cuenta por cobrar en 150.009,
+        # porque los precios viven en dolares y ahi un centavo son 31 pesos.
         cobrado, saldo = calcular_cobro(10.0, 3.333333, 'Ambulatorio')
-        self.assertEqual(cobrado, 3.33)
-        self.assertEqual(saldo, 6.67)
+        self.assertEqual(cobrado, 3.3333)
+        self.assertEqual(saldo, 6.6667)
+
+    def test_lo_cobrado_y_el_saldo_suman_el_total(self):
+        # Es la propiedad que de verdad importa: si no cuadran, el corte le
+        # reclama a la clinica una cifra distinta de la facturada.
+        for total, abonado in ((150000 / 3100.0, 0), (48.3871, 12.5),
+                               (10.0, 3.333333), (0.0001, 0)):
+            cobrado, saldo = calcular_cobro(total, abonado, 'Ambulatorio')
+            self.assertAlmostEqual(cobrado + saldo, round(total, 4), places=4,
+                                   msg="total %s" % total)
 
 
 class TestTextos(unittest.TestCase):

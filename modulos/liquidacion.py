@@ -38,9 +38,11 @@ except Exception:  # pragma: no cover
     _log = logging.getLogger('angeslab.liquidacion')
 
 try:
-    from modulos.procedencia import (DIAS_CREDITO_SEGURO, calcular_cobro,
-                                     descripcion_cuenta, es_credito)
+    from modulos.procedencia import (DECIMALES_IMPORTE, DIAS_CREDITO_SEGURO,
+                                     calcular_cobro, descripcion_cuenta,
+                                     es_credito)
 except Exception:  # pragma: no cover
+    DECIMALES_IMPORTE = 4
     DIAS_CREDITO_SEGURO = 30
 
     def es_credito(_tipo):
@@ -52,7 +54,8 @@ except Exception:  # pragma: no cover
         except (TypeError, ValueError):
             total = 0.0
         cobrado = total if hay_documento else 0.0
-        return round(cobrado, 2), round(total - cobrado, 2)
+        return (round(cobrado, DECIMALES_IMPORTE),
+                round(total - cobrado, DECIMALES_IMPORTE))
 
     def descripcion_cuenta(tipo, numero=''):
         return "Solicitud " + str(numero)
@@ -129,14 +132,15 @@ class Liquidador:
         if existente:
             cuenta_id = existente.get('CuentaCobrarID')
             abonado = _f(existente.get('MontoCobrado'))
-            nuevo_saldo = round(max(0.0, saldo - abonado), 2)
+            nuevo_saldo = round(max(0.0, saldo - abonado),
+                                DECIMALES_IMPORTE)
             if (abs(_f(existente.get('MontoOriginal')) - saldo) < 0.005
                     and abs(_f(existente.get('SaldoPendiente')) - nuevo_saldo) < 0.005):
                 return 'sin_cambio', cuenta_id
 
             estado = 'Cobrada' if nuevo_saldo <= 0.001 else (
                 'Parcial' if abonado > 0.001 else 'Pendiente')
-            sets = ["MontoOriginal=" + str(round(saldo, 2)),
+            sets = ["MontoOriginal=" + str(round(saldo, DECIMALES_IMPORTE)),
                     "SaldoPendiente=" + str(nuevo_saldo),
                     "Estado='" + estado + "'"]
             if self._tiene_columna('CuentasPorCobrar', 'FechaLiberacion'):
@@ -171,8 +175,10 @@ class Liquidador:
                 "MontoOriginal", "MontoCobrado", "SaldoPendiente", "DiasVencida",
                 "Estado", "Observaciones"]
         vals = [str(pac_id), "'" + nombre + "'", _fecha_access(ahora),
-                vence.strftime('#%m/%d/%Y#'), str(round(saldo, 2)), "0",
-                str(round(saldo, 2)), "0", "'Pendiente'", "'" + obs + "'"]
+                vence.strftime('#%m/%d/%Y#'),
+                str(round(saldo, DECIMALES_IMPORTE)), "0",
+                str(round(saldo, DECIMALES_IMPORTE)), "0",
+                "'Pendiente'", "'" + obs + "'"]
 
         # En bases antiguas estas columnas pueden no existir todavia; se
         # omiten en vez de romper el guardado de la solicitud.

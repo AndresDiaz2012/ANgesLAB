@@ -34,6 +34,11 @@ Copyright 2024-2026 ANgesLAB Solutions
 from datetime import datetime
 
 try:
+    from modulos.procedencia import DECIMALES_IMPORTE
+except Exception:  # pragma: no cover
+    DECIMALES_IMPORTE = 4
+
+try:
     from modulos.logging_config import obtener_logger
     _log = obtener_logger('angeslab.desembolsos')
 except Exception:  # pragma: no cover - respaldo si falta el modulo de logging
@@ -249,12 +254,12 @@ class GestorDesembolsos:
         if not cuenta:
             return False, "No se encontro la cuenta del paciente.", None
 
-        saldo = round(_f(cuenta.get('SaldoPendiente')), 2)
+        saldo = round(_f(cuenta.get('SaldoPendiente')), DECIMALES_IMPORTE)
         if saldo <= 0.001:
             return False, (f"{cuenta.get('NombrePaciente', 'El paciente')} ya esta "
                            f"liberado: no tiene saldo pendiente."), None
 
-        monto = round(_f(monto), 2)
+        monto = round(_f(monto), DECIMALES_IMPORTE)
         if monto <= 0:
             return False, "El importe debe ser mayor que cero.", None
         if monto > saldo + 0.001:
@@ -262,8 +267,9 @@ class GestorDesembolsos:
                            f"{cuenta.get('NombrePaciente', 'este paciente')} "
                            f"({saldo:,.2f})."), None
 
-        cobrado_nuevo = round(_f(cuenta.get('MontoCobrado')) + monto, 2)
-        saldo_nuevo = round(saldo - monto, 2)
+        cobrado_nuevo = round(_f(cuenta.get('MontoCobrado')) + monto,
+                              DECIMALES_IMPORTE)
+        saldo_nuevo = round(saldo - monto, DECIMALES_IMPORTE)
         libera = saldo_nuevo <= 0.001
         estado = ESTADO_LIBERADA if libera else ESTADO_PARCIAL
         ahora = datetime.now()
@@ -339,7 +345,7 @@ class GestorDesembolsos:
 
         for linea in lineas:
             cuenta_id = linea.get('cuenta_id')
-            monto = round(_f(linea.get('monto')), 2)
+            monto = round(_f(linea.get('monto')), DECIMALES_IMPORTE)
             if monto <= 0:
                 continue
             # Cada abono se registra sin tocar caja: el ingreso se asienta
@@ -356,7 +362,7 @@ class GestorDesembolsos:
         if not aplicadas:
             return False, ("No se aplico ningun abono. " + " ".join(errores)).strip(), None
 
-        total = round(sum(a['monto'] for a in aplicadas), 2)
+        total = round(sum(a['monto'] for a in aplicadas), DECIMALES_IMPORTE)
         liberados = [a for a in aplicadas if a['libera']]
 
         aviso_caja = ''

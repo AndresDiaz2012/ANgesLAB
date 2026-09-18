@@ -2318,6 +2318,16 @@ class MainApplication:
                 CXC_TIENE_PROCEDENCIA = False
                 _log.warning("No se pudo crear CuentasPorCobrar.TipoProcedencia: %s", e)
 
+        # Perfiles.PrecioPerfil y companeras: la oferta de paquete. Quedan en
+        # NULL, que significa "sin oferta", asi que hasta que alguien cargue
+        # un paquete cada perfil sigue costando lo que suman sus pruebas.
+        if TARIFAS_DISPONIBLE:
+            try:
+                tarifas_mod.GestorTarifas(db).asegurar_columnas_perfiles()
+            except Exception as e:
+                _log.warning("No se pudieron crear las columnas de oferta "
+                             "de perfil: %s", e)
+
     def _asegurar_areas_clinicas(self):
         """
         Garantiza que existan exactamente las areas clinicas requeridas con los AreaIDs
@@ -6706,6 +6716,16 @@ class MainApplication:
             messagebox.showinfo("Perfil", "Este perfil no tiene pruebas asignadas")
             return 0
 
+        # Las lineas quedan marcadas con el perfil del que salieron: es lo
+        # que permite despues cobrarlas como paquete en vez de una por una.
+        # Se marcan tambien las que ya estaban seleccionadas sueltas, porque
+        # si no el perfil pareceria incompleto y perderia su oferta.
+        ids_del_perfil = {p['PruebaID'] for p in pruebas}
+        for linea in self.sol_pruebas_seleccionadas:
+            if linea.get('id') in ids_del_perfil:
+                linea['_perfil_id'] = perfil_id
+                linea['_perfil_nombre'] = nombre_perfil
+
         agregadas = 0
         for p in pruebas:
             if p['PruebaID'] in ids_ya:
@@ -6714,6 +6734,8 @@ class MainApplication:
                 'id': p['PruebaID'], 'codigo': p['CodigoPrueba'],
                 'nombre': p['NombrePrueba'],
                 'precio': float(p.get('Precio') or 0),
+                '_perfil_id': perfil_id,
+                '_perfil_nombre': nombre_perfil,
             })
             ids_ya.add(p['PruebaID'])
             agregadas += 1
@@ -7323,6 +7345,80 @@ class MainApplication:
         elif not sin_convenio:
             self._aviso_sin_convenio = None
 
+        self._aplicar_ofertas_de_perfil(tipo)
+
+    def _aplicar_ofertas_de_perfil(self, tipo):
+        """
+        Cobra como paquete los perfiles que tengan oferta pactada.
+
+        Un perfil suele valer menos que sus pruebas por separado: el perfil
+        20 se ofrece en 120.000 donde sus catorce pruebas suman 152.000. Como
+        la solicitud se factura linea a linea, la rebaja se reparte entre
+        esas lineas (ver tarifas.prorratear): el total queda en lo pactado y
+        la cadena hasta la cuenta por cobrar y el corte no se entera de nada.
+
+        El paquete solo se aplica con el perfil COMPLETO. Si se quito una de
+        sus pruebas ya no es el perfil que se oferto, asi que cada prueba
+        vuelve a su precio suelto y se avisa, que es preferible a cobrar un
+        paquete por algo que no lo es.
+        """
+        self._ofertas_perfil = []
+        seleccion = self.sol_pruebas_seleccionadas
+        for linea in seleccion:
+            linea.pop('_oferta', None)
+
+        por_perfil = {}
+        for linea in seleccion:
+            pid = linea.get('_perfil_id')
+            if pid:
+                por_perfil.setdefault(pid, []).append(linea)
+        if not por_perfil:
+            return
+
+        gestor = tarifas_mod.GestorTarifas(db)
+        incompletos = []
+        for perfil_id, lineas in por_perfil.items():
+            perfil = gestor.obtener_perfil(perfil_id)
+            if not perfil:
+                continue
+            paquete = tarifas_mod.precio_paquete(perfil, tipo)
+            if paquete is None:
+                continue
+
+            # Completo quiere decir: estan todas las pruebas activas que el
+            # perfil agrupa hoy, no las que tenia cuando se pidio
+            del_perfil = gestor.pruebas_de_perfil(perfil_id)
+            faltan = ({x['PruebaID'] for x in del_perfil}
+                      - {l.get('id') for l in lineas})
+            if faltan:
+                incompletos.append("%s (faltan %d)" % (
+                    perfil.get('NombrePerfil') or '', len(faltan)))
+                continue
+
+            suelto = sum(float(l.get('precio') or 0) for l in lineas)
+            ajustados = tarifas_mod.prorratear(
+                [l.get('precio') for l in lineas], paquete)
+            for linea, nuevo_precio in zip(lineas, ajustados):
+                linea['precio'] = nuevo_precio
+                linea['_oferta'] = perfil.get('CodigoPerfil') or ''
+            self._ofertas_perfil.append({
+                'nombre': perfil.get('NombrePerfil') or '',
+                'paquete': paquete,
+                'suelto': round(suelto, 2),
+                'n': len(lineas),
+            })
+
+        # El aviso de perfil incompleto se da una sola vez por combinacion:
+        # se repinta la lista con cada tecla y seria insoportable
+        clave = tuple(sorted(incompletos))
+        if incompletos and getattr(self, '_aviso_perfil_incompleto', None) != clave:
+            self._aviso_perfil_incompleto = clave
+            self._set_pac_status(
+                "Sin oferta de paquete: " + ", ".join(incompletos)
+                + ". Se cobra prueba por prueba.", '#fff3e0', '#e65100')
+        elif not incompletos:
+            self._aviso_perfil_incompleto = None
+
     def _refrescar_lista_seleccionadas(self):
         """Reconstruye el treeview unico de pruebas seleccionadas."""
         self._aplicar_tarifa_por_procedencia()
@@ -7333,15 +7429,29 @@ class MainApplication:
         for i, p in enumerate(self.sol_pruebas_seleccionadas, 1):
             precio = float(p.get('precio') or 0)
             area = p.get('area') or areas.get(p.get('id'), '—')
+            # Una prueba dentro de un paquete no vale lo que dice el baremo:
+            # lleva encima la parte que le toca de la rebaja. Sin decirlo, el
+            # operador ve un importe que no cuadra con nada y desconfia.
+            nombre = p.get('nombre', '')
+            if p.get('_oferta'):
+                nombre = f"{nombre}  ◆ {p['_oferta']}"
             self.tree_pruebas_sel.insert('', 'end', values=(
-                i, p.get('codigo', ''), area, p.get('nombre', ''),
+                i, p.get('codigo', ''), area, nombre,
                 f"${precio:,.2f}"
             ))
         # Actualizar barra resumen
         n = len(self.sol_pruebas_seleccionadas)
         subtotal = sum(float(p.get('precio', 0)) for p in self.sol_pruebas_seleccionadas)
         if hasattr(self, 'lbl_resumen_pruebas'):
-            self.lbl_resumen_pruebas.config(text=f"{n} prueba{'s' if n != 1 else ''} | Subtotal: ${subtotal:,.2f}")
+            resumen = f"{n} prueba{'s' if n != 1 else ''} | Subtotal: ${subtotal:,.2f}"
+            # Que se vea el paquete aplicado y cuanto rebaja: es la cifra que
+            # el paciente pregunta y la que justifica el total
+            for of in getattr(self, '_ofertas_perfil', []) or []:
+                ahorro = of['suelto'] - of['paquete']
+                resumen += f"  ◆ {of['nombre']}: paquete ${of['paquete']:,.2f}"
+                if ahorro > 0.005:
+                    resumen += f" (ahorra ${ahorro:,.2f})"
+            self.lbl_resumen_pruebas.config(text=resumen)
         # Actualizar pill contador
         if hasattr(self, 'pill_contador'):
             txt = f" {n} prueba{'s' if n != 1 else ''} "

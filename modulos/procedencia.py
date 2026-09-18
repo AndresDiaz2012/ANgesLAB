@@ -120,6 +120,18 @@ def es_area_clinica(tipo_servicio):
     return area_servicio(tipo_servicio) in AREAS_CLINICA
 
 # Dias de plazo para cobrarle al seguro.
+# Decimales con los que se escribe cualquier importe en la base.
+#
+# Cuatro y no dos, por dos razones que apuntan al mismo sitio: el campo
+# CURRENCY de Access guarda exactamente cuatro, y los precios viven en
+# dolares, donde un centavo son 31 pesos. Redondear a dos hacia que una
+# solicitud de 150.000 COP abriera la cuenta por cobrar en 150.009, de modo
+# que lo que se le reclamaba a la clinica no cuadraba con lo facturado.
+#
+# Las cifras que solo se muestran o se imprimen si van a dos: ahi el que lee
+# quiere pesos y centimos, no diezmilesimas de dolar.
+DECIMALES_IMPORTE = 4
+
 DIAS_CREDITO_SEGURO = 30
 
 
@@ -154,7 +166,9 @@ def calcular_cobro(total, abonado, tipo_servicio, hay_documento=True):
     """
     Reparte el importe de una solicitud entre lo cobrado y lo que queda a deber.
 
-    Devuelve la tupla (cobrado, saldo), ambos redondeados a dos decimales.
+    Devuelve la tupla (cobrado, saldo). Ver DECIMALES_IMPORTE: se
+    redondean con la misma precision con la que se guardan, para que la
+    cuenta por cobrar diga exactamente lo que dice la solicitud.
 
     Lo abonado se toma al pie de la letra: si dice cero, se cobro cero. La
     pantalla rellena esa casilla con el total en cuanto la procedencia es de
@@ -191,7 +205,8 @@ def calcular_cobro(total, abonado, tipo_servicio, hay_documento=True):
     else:
         cobrado = min(abonado, total)
 
-    return round(cobrado, 2), round(total - cobrado, 2)
+    return (round(cobrado, DECIMALES_IMPORTE),
+            round(total - cobrado, DECIMALES_IMPORTE))
 
 
 def descripcion_cuenta(tipo_servicio, numero_solicitud=''):

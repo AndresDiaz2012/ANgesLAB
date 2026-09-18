@@ -58,6 +58,14 @@ except Exception:  # pragma: no cover
 COL_CLINICA = 'PrecioClinica'
 COL_CONVENIO = 'PrecioConvenio'
 
+# Las mismas tres tarifas, pero del perfil entero: la oferta de paquete.
+# Un perfil vale por defecto lo que suman sus pruebas, pero se pactan
+# paquetes por debajo de esa suma (el perfil 20 sale en 120.000 donde sus
+# catorce pruebas sueltas suman 152.000). Cargado aqui, ese precio manda.
+COL_PERFIL_BASE = 'PrecioPerfil'
+COL_PERFIL_CLINICA = 'PrecioClinicaPerfil'
+COL_PERFIL_CONVENIO = 'PrecioConvenioPerfil'
+
 # Tarifas
 TARIFA_AMBULATORIO = 'ambulatorio'
 TARIFA_CLINICA = 'clinica'
@@ -244,6 +252,64 @@ def precio_detalle(prueba, tipo_servicio):
     }
 
 
+def precio_paquete(perfil, tipo_servicio):
+    """
+    Lo que cuesta el perfil como paquete, o None si no hay oferta cargada.
+
+    Sin oferta el perfil vale lo que suman sus pruebas, que es el
+    comportamiento de siempre.
+
+    Cada tarifa tiene SU oferta y no se cubren entre si. Si esta cargada la
+    ambulatoria pero no la de convenio, un paciente de hospitalizacion no se
+    factura con el paquete de la calle: se le cobra a la clinica la suma de
+    los precios de convenio, que es el precio entero. Prestar aqui la oferta
+    ambulatoria le reclamaria a la clinica 120.000 donde le corresponden
+    218.000, y ese es justo el error que este modulo existe para evitar.
+
+    Un cero no es un paquete gratis: es la forma natural de borrar la oferta
+    desde la pantalla de precios, y asi se entiende.
+    """
+    columna = (COL_PERFIL_BASE if tarifa_de(tipo_servicio) == TARIFA_AMBULATORIO
+               else COL_PERFIL_CONVENIO)
+    valor = _cargado(perfil, columna)
+    if valor is None or valor <= 0:
+        return None
+    return round(valor, 4)
+
+
+def prorratear(precios, total):
+    """
+    Reparte el precio del paquete entre las pruebas que lo componen.
+
+    La solicitud se factura linea a linea: el total sale de sumar lo que
+    vale cada prueba, y de ahi pasa a la cuenta por cobrar y al corte. Para
+    que un perfil con oferta cueste lo pactado sin romper esa cadena, cada
+    linea se ajusta en la misma proporcion en vez de meter un descuento
+    aparte que habria que arrastrar por los cuatro sitios.
+
+    Repartir en proporcion y no a partes iguales mantiene el detalle
+    defendible: si la clinica pregunta por que la hematologia aparece en
+    15.789 y no en 20.000, la respuesta es que el paquete rebaja un 21% y
+    cada prueba lo lleva encima.
+
+    La ultima linea absorbe el resto del redondeo, asi que la suma cuadra
+    con el paquete al centimo. Sin eso, catorce redondeos de cuatro
+    decimales dejan la solicitud descuadrada contra lo que se pacto.
+    """
+    valores = [_f(x) for x in precios]
+    if not valores:
+        return []
+    objetivo = round(_f(total), 4)
+    suma = sum(valores)
+    if suma <= 0:
+        # Sin precios individuales solo cabe repartir a partes iguales
+        ajustados = [round(objetivo / len(valores), 4)] * len(valores)
+    else:
+        ajustados = [round(v * objetivo / suma, 4) for v in valores]
+    ajustados[-1] = round(ajustados[-1] + (objetivo - sum(ajustados)), 4)
+    return ajustados
+
+
 def comision(prueba):
     """Lo que se queda la clinica por esta prueba, o 0 si no aplica."""
     clinica = _f(prueba.get(COL_CLINICA))
@@ -267,6 +333,7 @@ class GestorTarifas:
     def __init__(self, db):
         self.db = db
         self._columnas_ok = False
+        self._columnas_perfil_ok = False
 
     def asegurar_columnas(self):
         """
@@ -291,6 +358,75 @@ class GestorTarifas:
             except Exception as e:
                 _log.warning("No se pudo crear la columna '%s': %s", col, e)
         self._columnas_ok = True
+
+    def asegurar_columnas_perfiles(self):
+        """
+        Crea las tres columnas de oferta de paquete en Perfiles si faltan.
+
+        Quedan en NULL, que es 'sin oferta': hasta que alguien cargue un
+        paquete, cada perfil sigue costando lo que suman sus pruebas, tal
+        como venia funcionando.
+        """
+        if self._columnas_perfil_ok:
+            return
+        for col in (COL_PERFIL_BASE, COL_PERFIL_CLINICA, COL_PERFIL_CONVENIO):
+            try:
+                self.db.query_one("SELECT TOP 1 " + col + " FROM Perfiles")
+                continue
+            except Exception:
+                pass
+            try:
+                self.db.execute(
+                    "ALTER TABLE Perfiles ADD COLUMN " + col + " CURRENCY")
+                _log.info("Columna de oferta de perfil creada: %s", col)
+            except Exception as e:
+                _log.warning("No se pudo crear la columna '%s': %s", col, e)
+        self._columnas_perfil_ok = True
+
+    def tiene_columnas_perfiles(self):
+        try:
+            self.db.query_one(
+                "SELECT TOP 1 " + COL_PERFIL_CONVENIO + " FROM Perfiles")
+            return True
+        except Exception:
+            return False
+
+    def obtener_perfil(self, perfil_id):
+        """Un perfil con su oferta de paquete, o None."""
+        campos = "PerfilID, CodigoPerfil, NombrePerfil, Descripcion, Activo"
+        if self.tiene_columnas_perfiles():
+            campos += (", " + COL_PERFIL_BASE + ", " + COL_PERFIL_CLINICA
+                       + ", " + COL_PERFIL_CONVENIO)
+        try:
+            return self.db.query_one(
+                "SELECT " + campos + " FROM Perfiles WHERE PerfilID="
+                + str(int(perfil_id)))
+        except Exception as e:
+            _log.error("No se pudo leer el perfil %s: %s", perfil_id, e)
+            return None
+
+    def pruebas_de_perfil(self, perfil_id, solo_activas=True):
+        """
+        Las pruebas del perfil con sus tres precios.
+
+        Solo las activas, que son las que de verdad entran en la solicitud
+        cuando se pide el perfil. Contar aqui una prueba dada de baja pondria
+        en el baremo un precio que nunca se llega a cobrar.
+        """
+        campos = "p.PruebaID, p.CodigoPrueba, p.NombrePrueba, p.Precio"
+        if self.tiene_columnas():
+            campos += ", p." + COL_CLINICA + ", p." + COL_CONVENIO
+        sql = ("SELECT " + campos + " FROM PruebasEnPerfil pp "
+               "INNER JOIN Pruebas p ON pp.PruebaID = p.PruebaID "
+               "WHERE pp.PerfilID = " + str(int(perfil_id)))
+        if solo_activas:
+            sql += " AND p.Activo = True"
+        try:
+            return self.db.query(sql) or []
+        except Exception as e:
+            _log.warning("Perfil %s: no se pudieron leer sus pruebas: %s",
+                         perfil_id, e)
+            return []
 
     def tiene_columnas(self):
         try:
@@ -357,23 +493,28 @@ class GestorTarifas:
 
     def listar_perfiles(self, solo_activos=True):
         """
-        Los perfiles con el precio que suman sus pruebas.
+        Los perfiles con lo que cuesta cada uno, para el baremo.
 
-        Un perfil no tiene precio propio en la base: al pedirlo se expanden
-        sus pruebas y se cobra la suma de cada una. Por eso el precio se
-        calcula aqui y no se guarda: si manana cambia una prueba suelta, el
-        perfil la sigue.
+        Un perfil vale lo que suman sus pruebas, salvo que tenga cargada una
+        oferta de paquete: entonces vale el paquete. Lo que sale aqui es el
+        precio que se va a cobrar de verdad, no la suma teorica, para que el
+        papel que se entrega en la clinica diga la misma cifra que la
+        solicitud.
 
-        Devuelve filas con la misma forma que listar_baremo(), para que el
-        baremo las pinte igual, mas n_pruebas y CodigoPerfil.
+        Devuelve filas con la misma forma que listar_baremo() mas:
+            n_pruebas     cuantas pruebas incluye
+            es_perfil     para distinguirlas al pintar
+            es_oferta     True si el precio viene de un paquete pactado
+            suma_*        lo que sumarian las pruebas sueltas
         """
         tiene = self.tiene_columnas()
-        campos = "p.Precio"
-        if tiene:
-            campos += ", p." + COL_CLINICA + ", p." + COL_CONVENIO
+        tiene_perf = self.tiene_columnas_perfiles()
 
-        sql_perfiles = ("SELECT PerfilID, CodigoPerfil, NombrePerfil, Descripcion "
-                        "FROM Perfiles")
+        campos = "PerfilID, CodigoPerfil, NombrePerfil, Descripcion"
+        if tiene_perf:
+            campos += (", " + COL_PERFIL_BASE + ", " + COL_PERFIL_CLINICA
+                       + ", " + COL_PERFIL_CONVENIO)
+        sql_perfiles = "SELECT " + campos + " FROM Perfiles"
         if solo_activos:
             sql_perfiles += " WHERE Activo = True"
         sql_perfiles += " ORDER BY NombrePerfil"
@@ -386,26 +527,33 @@ class GestorTarifas:
 
         filas = []
         for perf in perfiles:
-            try:
-                pruebas = self.db.query(
-                    "SELECT " + campos + " FROM PruebasEnPerfil pp "
-                    "INNER JOIN Pruebas p ON pp.PruebaID = p.PruebaID "
-                    "WHERE pp.PerfilID = " + str(int(perf['PerfilID']))) or []
-            except Exception as e:
-                _log.warning("Perfil %s: no se pudieron leer sus pruebas: %s",
-                             perf.get('CodigoPerfil'), e)
-                continue
+            pruebas = self.pruebas_de_perfil(perf['PerfilID'])
             if not pruebas:
                 continue
 
-            base = sum(_f(x.get('Precio')) for x in pruebas)
-            clinica = sum(_f(x.get(COL_CLINICA)) for x in pruebas) if tiene else 0.0
+            suma_base = sum(_f(x.get('Precio')) for x in pruebas)
+            suma_clinica = (sum(_f(x.get(COL_CLINICA)) for x in pruebas)
+                            if tiene else 0.0)
             # El convenio de cada prueba, con el respaldo al ambulatorio de
             # las que no lo tengan: es lo que se facturaria de verdad.
-            convenio = sum(precio_aplicable(x, 'Hospitalizado Asegurado')
-                           for x in pruebas)
-            sin_conv = any(_cargado(x, COL_CONVENIO) is None for x in pruebas) \
-                if tiene else True
+            suma_convenio = sum(precio_aplicable(x, 'Hospitalizado Asegurado')
+                                for x in pruebas)
+
+            paq_base = precio_paquete(perf, 'Ambulatorio')
+            paq_convenio = precio_paquete(perf, 'Hospitalizado Asegurado')
+            paq_clinica = _cargado(perf, COL_PERFIL_CLINICA)
+            if paq_clinica is not None and paq_clinica <= 0:
+                paq_clinica = None
+
+            base = suma_base if paq_base is None else paq_base
+            convenio = suma_convenio if paq_convenio is None else paq_convenio
+            # Lo que la clinica le cobra al paciente es informativo: si hay
+            # paquete de convenio pero nadie cargo lo que cobra la clinica,
+            # se muestra la suma para no inventar una comision.
+            clinica = suma_clinica if paq_clinica is None else paq_clinica
+
+            sin_conv = (any(_cargado(x, COL_CONVENIO) is None for x in pruebas)
+                        if tiene else True)
 
             fila = {
                 'PruebaID': None,
@@ -416,15 +564,63 @@ class GestorTarifas:
                 COL_CLINICA: round(clinica, 4),
                 COL_CONVENIO: round(convenio, 4),
                 'Activo': True,
+                'PerfilID': perf['PerfilID'],
                 'n_pruebas': len(pruebas),
                 'es_perfil': True,
+                'es_oferta': paq_base is not None or paq_convenio is not None,
+                'suma_base': round(suma_base, 4),
+                'suma_clinica': round(suma_clinica, 4),
+                'suma_convenio': round(suma_convenio, 4),
             }
-            fila['_comision'] = round(max(0.0, clinica - convenio), 4) if clinica else 0.0
+            fila['_comision'] = (round(max(0.0, clinica - convenio), 4)
+                                 if clinica else 0.0)
             fila['_pct_comision'] = (round(fila['_comision'] / clinica * 100, 1)
                                      if clinica else 0.0)
             fila['_sin_convenio'] = sin_conv
             filas.append(fila)
         return filas
+
+    def guardar_precios_perfil(self, perfil_id, precio=None,
+                               precio_clinica=None, precio_convenio=None):
+        """
+        Carga la oferta de paquete de un perfil. Solo escribe lo que recibe.
+
+        Un cero borra esa oferta: el perfil vuelve a costar lo que suman sus
+        pruebas. Es lo que espera quien vacia la casilla en la pantalla de
+        precios, y no existe un paquete que valga cero de verdad.
+
+        Devuelve (exito, mensaje).
+        """
+        self.asegurar_columnas_perfiles()
+        sets = []
+
+        for valor, columna, etiqueta in (
+                (precio, COL_PERFIL_BASE, 'ambulatorio'),
+                (precio_clinica, COL_PERFIL_CLINICA, 'de clinica'),
+                (precio_convenio, COL_PERFIL_CONVENIO, 'de convenio')):
+            if valor is None:
+                continue
+            try:
+                # Cuatro decimales, los mismos que las pruebas: el precio se
+                # teclea en pesos y se guarda en dolares.
+                v = round(float(valor), 4)
+            except (TypeError, ValueError):
+                return False, "El precio " + etiqueta + " no es un importe valido."
+            if v < 0:
+                return False, "El precio " + etiqueta + " no puede ser negativo."
+            sets.append(columna + "=" + ("NULL" if v == 0 else str(v)))
+
+        if not sets:
+            return False, "No se indico ningun precio."
+
+        try:
+            self.db.execute("UPDATE Perfiles SET " + ", ".join(sets)
+                            + " WHERE PerfilID=" + str(int(perfil_id)))
+            return True, "Oferta del perfil actualizada."
+        except Exception as e:
+            _log.error("No se pudo guardar la oferta del perfil %s: %s",
+                       perfil_id, e)
+            return False, "No se pudo guardar la oferta: " + str(e)
 
     def guardar_precios(self, prueba_id, precio=None, precio_clinica=None,
                         precio_convenio=None):
