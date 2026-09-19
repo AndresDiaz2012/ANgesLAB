@@ -405,7 +405,8 @@ def generar_pdf_gtt(db, detalle_id, filename, config_lab=None,
                         fh = 0.8 * inch
                         canvas.drawImage(ruta_abs, bx_bio - fw / 2, y_pos,
                                          width=fw, height=fh,
-                                         preserveAspectRatio=True, mask='auto')
+                                         preserveAspectRatio=True, mask='auto',
+                                         anchor='s')
                         y_pos -= 0.05 * inch
                     except Exception:
                         pass

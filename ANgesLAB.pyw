@@ -13042,7 +13042,10 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                 left_margin = 0.5 * inch
                 right_margin = 0.5 * inch
                 top_margin = 0.4 * inch
-                bottom_margin = 1.3 * inch if bioanalistas_por_area else 0.5 * inch
+                # Sin layout se usa la misma reserva que calcula este para
+                # carta: el bloque de firma llega a 1,84 pulgadas del borde,
+                # y con 1,3 la firma acabaria dentro de la tabla.
+                bottom_margin = 1.95 * inch if bioanalistas_por_area else 0.5 * inch
 
             # Preparar datos del paciente para el encabezado
             nombre_paciente = f"{sol.get('Nombres') or ''} {sol.get('Apellidos') or ''}".strip().upper() or 'N/A'
@@ -13300,8 +13303,12 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                         # Distribuir desde la derecha hacia la izquierda
                         bloque_x = _right_edge - (_ancho_bloque_firma * (num_bios - 1 - idx)) - _ancho_bloque_firma / 2
 
-                        # Posicionar encima del pie de página (línea separadora está a ~0.30")
-                        y_pos = 0.38*inch + 0.85*inch
+                        # Donde se apoya el bloque lo decide el layout, que
+                        # es el mismo que reserva el sitio en la pagina. Aqui
+                        # habia un 0.38+0.85 suelto que no cuadraba con esa
+                        # reserva, y la firma se metia dentro de la tabla.
+                        y_pos = (layout.firma_base_y if layout
+                                 else 0.38*inch + 0.85*inch)
 
                         # Dibujar imagen de firma si existe
                         ruta_firma = bio.get('RutaFirma', '')
@@ -13314,7 +13321,8 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                                         bloque_x - _firma_w/2,
                                         y_pos,
                                         width=_firma_w, height=_firma_h,
-                                        preserveAspectRatio=True, mask='auto'
+                                        preserveAspectRatio=True, mask='auto',
+                                        anchor='s'
                                     )
                                     y_pos -= 0.05*inch
                                 except Exception:

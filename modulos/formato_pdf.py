@@ -81,11 +81,15 @@ class LayoutCalculator:
             self.margin_left   = 0.25 * inch
             self.margin_right  = 0.25 * inch
             self.margin_top    = 0.2  * inch
+            # Con bioanalistas se recalcula en la seccion de firmas, a
+            # partir de lo que mide el bloque de verdad
             self.margin_bottom = 0.9 * inch if self._tiene_bio else 0.3 * inch
         else:
             self.margin_left   = 0.35 * inch
             self.margin_right  = 0.35 * inch
             self.margin_top    = 0.25 * inch
+            # Con bioanalistas se recalcula en la seccion de firmas, a
+            # partir de lo que mide el bloque de verdad
             self.margin_bottom = 1.1 * inch if self._tiene_bio else 0.35 * inch
 
         # Ancho de contenido disponible
@@ -197,16 +201,45 @@ class LayoutCalculator:
         self.gtt_grafica_height = 3.3 * inch if not self.es_media_carta else 2.2 * inch
 
         # ── Firmas / Footer ───────────────────────────────────────────
+        # El hueco de la firma es ALTO, no solo ancho. Una firma escaneada
+        # puede venir apaisada o vertical, y el informe la encaja dentro sin
+        # deformarla: si el hueco es bajo, una firma vertical tropieza con
+        # la altura y sale reducida a una mancha. Con 0,4 de alto, una firma
+        # vertical corriente salia a 0,22 pulgadas, el 15% del ancho de su
+        # propia linea de firma.
+        #
+        # La imagen se ancla abajo (anchor='s' al dibujarla), de modo que
+        # quede pegada a la linea sea cual sea su forma: una firma apaisada
+        # no se queda flotando en mitad del hueco.
         if self.es_media_carta:
-            self.firma_img_width  = 0.9 * inch
-            self.firma_img_height = 0.3 * inch
+            self.firma_img_width  = 1.1 * inch
+            self.firma_img_height = 0.65 * inch
             self.firma_linea_width = 1.1 * inch
             self.max_firmas = 2  # Máximo 2 firmas en media carta
         else:
-            self.firma_img_width  = 1.2 * inch
-            self.firma_img_height = 0.4 * inch
+            self.firma_img_width  = 1.5 * inch
+            self.firma_img_height = 1.15 * inch
             self.firma_linea_width = 1.5 * inch
             self.max_firmas = 3  # Máximo 3 firmas en formatos grandes
+
+        # Donde se apoya el bloque, medido desde el borde inferior.
+        #
+        # Debajo del texto de la firma solo tiene que quedar sitio para el
+        # pie de pagina (numero de orden, paciente, fecha), que va a 0,22.
+        # Antes el bloque arrancaba a 1,23 y dejaba 0,64 pulgadas vacias por
+        # debajo mientras se comia el area de resultados por arriba.
+        self.firma_pie_pagina = 0.32 * inch   # lo que ocupa el pie y su aire
+        # Tres lineas bajo la raya: nombre, titulo y registro
+        self.firma_texto_alto = (0.12 + 0.10 + 0.10) * inch
+        self.firma_linea_y = self.firma_pie_pagina + self.firma_texto_alto
+        self.firma_base_y = self.firma_linea_y + 0.05 * inch
+
+        # Lo que ocupa el bloque entero, de la ultima linea de texto al
+        # techo de la imagen. La reserva de pagina sale de aqui y no de un
+        # numero escrito aparte: asi no pueden contradecirse.
+        self.firma_bloque_alto = self.firma_base_y + self.firma_img_height
+        if self._tiene_bio:
+            self.margin_bottom = self.firma_bloque_alto + 0.10 * inch
 
         # ── Espaciadores ──────────────────────────────────────────────
         self.space_after_prueba = 0.08 * inch if not self.es_media_carta else 0.05 * inch
