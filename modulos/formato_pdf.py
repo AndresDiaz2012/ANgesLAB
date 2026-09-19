@@ -201,6 +201,20 @@ class LayoutCalculator:
         self.gtt_grafica_height = 3.3 * inch if not self.es_media_carta else 2.2 * inch
 
         # ── Firmas / Footer ───────────────────────────────────────────
+        # ALTURA DE LA FIRMA: es lo que le cuesta a la tabla.
+        #
+        # Con la firma montada sobre la linea, la reserva de pagina sale de
+        # firma_linea_y + alto - caida. Una fila de resultados mide 0,189
+        # pulgadas en carta y 0,166 en media carta (medido, no estimado:
+        # fuente de 8 y 7 puntos con 2 de relleno arriba y abajo), asi que
+        # cada 0,19 de firma es una fila menos de resultados. Estas medidas
+        # dejan la firma en algo mas de la mitad de su linea sin quitarle a
+        # la tabla mas de lo razonable.
+        #
+        # Ojo al subirlas: en una firma vertical el ancho lo manda la
+        # ALTURA, no firma_img_width. Ensanchar el hueco no la hace mas
+        # ancha; solo subir el alto, y eso se paga en filas.
+        #
         # El hueco de la firma es ALTO, no solo ancho. Una firma escaneada
         # puede venir apaisada o vertical, y el informe la encaja dentro sin
         # deformarla: si el hueco es bajo, una firma vertical tropieza con
@@ -213,12 +227,12 @@ class LayoutCalculator:
         # no se queda flotando en mitad del hueco.
         if self.es_media_carta:
             self.firma_img_width  = 1.1 * inch
-            self.firma_img_height = 1.10 * inch
+            self.firma_img_height = 0.75 * inch
             self.firma_linea_width = 1.1 * inch
             self.max_firmas = 2  # Máximo 2 firmas en media carta
         else:
             self.firma_img_width  = 1.5 * inch
-            self.firma_img_height = 1.80 * inch
+            self.firma_img_height = 1.40 * inch
             self.firma_linea_width = 1.5 * inch
             self.max_firmas = 3  # Máximo 3 firmas en formatos grandes
 
