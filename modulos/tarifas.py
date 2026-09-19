@@ -488,7 +488,15 @@ class GestorTarifas:
         for f in filas:
             f['_comision'] = comision(f)
             f['_pct_comision'] = porcentaje_comision(f)
-            f['_sin_convenio'] = _f(f.get(COL_CONVENIO)) <= 0
+            # Mismo criterio que el motor de cobro (ver precio_detalle): sin
+            # tarifar es NO TENER VALOR. Un cero puesto a proposito -la
+            # relacion PSA sale de dividir dos resultados ya cobrados- esta
+            # tarifado, y marcarlo como pendiente pondria en el documento que
+            # se entrega en la clinica que hay algo por acordar donde no lo
+            # hay.
+            cargado = _cargado(f, COL_CONVENIO)
+            f['_sin_convenio'] = cargado is None
+            f['_sin_coste'] = cargado == 0
         return filas
 
     def listar_perfiles(self, solo_activos=True):
@@ -554,6 +562,7 @@ class GestorTarifas:
 
             sin_conv = (any(_cargado(x, COL_CONVENIO) is None for x in pruebas)
                         if tiene else True)
+            sin_coste = convenio == 0 and not sin_conv
 
             fila = {
                 'PruebaID': None,
@@ -577,6 +586,7 @@ class GestorTarifas:
             fila['_pct_comision'] = (round(fila['_comision'] / clinica * 100, 1)
                                      if clinica else 0.0)
             fila['_sin_convenio'] = sin_conv
+            fila['_sin_coste'] = sin_coste
             filas.append(fila)
         return filas
 

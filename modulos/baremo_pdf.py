@@ -55,13 +55,24 @@ def _f(valor):
         return 0.0
 
 
-def _importe(valor):
-    """Un guion en vez de 0,00 cuando el precio no esta cargado."""
+# Lo que se escribe donde no hay importe. Son dos cosas distintas y el
+# documento tiene que decir cual: un guion es "falta por acordar" y da pie a
+# preguntar; "sin coste" es una prueba que se incluye a proposito, como la
+# relacion PSA, que sale de dividir dos resultados ya cobrados.
+SIN_CARGAR = '\u2014'
+SIN_COSTE = 'sin coste'
+
+
+def _importe(valor, sin_coste=False):
+    """Un guion cuando el precio no esta cargado; aviso si es gratis aposta."""
     v = _f(valor)
-    return '{:,.2f}'.format(v) if v > 0 else '—'
+    if v > 0:
+        return '{:,.2f}'.format(v)
+    return SIN_COSTE if sin_coste else SIN_CARGAR
 
 
-def _importe_doble(valor_usd, tasa_cop, estilo_cop, estilo_usd):
+def _importe_doble(valor_usd, tasa_cop, estilo_cop, estilo_usd,
+                   sin_coste=False):
     """
     El importe en las dos monedas: pesos arriba, dolares debajo.
 
@@ -74,7 +85,7 @@ def _importe_doble(valor_usd, tasa_cop, estilo_cop, estilo_usd):
 
     v = _f(valor_usd)
     if v <= 0:
-        return Paragraph('—', estilo_cop)
+        return Paragraph(SIN_COSTE if sin_coste else SIN_CARGAR, estilo_cop)
     if not tasa_cop:
         return Paragraph('${:,.2f}'.format(v), estilo_cop)
     return Paragraph(
@@ -240,10 +251,13 @@ def generar_baremo_pdf(ruta, filas, config_lab=None, usuario='',
             fila = [str(f.get('CodigoPrueba') or ''),
                     Paragraph(nombre, st_celda)]
 
-            def imp(valor):
+            _gratis = bool(f.get('_sin_coste'))
+
+            def imp(valor, sin_coste=_gratis):
                 if doble:
-                    return _importe_doble(valor, tasa_cop, st_imp, st_imp)
-                return _importe(valor)
+                    return _importe_doble(valor, tasa_cop, st_imp, st_imp,
+                                          sin_coste)
+                return _importe(valor, sin_coste)
 
             if incluir_ambulatorio:
                 fila.append(imp(f.get('Precio')))
