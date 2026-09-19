@@ -213,12 +213,12 @@ class LayoutCalculator:
         # no se queda flotando en mitad del hueco.
         if self.es_media_carta:
             self.firma_img_width  = 1.1 * inch
-            self.firma_img_height = 0.95 * inch
+            self.firma_img_height = 1.10 * inch
             self.firma_linea_width = 1.1 * inch
             self.max_firmas = 2  # Máximo 2 firmas en media carta
         else:
             self.firma_img_width  = 1.5 * inch
-            self.firma_img_height = 1.55 * inch
+            self.firma_img_height = 1.80 * inch
             self.firma_linea_width = 1.5 * inch
             self.max_firmas = 3  # Máximo 3 firmas en formatos grandes
 
@@ -246,10 +246,10 @@ class LayoutCalculator:
             from modulos.firma_pie import caida as _caida_firma
         except Exception:  # pragma: no cover
             def _caida_firma(alto, tope=None):
-                return min(alto * 0.40, 0.30 * inch)
+                return min(alto * 0.40, 0.32 * inch)
         # La firma no puede bajar tanto que tape el pie de pagina: como mucho
         # cruza el nombre y llega al titulo.
-        self.firma_caida_max = 0.30 * inch
+        self.firma_caida_max = 0.32 * inch
         self.firma_caida = _caida_firma(self.firma_img_height,
                                         self.firma_caida_max)
         self.firma_solape = self.firma_caida / self.firma_img_height

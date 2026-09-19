@@ -59,10 +59,12 @@ SOLAPE_LINEA = 0.40
 # la firma llegaria hasta el canto de la hoja tapando el numero de orden y
 # la fecha.
 #
-# Con 0,30 el trazo cruza el nombre y el titulo y alcanza el numero de
-# registro, que son las tres lineas del bloque. Por debajo de ahi ya no hay
-# datos de la firma sino el pie de pagina del informe, y ese no se toca.
-CAIDA_MAXIMA = 0.30 * 72.0  # puntos
+# Con 0,32 el trazo cruza las tres lineas del bloque -nombre, titulo y
+# numero de registro- y remata justo debajo. Por ahi anda el limite: a 0,34
+# la tinta empezaria a tocar el pie de pagina del informe, que va a 0,22 del
+# canto y lleva el numero de orden, el paciente y la fecha. Ese no se cruza:
+# es lo que permite identificar el informe.
+CAIDA_MAXIMA = 0.32 * 72.0  # puntos
 
 
 def encajar(ruta, ancho_max, alto_max):
