@@ -34,13 +34,27 @@ class TestElBloqueCabeEnSuReserva(unittest.TestCase):
     """
 
     def test_la_reserva_cubre_el_techo_del_bloque(self):
+        # La firma monta sobre la linea: parte de su altura queda por
+        # debajo, cruzando el nombre, y solo el resto sube. La reserva tiene
+        # que cubrir lo que sube.
         for papel in PAPELES:
             L = LayoutCalculator(papel, tiene_bioanalistas=True)
-            techo = L.firma_base_y + L.firma_img_height
+            techo = (L.firma_linea_y
+                     + L.firma_img_height * (1 - L.firma_solape))
             self.assertGreaterEqual(
                 L.margin_bottom, techo,
                 "%s: el bloque llega a %.2f y solo se reservan %.2f pulgadas"
                 % (papel, techo / inch, L.margin_bottom / inch))
+
+    def test_el_techo_declarado_es_el_real(self):
+        # firma_techo es lo que el layout promete; si se separa del calculo,
+        # la reserva vuelve a mentir
+        for papel in PAPELES:
+            L = LayoutCalculator(papel, tiene_bioanalistas=True)
+            self.assertAlmostEqual(
+                L.firma_techo,
+                L.firma_linea_y + L.firma_img_height * (1 - L.firma_solape),
+                delta=0.5, msg=papel)
 
     def test_el_texto_no_pisa_el_pie_de_pagina(self):
         # Bajo el texto de la firma va el numero de orden, el paciente y la
@@ -106,6 +120,49 @@ class TestUnaFirmaVerticalSeVe(unittest.TestCase):
             self.assertLessEqual(ancho_bloque * L.max_firmas, L.content_width,
                                  "%s: no caben %d firmas seguidas"
                                  % (papel, L.max_firmas))
+
+
+class TestLaFirmaMontaSobreLaLinea(unittest.TestCase):
+    """
+    Una firma de verdad arranca sobre la raya y baja cruzando el nombre.
+
+    Apoyada limpiamente encima delata que es una imagen pegada.
+    """
+
+    def test_parte_de_la_firma_queda_bajo_la_linea(self):
+        from modulos.firma_pie import SOLAPE_LINEA
+        self.assertGreater(SOLAPE_LINEA, 0.0)
+        self.assertLess(SOLAPE_LINEA, 1.0)
+
+    def test_la_firma_no_baja_tanto_que_tape_el_registro(self):
+        # Si bajara entera, en vez de cruzar el nombre lo borraria
+        from modulos.firma_pie import SOLAPE_LINEA
+        self.assertLessEqual(SOLAPE_LINEA, 0.5)
+
+    def test_el_solape_recupera_pagina(self):
+        # Montada sobre la linea, la firma sube menos que su altura, asi que
+        # cabe una firma mayor con la misma reserva
+        for papel in PAPELES:
+            L = LayoutCalculator(papel, tiene_bioanalistas=True)
+            sube = L.firma_img_height * (1 - L.firma_solape)
+            self.assertLess(sube, L.firma_img_height, papel)
+
+    def test_una_firma_apaisada_tambien_monta_sobre_la_linea(self):
+        # El solape se mide sobre lo que la firma ocupa de verdad, no sobre
+        # el hueco: con el hueco, una apaisada se hundiria entera.
+        from modulos.firma_pie import SOLAPE_LINEA
+        alto_hueco = 1.6 * inch
+        alto_real = 0.4 * inch          # una firma apaisada llena poco
+        y_linea = 0.64 * inch
+        y_real = y_linea - alto_real * SOLAPE_LINEA
+        y_con_hueco = y_linea - alto_hueco * SOLAPE_LINEA
+        self.assertGreater(y_real + alto_real, y_linea,
+                           "la firma tiene que asomar por encima de la raya")
+        self.assertLess(y_con_hueco + alto_hueco - y_linea,
+                        alto_hueco,  # control de cordura
+                        "")
+        self.assertLess(y_con_hueco, y_real,
+                        "usar el hueco la hundiria mas de la cuenta")
 
 
 if __name__ == '__main__':

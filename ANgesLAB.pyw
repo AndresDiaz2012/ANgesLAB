@@ -13303,45 +13303,46 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                         # Distribuir desde la derecha hacia la izquierda
                         bloque_x = _right_edge - (_ancho_bloque_firma * (num_bios - 1 - idx)) - _ancho_bloque_firma / 2
 
-                        # Donde se apoya el bloque lo decide el layout, que
-                        # es el mismo que reserva el sitio en la pagina. Aqui
-                        # habia un 0.38+0.85 suelto que no cuadraba con esa
-                        # reserva, y la firma se metia dentro de la tabla.
-                        y_pos = (layout.firma_base_y if layout
-                                 else 0.38*inch + 0.85*inch)
-
-                        # Dibujar imagen de firma si existe
-                        ruta_firma = bio.get('RutaFirma', '')
-                        if ruta_firma:
-                            ruta_abs_firma = os.path.join(base_dir, ruta_firma)
-                            if os.path.exists(ruta_abs_firma):
-                                try:
-                                    canvas.drawImage(
-                                        ruta_abs_firma,
-                                        bloque_x - _firma_w/2,
-                                        y_pos,
-                                        width=_firma_w, height=_firma_h,
-                                        preserveAspectRatio=True, mask='auto',
-                                        anchor='s'
-                                    )
-                                    y_pos -= 0.05*inch
-                                except Exception:
-                                    pass
-
-                        # Línea de firma
+                        # La linea guia, de donde arranca la firma. Su
+                        # altura la decide el layout, que es el mismo que
+                        # reserva el sitio en la pagina: antes habia aqui un
+                        # 0.38+0.85 suelto que no cuadraba con esa reserva.
+                        _y_linea = (layout.firma_linea_y if layout
+                                    else 0.64*inch)
                         canvas.setStrokeColor(colors.grey)
                         canvas.setLineWidth(0.5)
-                        canvas.line(bloque_x - _linea_w/2, y_pos, bloque_x + _linea_w/2, y_pos)
+                        canvas.line(bloque_x - _linea_w/2, _y_linea,
+                                    bloque_x + _linea_w/2, _y_linea)
 
                         # Nombre, titulo y registro. El QUE se escribe y en
                         # que orden vive en modulos/firma_pie.py, que es el
                         # mismo para los tres informes que llevan firma.
+                        y_pos = _y_linea
                         for _txt, _fuente, _clase in firma_pie.lineas_firma(bio):
                             y_pos -= 0.12*inch if _clase == 'nombre' else 0.1*inch
                             canvas.setFont(
                                 _fuente,
                                 _f_nombre if _clase == 'nombre' else _f_detalle)
                             canvas.drawCentredString(bloque_x, y_pos, _txt)
+
+                        # La firma va LA ULTIMA, encima del texto: se firma
+                        # sobre un papel ya impreso, no debajo. Y montada
+                        # sobre la linea, de modo que los trazos largos
+                        # cruzan el nombre, como una firma de verdad.
+                        ruta_firma = bio.get('RutaFirma', '')
+                        if ruta_firma:
+                            ruta_abs_firma = os.path.join(base_dir, ruta_firma)
+                            if os.path.exists(ruta_abs_firma):
+                                try:
+                                    _fw, _fh, _fy = firma_pie.posicion_firma(
+                                        ruta_abs_firma, _firma_w, _firma_h,
+                                        _y_linea)
+                                    canvas.drawImage(
+                                        ruta_abs_firma,
+                                        bloque_x - _fw/2, _fy,
+                                        width=_fw, height=_fh, mask='auto')
+                                except Exception:
+                                    pass
 
                 elif config_lab and config_lab.get('MostrarFirma'):
                     # Fallback: firma del Director (comportamiento original)
@@ -20977,29 +20978,13 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
                         bloque_x = start_x + (idx * ancho_bloque) + (ancho_bloque / 2)
                         y_pos = footer_y + 0.9*inch
 
-                        # Imagen de firma
-                        ruta_firma = bio.get('RutaFirma', '')
-                        if ruta_firma:
-                            ruta_abs_firma = os.path.join(base_dir, ruta_firma)
-                            if os.path.exists(ruta_abs_firma):
-                                try:
-                                    firma_w = 1.2*inch
-                                    firma_h = 0.4*inch
-                                    canvas_pdf.drawImage(
-                                        ruta_abs_firma,
-                                        bloque_x - firma_w/2, y_pos,
-                                        width=firma_w, height=firma_h,
-                                        preserveAspectRatio=True, mask='auto'
-                                    )
-                                    y_pos -= 0.05*inch
-                                except Exception:
-                                    pass
-
-                        # Línea
+                        # Línea guía, de donde arranca la firma
                         canvas_pdf.setStrokeColor(colors.grey)
                         canvas_pdf.setLineWidth(0.5)
                         linea_w = 1.5*inch
-                        canvas_pdf.line(bloque_x - linea_w/2, y_pos, bloque_x + linea_w/2, y_pos)
+                        canvas_pdf.line(bloque_x - linea_w/2, y_pos,
+                                        bloque_x + linea_w/2, y_pos)
+                        _y_linea = y_pos
 
                         # Ver modulos/firma_pie.py: mismo texto que el
                         # informe de resultados, para que una firma no diga
@@ -21008,6 +20993,22 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
                             y_pos -= 0.12*inch if _clase == 'nombre' else 0.1*inch
                             canvas_pdf.setFont(_fuente, 7 if _clase == 'nombre' else 6.5)
                             canvas_pdf.drawCentredString(bloque_x, y_pos, _txt)
+
+                        # La firma va la ultima, encima del texto y montada
+                        # sobre la linea: se firma sobre el papel impreso.
+                        ruta_firma = bio.get('RutaFirma', '')
+                        if ruta_firma:
+                            ruta_abs_firma = os.path.join(base_dir, ruta_firma)
+                            if os.path.exists(ruta_abs_firma):
+                                try:
+                                    _fw, _fh, _fy = firma_pie.posicion_firma(
+                                        ruta_abs_firma, 1.5*inch, 1.6*inch,
+                                        _y_linea)
+                                    canvas_pdf.drawImage(
+                                        ruta_abs_firma, bloque_x - _fw/2, _fy,
+                                        width=_fw, height=_fh, mask='auto')
+                                except Exception:
+                                    pass
 
                 elif config_lab and config_lab.get('MostrarFirma'):
                     # Fallback: firma del Director

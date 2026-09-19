@@ -45,6 +45,64 @@ FUENTE_REGISTRO = 'Helvetica'
 ETIQUETA_REGISTRO = 'N° '
 
 
+# Cuanto de la firma cae POR DEBAJO de la linea guia, en tanto por uno de
+# su altura.
+#
+# Una firma de verdad no se posa encima de la raya: se arranca sobre ella y
+# los trazos largos bajan y cruzan lo que haya escrito debajo. Dejarla
+# flotando limpia por encima delata que es una imagen pegada. Los trazos son
+# finos, asi que cruzan el nombre sin taparlo.
+SOLAPE_LINEA = 0.40
+
+# Pero con tope, porque el 40% de una firma alta es mucho en pulgadas: una
+# firma de 1,6 pulgadas caeria 0,64, y como la raya esta a 0,64 del borde,
+# la firma llegaria hasta el canto de la hoja tapando el numero de orden y
+# la fecha. El tope la deja cruzando el nombre y llegando al titulo, que es
+# hasta donde tiene sentido que baje.
+CAIDA_MAXIMA = 0.22 * 72.0  # puntos
+
+
+def encajar(ruta, ancho_max, alto_max):
+    """
+    El tamano con que se dibuja la firma dentro de su hueco, sin deformarla.
+
+    Se calcula aqui en vez de dejarselo a preserveAspectRatio porque hace
+    falta saber el tamano REAL para colocarla: el solape se mide sobre lo
+    que la firma ocupa, no sobre el hueco. Una firma apaisada apenas llena
+    un tercio de la altura del hueco, y usar la del hueco la hundiria entera
+    por debajo de la linea.
+
+    Devuelve (ancho, alto). Si no se puede leer la imagen, devuelve el hueco
+    entero, que es lo que se hacia antes.
+    """
+    try:
+        from reportlab.lib.utils import ImageReader
+        w, h = ImageReader(ruta).getSize()
+    except Exception:
+        return ancho_max, alto_max
+    if not w or not h:
+        return ancho_max, alto_max
+    escala = min(ancho_max / float(w), alto_max / float(h))
+    return w * escala, h * escala
+
+
+def caida(alto, caida_maxima=None):
+    """Cuanto baja la firma por debajo de la raya, en puntos."""
+    tope = CAIDA_MAXIMA if caida_maxima is None else caida_maxima
+    return min(alto * SOLAPE_LINEA, tope)
+
+
+def posicion_firma(ruta, ancho_max, alto_max, y_linea, caida_maxima=None):
+    """
+    Donde y de que tamano se dibuja la firma para que monte sobre la linea.
+
+    Devuelve (ancho, alto, y), con y medido desde el borde inferior de la
+    pagina hasta la base de la imagen.
+    """
+    ancho, alto = encajar(ruta, ancho_max, alto_max)
+    return ancho, alto, y_linea - caida(alto, caida_maxima)
+
+
 def _texto(valor):
     return str(valor).strip() if valor is not None else ''
 

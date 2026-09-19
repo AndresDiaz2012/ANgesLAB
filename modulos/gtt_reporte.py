@@ -392,30 +392,15 @@ def generar_pdf_gtt(db, detalle_id, filename, config_lab=None,
 
         if bioanalista:
             bx_bio = page_w / 2
-            y_pos = 0.38 * inch + 0.85 * inch
-
-            # Firma imagen
+            y_pos = 0.64 * inch
             ruta_firma = bioanalista.get('RutaFirma', '')
-            if ruta_firma:
-                base_dir = os.path.dirname(os.path.abspath(__file__))
-                ruta_abs = os.path.join(base_dir, '..', ruta_firma)
-                if os.path.exists(ruta_abs):
-                    try:
-                        fw = 2.2 * inch
-                        fh = 0.8 * inch
-                        canvas.drawImage(ruta_abs, bx_bio - fw / 2, y_pos,
-                                         width=fw, height=fh,
-                                         preserveAspectRatio=True, mask='auto',
-                                         anchor='s')
-                        y_pos -= 0.05 * inch
-                    except Exception:
-                        pass
 
-            # Línea de firma
+            # Línea de firma, de donde arranca el trazo
             canvas.setStrokeColor(colors.grey)
             canvas.setLineWidth(0.5)
             lw = 1.5 * inch
             canvas.line(bx_bio - lw / 2, y_pos, bx_bio + lw / 2, y_pos)
+            y_linea = y_pos
             y_pos -= 0.12 * inch
 
             # Mismo texto que el informe de resultados: ver
@@ -426,6 +411,20 @@ def generar_pdf_gtt(db, detalle_id, filename, config_lab=None,
                 canvas.setFont(_fuente, 7 if _clase == 'nombre' else 6.5)
                 canvas.drawCentredString(bx_bio, y_pos, _txt)
                 y_pos -= 0.11 * inch if _clase == 'nombre' else 0.1 * inch
+
+            # La firma va la ultima, sobre el texto y montada en la linea:
+            # se firma encima de un papel ya impreso. Ver firma_pie.py.
+            if ruta_firma:
+                base_dir = os.path.dirname(os.path.abspath(__file__))
+                ruta_abs = os.path.join(base_dir, '..', ruta_firma)
+                if os.path.exists(ruta_abs):
+                    try:
+                        _fw, _fh, _fy = firma_pie.posicion_firma(
+                            ruta_abs, 1.5 * inch, 1.6 * inch, y_linea)
+                        canvas.drawImage(ruta_abs, bx_bio - _fw / 2, _fy,
+                                         width=_fw, height=_fh, mask='auto')
+                    except Exception:
+                        pass
 
         # ── PIE DE PÁGINA (misma línea que el reporte general) ──
         _pie_y = 0.22 * inch

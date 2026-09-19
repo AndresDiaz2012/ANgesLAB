@@ -213,12 +213,12 @@ class LayoutCalculator:
         # no se queda flotando en mitad del hueco.
         if self.es_media_carta:
             self.firma_img_width  = 1.1 * inch
-            self.firma_img_height = 0.65 * inch
+            self.firma_img_height = 0.85 * inch
             self.firma_linea_width = 1.1 * inch
             self.max_firmas = 2  # Máximo 2 firmas en media carta
         else:
             self.firma_img_width  = 1.5 * inch
-            self.firma_img_height = 1.15 * inch
+            self.firma_img_height = 1.35 * inch
             self.firma_linea_width = 1.5 * inch
             self.max_firmas = 3  # Máximo 3 firmas en formatos grandes
 
@@ -237,9 +237,27 @@ class LayoutCalculator:
         # Lo que ocupa el bloque entero, de la ultima linea de texto al
         # techo de la imagen. La reserva de pagina sale de aqui y no de un
         # numero escrito aparte: asi no pueden contradecirse.
-        self.firma_bloque_alto = self.firma_base_y + self.firma_img_height
+        #
+        # La firma monta sobre la linea guia: una parte de su altura queda
+        # POR DEBAJO, cruzando el nombre, y solo el resto sube. Por eso la
+        # reserva cuenta la fraccion que sobresale y no la altura entera, y
+        # por eso se pudo agrandar la firma sin gastar mas pagina.
+        try:
+            from modulos.firma_pie import caida as _caida_firma
+        except Exception:  # pragma: no cover
+            def _caida_firma(alto, tope=None):
+                return min(alto * 0.40, 0.22 * inch)
+        # La firma no puede bajar tanto que tape el pie de pagina: como mucho
+        # cruza el nombre y llega al titulo.
+        self.firma_caida_max = 0.22 * inch
+        self.firma_caida = _caida_firma(self.firma_img_height,
+                                        self.firma_caida_max)
+        self.firma_solape = self.firma_caida / self.firma_img_height
+        self.firma_techo = (self.firma_linea_y + self.firma_img_height
+                            - self.firma_caida)
+        self.firma_bloque_alto = self.firma_techo
         if self._tiene_bio:
-            self.margin_bottom = self.firma_bloque_alto + 0.10 * inch
+            self.margin_bottom = self.firma_techo + 0.10 * inch
 
         # ── Espaciadores ──────────────────────────────────────────────
         self.space_after_prueba = 0.08 * inch if not self.es_media_carta else 0.05 * inch
