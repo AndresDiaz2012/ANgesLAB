@@ -185,6 +185,7 @@ except ImportError:
 
 # Procedencia: decide si la solicitud se cobra de contado o al seguro
 try:
+    from modulos import firma_pie
     from modulos import procedencia as procedencia_cobro
     PROCEDENCIA_DISPONIBLE = True
 except ImportError:
@@ -2317,6 +2318,16 @@ class MainApplication:
             except Exception as e:
                 CXC_TIENE_PROCEDENCIA = False
                 _log.warning("No se pudo crear CuentasPorCobrar.TipoProcedencia: %s", e)
+
+        # Bioanalistas.TituloProfesional: lo que va bajo el nombre en el pie
+        # del informe. Es CRITICA: las consultas del pie ya la piden, y sin
+        # ella la lectura falla y el informe sale sin ninguna firma.
+        try:
+            if not firma_pie.asegurar_columna_titulo(db):
+                _log.warning("No se pudo crear Bioanalistas.TituloProfesional: "
+                             "el pie de firma usara el area")
+        except Exception as e:
+            _log.warning("Bioanalistas.TituloProfesional: %s", e)
 
         # Perfiles.PrecioPerfil y companeras: la oferta de paquete. Quedan en
         # NULL, que significa "sin oferta", asi que hasta que alguien cargue
@@ -12944,7 +12955,7 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                     areas_str = ','.join(str(a) for a in areas_ids)
                     # Buscar bioanalistas de las áreas de la solicitud
                     bios = db.query(
-                        f"SELECT b.BioanalistaID, b.NombreCompleto, b.Cedula, b.NumeroRegistro, "
+                        f"SELECT b.BioanalistaID, b.NombreCompleto, b.Cedula, b.NumeroRegistro, b.TituloProfesional, "
                         f"b.AreaID, b.RutaFirma, a.NombreArea "
                         f"FROM Bioanalistas b LEFT JOIN Areas a ON b.AreaID = a.AreaID "
                         f"WHERE b.AreaID IN ({areas_str}) AND b.Activo = True"
@@ -12956,7 +12967,7 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                 # buscar cualquier bioanalista activo (incluye AreaID=29 "General")
                 if not bioanalistas_por_area:
                     bios_todos = db.query(
-                        "SELECT b.BioanalistaID, b.NombreCompleto, b.Cedula, b.NumeroRegistro, "
+                        "SELECT b.BioanalistaID, b.NombreCompleto, b.Cedula, b.NumeroRegistro, b.TituloProfesional, "
                         "b.AreaID, b.RutaFirma, a.NombreArea "
                         "FROM Bioanalistas b LEFT JOIN Areas a ON b.AreaID = a.AreaID "
                         "WHERE b.Activo = True"
@@ -13314,28 +13325,15 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                         canvas.setLineWidth(0.5)
                         canvas.line(bloque_x - _linea_w/2, y_pos, bloque_x + _linea_w/2, y_pos)
 
-                        # Nombre del bioanalista
-                        y_pos -= 0.12*inch
-                        canvas.setFont('Helvetica-Bold', _f_nombre)
-                        canvas.drawCentredString(bloque_x, y_pos, bio.get('NombreCompleto', ''))
-
-                        # Cédula
-                        y_pos -= 0.11*inch
-                        canvas.setFont('Helvetica', _f_detalle)
-                        canvas.drawCentredString(bloque_x, y_pos, f"C.I.: {bio.get('Cedula', '')}")
-
-                        # Número de registro
-                        y_pos -= 0.1*inch
-                        canvas.drawCentredString(bloque_x, y_pos, f"Reg.: {bio.get('NumeroRegistro', '')}")
-
-                        # Título profesional / Área
-                        y_pos -= 0.1*inch
-                        canvas.setFont('Helvetica-Oblique', _f_area)
-                        area_nombre = bio.get('NombreArea', '')
-                        if area_nombre and area_nombre.lower() != 'general':
-                            canvas.drawCentredString(bloque_x, y_pos, f"Bioanalista - {area_nombre}")
-                        else:
-                            canvas.drawCentredString(bloque_x, y_pos, "Bioanalista")
+                        # Nombre, titulo y registro. El QUE se escribe y en
+                        # que orden vive en modulos/firma_pie.py, que es el
+                        # mismo para los tres informes que llevan firma.
+                        for _txt, _fuente, _clase in firma_pie.lineas_firma(bio):
+                            y_pos -= 0.12*inch if _clase == 'nombre' else 0.1*inch
+                            canvas.setFont(
+                                _fuente,
+                                _f_nombre if _clase == 'nombre' else _f_detalle)
+                            canvas.drawCentredString(bloque_x, y_pos, _txt)
 
                 elif config_lab and config_lab.get('MostrarFirma'):
                     # Fallback: firma del Director (comportamiento original)
@@ -20945,7 +20943,7 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
             bioanalistas_vet = []
             try:
                 bioanalistas_vet = db.query(
-                    "SELECT b.BioanalistaID, b.NombreCompleto, b.Cedula, b.NumeroRegistro, "
+                    "SELECT b.BioanalistaID, b.NombreCompleto, b.Cedula, b.NumeroRegistro, b.TituloProfesional, "
                     "b.RutaFirma, a.NombreArea "
                     "FROM Bioanalistas b LEFT JOIN Areas a ON b.AreaID = a.AreaID "
                     "WHERE b.Activo = True ORDER BY b.NombreCompleto"
@@ -20995,20 +20993,13 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
                         linea_w = 1.5*inch
                         canvas_pdf.line(bloque_x - linea_w/2, y_pos, bloque_x + linea_w/2, y_pos)
 
-                        y_pos -= 0.12*inch
-                        canvas_pdf.setFont('Helvetica-Bold', 7)
-                        canvas_pdf.drawCentredString(bloque_x, y_pos, bio.get('NombreCompleto', ''))
-
-                        y_pos -= 0.11*inch
-                        canvas_pdf.setFont('Helvetica', 6.5)
-                        canvas_pdf.drawCentredString(bloque_x, y_pos, f"C.I.: {bio.get('Cedula', '')}")
-
-                        y_pos -= 0.1*inch
-                        canvas_pdf.drawCentredString(bloque_x, y_pos, f"Reg.: {bio.get('NumeroRegistro', '')}")
-
-                        y_pos -= 0.1*inch
-                        canvas_pdf.setFont('Helvetica-Oblique', 6)
-                        canvas_pdf.drawCentredString(bloque_x, y_pos, "Bioanalista")
+                        # Ver modulos/firma_pie.py: mismo texto que el
+                        # informe de resultados, para que una firma no diga
+                        # una cosa en un papel y otra en otro.
+                        for _txt, _fuente, _clase in firma_pie.lineas_firma(bio):
+                            y_pos -= 0.12*inch if _clase == 'nombre' else 0.1*inch
+                            canvas_pdf.setFont(_fuente, 7 if _clase == 'nombre' else 6.5)
+                            canvas_pdf.drawCentredString(bloque_x, y_pos, _txt)
 
                 elif config_lab and config_lab.get('MostrarFirma'):
                     # Fallback: firma del Director

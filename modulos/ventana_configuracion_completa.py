@@ -3411,6 +3411,9 @@ class VentanaConfiguracionCompleta:
                 'NombreCompleto': 'TEXT(200)',
                 'Cedula': 'TEXT(20)',
                 'NumeroRegistro': 'TEXT(50)',
+                # Lo que se imprime bajo el nombre en el pie del informe
+                # (p.ej. "LCDO. BIOANALISIS"). Vacio, se usa el area.
+                'TituloProfesional': 'TEXT(100)',
                 'AreaID': 'LONG',
                 'RutaFirma': 'TEXT(255)',
                 'Activo': 'BIT',
@@ -3462,7 +3465,7 @@ class VentanaConfiguracionCompleta:
         try:
             bioanalistas = self.db.query(
                 "SELECT b.BioanalistaID, b.NombreCompleto, b.Cedula, b.NumeroRegistro, "
-                "b.AreaID, b.RutaFirma, b.Activo, a.NombreArea "
+                "b.TituloProfesional, b.AreaID, b.RutaFirma, b.Activo, a.NombreArea "
                 "FROM Bioanalistas b LEFT JOIN Areas a ON b.AreaID = a.AreaID "
                 "ORDER BY b.NombreCompleto"
             )
@@ -3628,10 +3631,21 @@ class VentanaConfiguracionCompleta:
         if area_names:
             combo_area.current(0)
 
+        # Título profesional
+        ttk.Label(campos_frame, text="Título profesional:",
+                  font=('Segoe UI', 10, 'bold')).grid(
+            row=4, column=0, sticky='w', pady=5)
+        entry_titulo = ttk.Entry(campos_frame, width=40)
+        entry_titulo.grid(row=4, column=1, pady=5, padx=(10, 0), sticky='ew')
+        ttk.Label(campos_frame, text="Lo que se imprime bajo el nombre en el informe, p. ej. «LCDO. BIOANÁLISIS». Si se deja vacío se usa el área.",
+                  font=('Segoe UI', 8), foreground='#64748b',
+                  wraplength=360, justify='left').grid(
+            row=5, column=1, sticky='w', padx=(10, 0))
+
         # Activo
         var_activo = tk.BooleanVar(value=True)
         ttk.Checkbutton(campos_frame, text="Activo", variable=var_activo).grid(
-            row=4, column=0, columnspan=2, sticky='w', pady=5)
+            row=6, column=0, columnspan=2, sticky='w', pady=5)
 
         campos_frame.columnconfigure(1, weight=1)
 
@@ -3686,6 +3700,7 @@ class VentanaConfiguracionCompleta:
             nombre = entry_nombre.get().strip()
             cedula = entry_cedula.get().strip()
             registro = entry_registro.get().strip()
+            titulo_prof = entry_titulo.get().strip()
             area_sel = combo_area.get()
             activo = var_activo.get()
 
@@ -3744,6 +3759,7 @@ class VentanaConfiguracionCompleta:
                 'NombreCompleto': nombre,
                 'Cedula': cedula,
                 'NumeroRegistro': registro,
+                'TituloProfesional': titulo_prof,
                 'AreaID': area_id,
                 'RutaFirma': ruta_firma_rel,
                 'Activo': activo
@@ -3862,10 +3878,22 @@ class VentanaConfiguracionCompleta:
                 combo_area.set(nombre_area)
                 break
 
+        # Título profesional
+        ttk.Label(campos_frame, text="Título profesional:",
+                  font=('Segoe UI', 10, 'bold')).grid(
+            row=4, column=0, sticky='w', pady=5)
+        entry_titulo = ttk.Entry(campos_frame, width=40)
+        entry_titulo.grid(row=4, column=1, pady=5, padx=(10, 0), sticky='ew')
+        entry_titulo.insert(0, bio.get('TituloProfesional') or '')
+        ttk.Label(campos_frame, text="Lo que se imprime bajo el nombre en el informe, p. ej. «LCDO. BIOANÁLISIS». Si se deja vacío se usa el área.",
+                  font=('Segoe UI', 8), foreground='#64748b',
+                  wraplength=360, justify='left').grid(
+            row=5, column=1, sticky='w', padx=(10, 0))
+
         # Activo
         var_activo = tk.BooleanVar(value=bool(bio.get('Activo', True)))
         ttk.Checkbutton(campos_frame, text="Activo", variable=var_activo).grid(
-            row=4, column=0, columnspan=2, sticky='w', pady=5)
+            row=6, column=0, columnspan=2, sticky='w', pady=5)
 
         campos_frame.columnconfigure(1, weight=1)
 
@@ -3946,6 +3974,7 @@ class VentanaConfiguracionCompleta:
             nombre = entry_nombre.get().strip()
             cedula = entry_cedula.get().strip()
             registro = entry_registro.get().strip()
+            titulo_prof = entry_titulo.get().strip()
             area_sel = combo_area.get()
             activo = var_activo.get()
 
@@ -3993,6 +4022,7 @@ class VentanaConfiguracionCompleta:
                     f"NombreCompleto={self.db.escape(nombre)}, "
                     f"Cedula={self.db.escape(cedula)}, "
                     f"NumeroRegistro={self.db.escape(registro)}, "
+                    f"TituloProfesional={self.db.escape(titulo_prof)}, "
                     f"AreaID={area_id}, "
                     f"RutaFirma={self.db.escape(ruta_firma_rel)}, "
                     f"Activo={activo} "

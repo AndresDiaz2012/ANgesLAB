@@ -22,6 +22,12 @@ import io
 import tempfile
 from datetime import datetime
 
+try:
+    from modulos import firma_pie
+except Exception:  # pragma: no cover
+    import firma_pie
+
+
 # Reportlab
 try:
     from reportlab.lib import colors
@@ -411,16 +417,14 @@ def generar_pdf_gtt(db, detalle_id, filename, config_lab=None,
             canvas.line(bx_bio - lw / 2, y_pos, bx_bio + lw / 2, y_pos)
             y_pos -= 0.12 * inch
 
-            canvas.setFont('Helvetica-Bold', 7)
-            canvas.drawCentredString(bx_bio, y_pos, bioanalista.get('NombreCompleto', ''))
-            y_pos -= 0.11 * inch
-            canvas.setFont('Helvetica', 6.5)
-            canvas.drawCentredString(bx_bio, y_pos, f"C.I.: {bioanalista.get('Cedula', '')}")
-            y_pos -= 0.1 * inch
-            canvas.drawCentredString(bx_bio, y_pos, f"Reg.: {bioanalista.get('NumeroRegistro', '')}")
-            y_pos -= 0.09 * inch
-            canvas.setFont('Helvetica-Oblique', 6)
-            canvas.drawCentredString(bx_bio, y_pos, "Bioanalista - Área Química")
+            # Mismo texto que el informe de resultados: ver
+            # modulos/firma_pie.py. Antes ponia "Bioanalista - Área Química"
+            # a fuego, de modo que este reporte atribuia al firmante un area
+            # que podia no ser la suya.
+            for _txt, _fuente, _clase in firma_pie.lineas_firma(bioanalista):
+                canvas.setFont(_fuente, 7 if _clase == 'nombre' else 6.5)
+                canvas.drawCentredString(bx_bio, y_pos, _txt)
+                y_pos -= 0.11 * inch if _clase == 'nombre' else 0.1 * inch
 
         # ── PIE DE PÁGINA (misma línea que el reporte general) ──
         _pie_y = 0.22 * inch

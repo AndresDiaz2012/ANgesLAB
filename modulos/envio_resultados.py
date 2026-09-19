@@ -5,6 +5,11 @@ Genera PDF de resultados y permite enviarlos por WhatsApp o Email
 """
 
 import os
+
+try:
+    from modulos import firma_pie
+except Exception:  # pragma: no cover
+    import firma_pie
 import tempfile
 import webbrowser
 import smtplib
@@ -365,6 +370,7 @@ class GeneradorPDF:
                     areas_str = ','.join(areas_ids)
                     bioanalistas_firma = self.db.query(
                         f"SELECT b.NombreCompleto, b.Cedula, b.NumeroRegistro, "
+                        f"b.TituloProfesional, "
                         f"b.RutaFirma, a.NombreArea "
                         f"FROM Bioanalistas b LEFT JOIN Areas a ON b.AreaID = a.AreaID "
                         f"WHERE b.AreaID IN ({areas_str}) AND b.Activo = True "
@@ -409,11 +415,14 @@ class GeneradorPDF:
                 if firma_img_elem:
                     bloque_data.append([firma_img_elem])
                 bloque_data.append([Paragraph('_' * 40, sig_style)])
-                bloque_data.append([Paragraph(f'<b>{nombre}</b>', sig_name)])
-                bloque_data.append([Paragraph(f'C.I.: {cedula}', sig_detail)])
-                bloque_data.append([Paragraph(f'Reg.: {registro}', sig_detail)])
-                if area:
-                    bloque_data.append([Paragraph(f'Bioanalista - {area}', sig_detail)])
+                # Mismo texto que el informe impreso: ver
+                # modulos/firma_pie.py. El resultado que se envia por correo
+                # y el que se entrega en mano tienen que firmar igual.
+                for _txt, _fuente, _clase in firma_pie.lineas_firma(bio):
+                    if _clase == 'nombre':
+                        bloque_data.append([Paragraph('<b>%s</b>' % _txt, sig_name)])
+                    else:
+                        bloque_data.append([Paragraph(_txt, sig_detail)])
 
                 bloque = Table(bloque_data, colWidths=[5.0 * cm],
                                style=[
