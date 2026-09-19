@@ -81,15 +81,15 @@ class LayoutCalculator:
             self.margin_left   = 0.25 * inch
             self.margin_right  = 0.25 * inch
             self.margin_top    = 0.2  * inch
-            # Con bioanalistas se recalcula en la seccion de firmas, a
-            # partir de lo que mide el bloque de verdad
+            # El margen configurado de siempre. La seccion de firmas solo
+            # lo sube si no diera ni para el texto del bloque.
             self.margin_bottom = 0.9 * inch if self._tiene_bio else 0.3 * inch
         else:
             self.margin_left   = 0.35 * inch
             self.margin_right  = 0.35 * inch
             self.margin_top    = 0.25 * inch
-            # Con bioanalistas se recalcula en la seccion de firmas, a
-            # partir de lo que mide el bloque de verdad
+            # El margen configurado de siempre. La seccion de firmas solo
+            # lo sube si no diera ni para el texto del bloque.
             self.margin_bottom = 1.1 * inch if self._tiene_bio else 0.35 * inch
 
         # Ancho de contenido disponible
@@ -248,14 +248,22 @@ class LayoutCalculator:
         self.firma_linea_y = self.firma_pie_pagina + self.firma_texto_alto
         self.firma_base_y = self.firma_linea_y + 0.05 * inch
 
-        # Lo que ocupa el bloque entero, de la ultima linea de texto al
-        # techo de la imagen. La reserva de pagina sale de aqui y no de un
-        # numero escrito aparte: asi no pueden contradecirse.
+        # LA FIRMA NO LE QUITA SITIO A LOS RESULTADOS.
         #
-        # La firma monta sobre la linea guia: una parte de su altura queda
-        # POR DEBAJO, cruzando el nombre, y solo el resto sube. Por eso la
-        # reserva cuenta la fraccion que sobresale y no la altura entera, y
-        # por eso se pudo agrandar la firma sin gastar mas pagina.
+        # La reserva de pagina cubre el TEXTO del bloque -nombre, titulo y
+        # registro-, que es lo que no se puede tapar nunca. La IMAGEN de la
+        # firma se dibuja por encima de la tabla si hace falta, igual que
+        # una firma de puno y letra se pone sobre un papel ya impreso.
+        #
+        # Es una decision, no un descuido: el informe reporta los resultados
+        # que reporta, y la firma no puede ser el motivo de que uno se vaya a
+        # la pagina siguiente. La contrapartida es que en una hoja llena
+        # hasta abajo el trazo cruza las ultimas filas. Son lineas finas
+        # sobre fondo transparente, asi que el valor se sigue leyendo, pero
+        # conviene saberlo.
+        #
+        # firma_techo queda calculado para quien quiera volver a reservar el
+        # hueco: basta con asignarselo a margin_bottom.
         try:
             from modulos.firma_pie import caida as _caida_firma
         except Exception:  # pragma: no cover
@@ -270,8 +278,14 @@ class LayoutCalculator:
         self.firma_techo = (self.firma_linea_y + self.firma_img_height
                             - self.firma_caida)
         self.firma_bloque_alto = self.firma_techo
+
+        # Lo unico que se reserva es el texto del bloque, con su aire. El
+        # margen de la pagina se queda como estaba configurado si ya daba
+        # para tanto, que es lo normal.
+        self.firma_texto_reserva = self.firma_linea_y + 0.10 * inch
         if self._tiene_bio:
-            self.margin_bottom = self.firma_techo + 0.10 * inch
+            self.margin_bottom = max(self.margin_bottom,
+                                     self.firma_texto_reserva)
 
         # ── Espaciadores ──────────────────────────────────────────────
         self.space_after_prueba = 0.08 * inch if not self.es_media_carta else 0.05 * inch

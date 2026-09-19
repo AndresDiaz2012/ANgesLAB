@@ -33,18 +33,37 @@ class TestElBloqueCabeEnSuReserva(unittest.TestCase):
     borde y la pagina solo reservaba 1,1.
     """
 
-    def test_la_reserva_cubre_el_techo_del_bloque(self):
-        # La firma monta sobre la linea: parte de su altura queda por
-        # debajo, cruzando el nombre, y solo el resto sube. La reserva tiene
-        # que cubrir lo que sube.
+    def test_la_reserva_cubre_el_texto_del_bloque(self):
+        # El texto -nombre, titulo y registro- no se puede tapar nunca: es
+        # quien firma. La IMAGEN si puede montar sobre la tabla, que es la
+        # decision tomada para que la firma no le quite filas al informe.
         for papel in PAPELES:
             L = LayoutCalculator(papel, tiene_bioanalistas=True)
-            techo = (L.firma_linea_y
-                     + L.firma_img_height * (1 - L.firma_solape))
             self.assertGreaterEqual(
-                L.margin_bottom, techo,
-                "%s: el bloque llega a %.2f y solo se reservan %.2f pulgadas"
-                % (papel, techo / inch, L.margin_bottom / inch))
+                L.margin_bottom, L.firma_texto_reserva,
+                "%s: el texto de la firma necesita %.2f y se reservan %.2f"
+                % (papel, L.firma_texto_reserva / inch, L.margin_bottom / inch))
+
+    def test_la_firma_no_le_quita_pagina_a_los_resultados(self):
+        # El margen con firma tiene que ser el que estaba configurado, no
+        # uno inflado para hacerle sitio a la imagen.
+        CONFIGURADO = {'Carta': 1.1 * inch, 'Media Carta': 0.9 * inch}
+        for papel in PAPELES:
+            L = LayoutCalculator(papel, tiene_bioanalistas=True)
+            self.assertAlmostEqual(
+                L.margin_bottom, CONFIGURADO[papel], delta=0.5,
+                msg="%s: la firma esta robandole %.2f pulgadas a la tabla"
+                % (papel, (L.margin_bottom - CONFIGURADO[papel]) / inch))
+
+    def test_agrandar_la_firma_no_encoge_la_tabla(self):
+        # La altura util no puede depender de lo grande que sea la firma
+        for papel in PAPELES:
+            L = LayoutCalculator(papel, tiene_bioanalistas=True)
+            util = L.get_content_frame_height()
+            L.firma_img_height *= 2
+            L._calcular_dimensiones()
+            self.assertAlmostEqual(L.get_content_frame_height(), util,
+                                   delta=0.5, msg=papel)
 
     def test_el_techo_declarado_es_el_real(self):
         # firma_techo es lo que el layout promete; si se separa del calculo,
