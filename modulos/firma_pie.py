@@ -57,9 +57,12 @@ SOLAPE_LINEA = 0.40
 # Pero con tope, porque el 40% de una firma alta es mucho en pulgadas: una
 # firma de 1,6 pulgadas caeria 0,64, y como la raya esta a 0,64 del borde,
 # la firma llegaria hasta el canto de la hoja tapando el numero de orden y
-# la fecha. El tope la deja cruzando el nombre y llegando al titulo, que es
-# hasta donde tiene sentido que baje.
-CAIDA_MAXIMA = 0.22 * 72.0  # puntos
+# la fecha.
+#
+# Con 0,30 el trazo cruza el nombre y el titulo y alcanza el numero de
+# registro, que son las tres lineas del bloque. Por debajo de ahi ya no hay
+# datos de la firma sino el pie de pagina del informe, y ese no se toca.
+CAIDA_MAXIMA = 0.30 * 72.0  # puntos
 
 
 def encajar(ruta, ancho_max, alto_max):
