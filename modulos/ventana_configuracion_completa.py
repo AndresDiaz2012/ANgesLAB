@@ -1688,6 +1688,7 @@ class VentanaConfiguracionCompleta:
 
         try:
             from modulos.tarifas import (COL_CLINICA, COL_CONVENIO,
+                                         DESCUENTO_CONVENIO as _DESCUENTO_CONVENIO,
                                          crear_gestor_tarifas)
         except ImportError:
             messagebox.showerror("No disponible",
@@ -1703,7 +1704,7 @@ class VentanaConfiguracionCompleta:
             return
 
         dlg = tk.Toplevel(self.win)
-        dlg.title("Tarifas de convenio")
+        dlg.title("Precio de la prueba")
         dlg.configure(bg='white')
         dlg.grab_set()
         # Redimensionable: el alto depende de cuantas monedas haya con tasa
@@ -1714,7 +1715,7 @@ class VentanaConfiguracionCompleta:
         y = (dlg.winfo_screenheight() - alto) // 2
         dlg.geometry(f"{ancho}x{alto}+{x}+{y}")
 
-        tk.Label(dlg, text="🤝 Tarifas de convenio", font=('Segoe UI', 13, 'bold'),
+        tk.Label(dlg, text="💵 Precio de la prueba", font=('Segoe UI', 13, 'bold'),
                  bg='#0891b2', fg='white', pady=12).pack(fill='x')
 
         # La barra de botones se reserva su sitio ANTES que el contenido: en
@@ -1802,16 +1803,16 @@ class VentanaConfiguracionCompleta:
             campos_tarifa.append((e, eq, float(valor or 0)))
             return e
 
-        e_base = campo("Precio ambulatorio",
-                       "Lo paga el paciente que viene por su cuenta. Entra a la caja.",
+        # UN precio. El convenio sale de el y se muestra debajo, calculado,
+        # en vez de pedirse: si fueran dos casillas, un dia alguien
+        # escribiria un convenio que no es el 20% y el baremo diria una cosa
+        # mientras la caja cobra otra.
+        e_base = campo("Precio de la prueba",
+                       "El mismo para todo el mundo, venga el paciente de la "
+                       "calle o de la clínica.",
                        prueba.get('Precio'))
-        e_clinica = campo("Precio que la clínica cobra al paciente",
-                          "Informativo: ese dinero lo cobra la clínica, no el laboratorio.",
-                          prueba.get(COL_CLINICA))
-        e_convenio = campo("Precio que la clínica nos paga",
-                           "Lo que percibe el laboratorio por hospitalización, "
-                           "emergencia y cirugía. Es lo que se factura y se reclama.",
-                           prueba.get(COL_CONVENIO))
+        e_clinica = e_base
+        e_convenio = None
 
         lbl_comision = tk.Label(cont, text="", font=('Segoe UI', 10, 'bold'),
                                 bg='white', anchor='w')
@@ -1875,54 +1876,52 @@ class VentanaConfiguracionCompleta:
         combo_moneda.bind('<<ComboboxSelected>>', cambiar_moneda)
 
         def actualizar_comision(*_):
+            """Enseña lo que la clínica pagaría por ese precio."""
             refrescar_equivalencias()
-            c, v = leer(e_clinica), leer(e_convenio)
-            if c is None or v is None:
+            base = leer(e_base)
+            if base is None:
                 lbl_comision.config(text="Importe no válido.", fg='#dc2626')
                 return
-            if not c or not v:
-                lbl_comision.config(text="Falta alguna tarifa de convenio.",
-                                    fg='#b45309')
+            if not base:
+                lbl_comision.config(text="Escriba el precio.", fg='#b45309')
                 return
-            dif = round(c - v, 2)
+            import math
             m = combo_moneda.get()
             dec = 0 if m == 'COP' else 2
-            if dif < 0:
-                lbl_comision.config(
-                    text=f"La clínica cobraría menos de lo que nos paga "
-                         f"({dif:,.{dec}f} {m}).",
-                    fg='#dc2626')
-            else:
-                pct = (dif / c * 100) if c else 0
-                lbl_comision.config(
-                    text=f"Comisión de la clínica: {dif:,.{dec}f} {m}  ({pct:.0f}%)",
-                    fg='#059669')
+            desc = _DESCUENTO_CONVENIO
+            convenio = math.ceil(base * (1 - desc / 100.0)) if m == 'COP' \
+                else base * (1 - desc / 100.0)
+            lbl_comision.config(
+                text=f"Con el {desc:.0f}% de convenio, la clínica paga "
+                     f"{convenio:,.{dec}f} {m}",
+                fg='#059669')
 
         def guardar():
             # Se teclea en la moneda elegida, pero en la base los precios
             # viven en dolares: se convierte aqui, en un solo sitio.
-            valores = {}
-            for nombre, entry in (('precio', e_base), ('precio_clinica', e_clinica),
-                                  ('precio_convenio', e_convenio)):
-                v = leer(entry)
-                if v is None:
-                    messagebox.showerror("Importe inválido",
-                                         "Escriba importes válidos.", parent=dlg)
-                    return
-                if v < 0:
-                    messagebox.showerror("Importe inválido",
-                                         "Los precios no pueden ser negativos.",
-                                         parent=dlg)
-                    return
-                valores[nombre] = a_usd(v)
+            v = leer(e_base)
+            if v is None:
+                messagebox.showerror("Importe inválido",
+                                     "Escriba un importe válido.", parent=dlg)
+                return
+            if v < 0:
+                messagebox.showerror("Importe inválido",
+                                     "El precio no puede ser negativo.",
+                                     parent=dlg)
+                return
 
-            if valores['precio_clinica'] and valores['precio_convenio'] \
-                    and valores['precio_clinica'] < valores['precio_convenio']:
-                if not messagebox.askyesno(
-                        "Revisar",
-                        "La clínica cobraría al paciente menos de lo que le paga "
-                        "al laboratorio. ¿Guardar de todas formas?", parent=dlg):
-                    return
+            # Se guardan los tres, pero calculados a partir de uno: el precio,
+            # el mismo como "lo que cobra la clínica" -son la misma cifra- y
+            # el convenio con su descuento. Que los tres salgan de aquí es lo
+            # que impide que se separen.
+            import math
+            base_usd = a_usd(v)
+            conv_cop = math.ceil(v * (1 - _DESCUENTO_CONVENIO / 100.0)) \
+                if combo_moneda.get() == 'COP' \
+                else v * (1 - _DESCUENTO_CONVENIO / 100.0)
+            valores = {'precio': base_usd,
+                       'precio_clinica': base_usd,
+                       'precio_convenio': a_usd(conv_cop)}
 
             ok, msg = gestor.guardar_precios(prueba_id, **valores)
             if ok:
@@ -2604,10 +2603,22 @@ class VentanaConfiguracionCompleta:
 
         valores = self.tree_precios.item(fila)['values']
         nombre = valores[1]
-        precio_actual = str(valores[3]).replace('$', '')
 
+        # El precio se lee de la BASE, no de la fila de la pantalla.
+        #
+        # Antes se sacaba de valores[3] dando por hecho que esa columna eran
+        # dolares. Al pasar la lista a cuatro monedas, la columna 3 son
+        # pesos, y el dialogo abria intentando leer "25.000" como si fuera un
+        # importe en dolares. Una pantalla no es una fuente de datos: se
+        # reordena y lo que cuelga de su orden se rompe en silencio.
         tasa_bs, tasa_cop = self._tasas_precios()
-        precio_valor = self._parsear_precio(precio_actual) or 0.0
+        try:
+            _fila_bd = self.db.query_one(
+                "SELECT Precio FROM Pruebas WHERE PruebaID=%d" % int(prueba_id))
+            precio_valor = self._precio_a_float(
+                (_fila_bd or {}).get('Precio')) or 0.0
+        except Exception:
+            precio_valor = 0.0
 
         win = tk.Toplevel(self.win)
         win.title(f"Editar Precio - {nombre}")
