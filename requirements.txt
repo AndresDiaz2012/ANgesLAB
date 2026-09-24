@@ -33,3 +33,4 @@ pyBCV>=0.2
 
 # --- IA Clinica (opcional) ---
 anthropic>=0.18
+openpyxl>=3.1

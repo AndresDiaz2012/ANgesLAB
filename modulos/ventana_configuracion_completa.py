@@ -313,6 +313,10 @@ class VentanaConfiguracionCompleta:
                   command=self._generar_baremo,
                   width=14).pack(side=tk.LEFT, padx=5)
 
+        ttk.Button(btn_frame, text="📗 Baremo Excel (administración)",
+                  command=self._generar_baremo_administracion,
+                  width=30).pack(side=tk.LEFT, padx=5)
+
         # Tasas con las que se convierten los precios.
         # El precio vive en dólares en la base; Bs y COP son esa misma cifra
         # convertida. Sin la tasa a la vista la columna en bolívares no se
@@ -1939,6 +1943,97 @@ class VentanaConfiguracionCompleta:
         dlg.minsize(480, min(alto_necesario, 520))
 
         e_base.focus_set()
+
+    def _generar_baremo_administracion(self):
+        """
+        El baremo en Excel que se le entrega a la administracion de la clinica.
+
+        Sale el libro editable y, al lado, el PDF con las MISMAS filas. Se
+        generan juntos a proposito: si uno incluyera una prueba que el otro
+        no, los dos documentos se contradirian y no habria forma de saber
+        cual vale.
+
+        Va sin filtrar por area ni por busqueda: es el baremo del convenio
+        entero, no un recorte de lo que se este mirando en pantalla.
+        """
+        try:
+            from modulos.baremo_excel import clasificar, generar_baremo_excel
+            from modulos.baremo_pdf import generar_baremo_pdf
+            from modulos.tarifas import crear_gestor_tarifas
+        except ImportError as e:
+            messagebox.showerror("No disponible",
+                                 "Falta un m\u00f3dulo para generar el baremo:\n%s" % e,
+                                 parent=self.win)
+            return
+
+        gestor = crear_gestor_tarifas(self.db)
+        gestor.asegurar_columnas()
+        try:
+            gestor.asegurar_columnas_perfiles()
+        except Exception:
+            pass
+
+        filas = (gestor.listar_perfiles(solo_activos=True)
+                 + gestor.listar_baremo(solo_activas=True))
+        if not filas:
+            messagebox.showinfo("Sin datos", "No hay pruebas con precio cargado.",
+                                parent=self.win)
+            return
+
+        incluidas = [f for f in filas if clasificar(f)[0]]
+        excluidas = len(filas) - len(incluidas)
+
+        carpeta = filedialog.askdirectory(
+            parent=self.win, title="\u00bfD\u00f3nde guardo el baremo?",
+            initialdir=os.path.join(os.path.expanduser("~"), "Downloads"))
+        if not carpeta:
+            return
+
+        _bs, tasa_cop = self._tasas_precios(refrescar=True)
+        try:
+            cfg = self.db.query_one("SELECT * FROM ConfiguracionLaboratorio") or {}
+        except Exception:
+            cfg = {}
+        usuario = (self.user or {}).get('NombreCompleto') or ''
+        sello = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+        ruta_x = os.path.join(carpeta, "Baremo_Convenio_%s.xlsx" % sello)
+        ruta_p = os.path.join(carpeta, "Baremo_Convenio_%s.pdf" % sello)
+
+        try:
+            x = generar_baremo_excel(ruta_x, filas, config_lab=cfg,
+                                     tasa_cop=tasa_cop or 3100.0,
+                                     usuario=usuario)
+            p = generar_baremo_pdf(ruta_p, incluidas, config_lab=cfg,
+                                   usuario=usuario, moneda='COP',
+                                   tasa_cop=tasa_cop)
+        except Exception as e:
+            messagebox.showerror("Error",
+                                 "No se pudo generar el baremo:\n%s" % e,
+                                 parent=self.win)
+            return
+
+        if not x:
+            messagebox.showerror(
+                "Error",
+                "No se pudo crear el Excel. Falta la librer\u00eda openpyxl:\n\n"
+                "pip install openpyxl", parent=self.win)
+            return
+
+        messagebox.showinfo(
+            "Baremo generado",
+            "%d pruebas y perfiles con precio acordado.\n"
+            "%d quedan en la hoja \u00abExcluidos\u00bb, sin borrar, a la espera "
+            "de precio.\n\n"
+            "Excel: %s\n%s"
+            % (len(incluidas), excluidas, os.path.basename(ruta_x),
+               ("PDF:   " + os.path.basename(ruta_p)) if p
+                else "El PDF no se pudo generar."),
+            parent=self.win)
+        try:
+            os.startfile(carpeta)
+        except Exception:
+            pass
 
     def _editar_ofertas_perfil(self):
         """
