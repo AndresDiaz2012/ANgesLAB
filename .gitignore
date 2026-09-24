@@ -61,5 +61,10 @@ perfiles_query_output.txt
 # Archivos de firma (datos personales)
 firmas/
 
+
+# Desinstalador que deja Inno Setup en la instalacion
+unins000.dat
+unins000.msg
+
 # Claude settings
 .claude/
