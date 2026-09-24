@@ -61,6 +61,14 @@ perfiles_query_output.txt
 # Archivos de firma (datos personales)
 firmas/
 
+# Identidad del laboratorio: el logo es del cliente, no del programa.
+#
+# Estuvo rastreado por error -entro de golpe el 12/09 al subir el paquete
+# de distribucion entero- y el repositorio es publico. Quien lo clone monta
+# su laboratorio y carga su logo desde la aplicacion; no se lleva el de
+# otro. La instalacion conserva el suyo en esta misma carpeta.
+logos/
+
 
 # Desinstalador que deja Inno Setup en la instalacion
 unins000.dat
