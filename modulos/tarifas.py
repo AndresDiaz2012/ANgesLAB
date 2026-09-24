@@ -180,6 +180,26 @@ def convertir_desde_usd(valor_usd, tasa):
     return round(valor_usd * tasa, 4) if tasa > 0 else round(valor_usd, 4)
 
 
+# Lo que se le descuenta al precio para llegar al convenio.
+#
+# Es un solo numero mirado desde dos lados: para el paciente es la oferta
+# que ve en el recibo, y para la clinica es lo que le paga al laboratorio.
+# Vive aqui, en el modulo que decide los precios, y de aqui lo toman la
+# pantalla de solicitud y el baremo que se entrega.
+DESCUENTO_CONVENIO = 20.0
+
+
+def descuento_para(tipo_servicio):
+    """
+    Que porcentaje se descuenta por venir de donde se viene.
+
+    El paciente que entra por hospitalizacion, emergencia o cirugia lo lleva
+    siempre: es el convenio con la clinica. El de calle no lo lleva por
+    defecto, pero el mostrador puede ponerselo a mano como oferta.
+    """
+    return DESCUENTO_CONVENIO if es_area_clinica(tipo_servicio) else 0.0
+
+
 def tarifa_de(tipo_servicio):
     """
     Que tarifa corresponde a una procedencia.

@@ -5867,7 +5867,11 @@ class MainApplication:
         self.entry_descuento = tk.Entry(row_desc, font=('Segoe UI', 9), width=6, relief='solid', bg=S['input'], bd=1, justify='right')
         self.entry_descuento.pack(side='right', ipady=2)
         self.entry_descuento.insert(0, '0')
-        self.entry_descuento.bind('<KeyRelease>', lambda e: self.calcular_totales())
+        # Escrito a mano manda sobre lo que proponga la procedencia
+        def _desc_a_mano(_e):
+            self._descuento_a_mano = True
+            self.calcular_totales()
+        self.entry_descuento.bind('<KeyRelease>', _desc_a_mano)
         row_desc_monto = tk.Frame(fact_frame, bg=S['frame'])
         row_desc_monto.pack(fill='x', pady=1)
         tk.Label(row_desc_monto, text="", bg=S['frame'], width=12).pack(side='left')
@@ -7288,16 +7292,21 @@ class MainApplication:
 
     def _aplicar_tarifa_por_procedencia(self):
         """
-        Pone a cada prueba el precio que le toca segun la procedencia.
+        Pone a cada prueba SU precio, el mismo para todo el mundo.
 
-        El paciente que entra por hospitalizacion, emergencia o cirugia se
-        factura al precio de convenio, que es lo que la clinica le paga al
-        laboratorio; el que llega por su pie, al precio ambulatorio. Antes se
-        cobraba el ambulatorio a todo el mundo, asi que de cada caso de
-        clinica se reclamaba de menos.
+        El laboratorio tiene un solo precio por prueba. Lo que distingue al
+        paciente que entra por hospitalizacion, emergencia o cirugia no es
+        un precio distinto sino un DESCUENTO: el 20% del convenio, que se
+        propone en la casilla de descuento (ver _proponer_descuento).
 
-        Se llama al repintar la lista, que es por donde pasa cualquier cambio
-        de pruebas o de procedencia.
+        Antes esta funcion cambiaba el precio de cada linea segun la
+        procedencia, y el paciente veia 20.000 sin enterarse de que el
+        precio era 25.000. Ahora el recibo dice "25.000, descuento 20%,
+        total 20.000": la misma cifra, contada de forma que se vea lo que se
+        le rebaja.
+
+        Se llama al repintar la lista, que es por donde pasa cualquier
+        cambio de pruebas o de procedencia.
         """
         if not (TARIFAS_DISPONIBLE and self.sol_pruebas_seleccionadas):
             return
@@ -7335,8 +7344,9 @@ class MainApplication:
             fila = mapa.get(p.get('id'))
             if not fila:
                 continue
+            # El precio, a secas. El descuento va aparte.
+            p['precio'] = tarifas_mod._f(fila.get('Precio'))
             detalle = tarifas_mod.precio_detalle(fila, tipo)
-            p['precio'] = detalle['precio']
             if detalle['sin_convenio']:
                 sin_convenio.append(p.get('nombre') or p.get('codigo') or '')
 
@@ -7357,6 +7367,34 @@ class MainApplication:
             self._aviso_sin_convenio = None
 
         self._aplicar_ofertas_de_perfil(tipo)
+        self._proponer_descuento(tipo)
+
+    def _proponer_descuento(self, tipo):
+        """
+        Escribe en la casilla de descuento el que corresponde a la procedencia.
+
+        El 20% del convenio no se aplica a escondidas: se pone en la casilla,
+        a la vista, y el operador puede cambiarlo. Es la misma casilla que
+        sirve para hacerle una oferta a un paciente de calle, asi que si
+        alguien ya escribio un descuento a mano no se le pisa.
+        """
+        if not hasattr(self, 'entry_descuento'):
+            return
+        sugerido = tarifas_mod.descuento_para(tipo)
+
+        # Solo se propone mientras nadie lo haya tocado. El operador manda.
+        if getattr(self, '_descuento_a_mano', False):
+            return
+        actual = _numero_usuario(self.entry_descuento.get(), 0)
+        anterior = getattr(self, '_descuento_propuesto', 0.0)
+        if abs(actual - anterior) > 0.01 and actual:
+            # Lo cambio una persona: a partir de ahora no se toca
+            self._descuento_a_mano = True
+            return
+
+        self.entry_descuento.delete(0, 'end')
+        self.entry_descuento.insert(0, ('%g' % sugerido) if sugerido else '0')
+        self._descuento_propuesto = sugerido
 
     def _aplicar_ofertas_de_perfil(self, tipo):
         """

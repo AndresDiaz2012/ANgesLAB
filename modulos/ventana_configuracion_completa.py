@@ -347,8 +347,21 @@ class VentanaConfiguracionCompleta:
         # clinica le cobra al de hospitalizacion, emergencia o cirugia; y
         # Convenio lo que la clinica le paga al laboratorio, que es el ingreso
         # real de esos casos. Ver modulos/tarifas.py.
-        cols = ('Código', 'Prueba', 'Área', 'Precio', 'Clinica', 'Convenio',
-                'Comision', 'PrecioBs', 'PrecioCOP')
+        # Cuatro precios y se acabo. Solo el primero se teclea: los otros
+        # tres salen de el y de las tasas, igual que en el baremo que se le
+        # entrega a la administracion.
+        #
+        #   COP        el precio. Uno solo, venga el paciente de donde venga
+        #   USD        COP entre la tasa del dia
+        #   Convenio   COP menos el 20%: la oferta al paciente y lo que la
+        #              clinica le paga al laboratorio, que son lo mismo
+        #   Bs         COP pasado por la tasa del BCV
+        #
+        # Se fueron "Clinica cobra", "Comision" y el porcentaje: ya no hay
+        # dos precios que comparar, y una columna que siempre dice 20% no
+        # informa de nada.
+        cols = ('Código', 'Prueba', 'Área', 'PrecioCOP', 'PrecioUSD',
+                'Convenio', 'PrecioBs')
         self.tree_precios = ttk.Treeview(tree_frame, columns=cols, show='headings',
                                           height=20, selectmode='extended')
 
@@ -356,22 +369,18 @@ class VentanaConfiguracionCompleta:
         self.tree_precios.heading('Código', text='Código')
         self.tree_precios.heading('Prueba', text='Nombre de la Prueba')
         self.tree_precios.heading('Área', text='Área')
-        self.tree_precios.heading('Precio', text='Ambulatorio')
-        self.tree_precios.heading('Clinica', text='Clínica cobra')
-        self.tree_precios.heading('Convenio', text='Nos pagan')
-        self.tree_precios.heading('Comision', text='Comisión')
-        self.tree_precios.heading('PrecioBs', text='Ambul. (Bs)')
-        self.tree_precios.heading('PrecioCOP', text='Ambul. (COP)')
+        self.tree_precios.heading('PrecioCOP', text='Precio (COP)')
+        self.tree_precios.heading('PrecioUSD', text='Precio (USD)')
+        self.tree_precios.heading('Convenio', text='Convenio (−20%)')
+        self.tree_precios.heading('PrecioBs', text='Precio (Bs)')
 
         self.tree_precios.column('Código', width=80, anchor='center')
         self.tree_precios.column('Prueba', width=230, anchor='w')
         self.tree_precios.column('Área', width=105, anchor='w')
-        self.tree_precios.column('Precio', width=92, anchor='e')
-        self.tree_precios.column('Clinica', width=92, anchor='e')
-        self.tree_precios.column('Convenio', width=92, anchor='e')
-        self.tree_precios.column('Comision', width=88, anchor='e')
-        self.tree_precios.column('PrecioBs', width=105, anchor='e')
         self.tree_precios.column('PrecioCOP', width=110, anchor='e')
+        self.tree_precios.column('PrecioUSD', width=95, anchor='e')
+        self.tree_precios.column('Convenio', width=110, anchor='e')
+        self.tree_precios.column('PrecioBs', width=110, anchor='e')
 
         # Las pruebas sin precio se resaltan: son las que hay que atender
         self.tree_precios.tag_configure('sin_precio', foreground='#b45309')
@@ -2537,13 +2546,18 @@ class VentanaConfiguracionCompleta:
                 etiquetas = ()
 
             iid = f"p{p['PruebaID']}"
+            # Las cuatro cifras salen todas del mismo precio: el de pesos
+            # manda y los otros tres se derivan, igual que en el baremo que
+            # se entrega. Asi la pantalla y el documento no pueden decir
+            # cosas distintas de la misma prueba.
             self.tree_precios.insert(
                 '', 'end', iid=iid,
                 values=(codigo or '—', nombre,
-                        p.get('NombreArea') or 'Sin área', f"${precio:.2f}",
-                        _imp(p_clinica), _imp(p_convenio), _imp(comision),
-                        self._precio_en_bs(precio, tasa_bs),
-                        self._precio_en_cop(precio, tasa_cop)),
+                        p.get('NombreArea') or 'Sin área',
+                        self._precio_en_cop(precio, tasa_cop),
+                        f"${precio:,.2f}",
+                        _imp(p_convenio),
+                        self._precio_en_bs(precio, tasa_bs)),
                 tags=etiquetas)
             mostradas += 1
 

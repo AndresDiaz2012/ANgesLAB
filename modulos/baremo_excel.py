@@ -61,9 +61,14 @@ except Exception:  # pragma: no cover
     COL_CONVENIO = 'PrecioConvenio'
 
 
-# La clinica se queda esta parte de lo que le cobra al paciente. Vive aqui
-# y en la formula de la hoja, que es la que manda para quien la edite.
-COMISION_CLINICA = 0.20
+# El descuento del convenio, en tanto por uno. Sale de tarifas.py, que es
+# quien decide los precios: si el baremo llevara su propia copia, un dia
+# diria un porcentaje distinto del que la caja aplica de verdad.
+try:
+    from modulos.tarifas import DESCUENTO_CONVENIO as _DESC
+    COMISION_CLINICA = _DESC / 100.0
+except Exception:  # pragma: no cover
+    COMISION_CLINICA = 0.20
 
 # Importe en dolares por debajo del cual un precio no es un precio sino un
 # relleno. El catalogo venia con pruebas a 50 centavos de dolar puestas para
