@@ -15,7 +15,8 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from modulos.tarifas import (COL_PERFIL_BASE, COL_PERFIL_CLINICA,
-                             COL_PERFIL_CONVENIO, precio_paquete, prorratear)
+                             COL_PERFIL_CONVENIO, descuento_para,
+                             objetivo_paquete, precio_paquete, prorratear)
 
 
 def perfil(base=120000.0, clinica=190000.0, convenio=150000.0):
@@ -145,6 +146,46 @@ class TestLaOfertaRebaja(unittest.TestCase):
         # La clinica cobra 190.000 y nos paga 150.000: se queda 40.000
         p = perfil()
         self.assertEqual(p[COL_PERFIL_CLINICA] - p[COL_PERFIL_CONVENIO], 40000.0)
+
+
+class TestElPaqueteSobreviveAlDescuento(unittest.TestCase):
+    """
+    El descuento se aplica al final, sobre toda la solicitud. Las lineas de
+    un perfil con paquete no valen el paquete: valen lo que, rebajado, DA el
+    paquete. Sin esa cuenta el descuento entraria dos veces.
+    """
+
+    def test_el_perfil_20_aterriza_en_los_150000_pactados(self):
+        d = descuento_para('Hospitalizado Asegurado')
+        objetivo = objetivo_paquete(perfil(), 'Hospitalizado Asegurado', d)
+        self.assertAlmostEqual(objetivo * (1 - d / 100.0), 150000.0, places=2)
+
+    def test_las_lineas_suman_mas_que_el_paquete(self):
+        # 187.500 para que el 20% las deje en 150.000
+        d = descuento_para('Hospitalizado Asegurado')
+        self.assertGreater(objetivo_paquete(perfil(), 'Hospitalizado Asegurado', d),
+                           150000.0)
+
+    def test_sin_descuento_el_objetivo_es_el_paquete(self):
+        # Al paciente de calle no se le rebaja nada encima
+        self.assertAlmostEqual(
+            objetivo_paquete(perfil(), 'Ambulatorio', 0.0), 120000.0, places=2)
+
+    def test_el_descuento_no_se_aplica_dos_veces(self):
+        # El fallo que esto evita: 150.000 rebajado otro 20% son 120.000
+        d = descuento_para('Cirugia Asegurado')
+        objetivo = objetivo_paquete(perfil(), 'Cirugia Asegurado', d)
+        self.assertNotAlmostEqual(objetivo * (1 - d / 100.0), 120000.0, places=0)
+
+    def test_el_reparto_entre_lineas_sigue_cuadrando(self):
+        d = descuento_para('Hospitalizado Asegurado')
+        objetivo = objetivo_paquete(perfil(), 'Hospitalizado Asegurado', d)
+        lineas = prorratear([8000, 20000, 24000, 16000], objetivo)
+        self.assertAlmostEqual(sum(lineas) * (1 - d / 100.0), 150000.0, places=2)
+
+    def test_un_perfil_sin_oferta_no_tiene_objetivo(self):
+        vacio = {'PerfilID': 1}
+        self.assertIsNone(objetivo_paquete(vacio, 'Ambulatorio', 0.0))
 
 
 if __name__ == '__main__':

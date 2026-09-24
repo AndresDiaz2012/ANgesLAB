@@ -297,6 +297,30 @@ def precio_paquete(perfil, tipo_servicio):
     return round(valor, 4)
 
 
+def objetivo_paquete(perfil, tipo_servicio, descuento_pct=0.0):
+    """
+    Cuanto tienen que sumar las lineas para que el total sea el paquete.
+
+    Con el descuento aplicandose al final sobre toda la solicitud, las
+    lineas ya no valen el paquete: valen lo que, rebajado, DA el paquete. El
+    perfil 20 esta pactado en 150.000 para la clinica; con un 20% encima,
+    sus catorce lineas tienen que sumar 187.500 para aterrizar justo ahi.
+
+    Sin esta cuenta se aplicaria el descuento dos veces -una en el precio de
+    paquete y otra en la casilla- y el perfil saldria en 120.000.
+
+    Devuelve None si el perfil no tiene oferta, que quiere decir "cobra la
+    suma de sus pruebas".
+    """
+    paquete = precio_paquete(perfil, tipo_servicio)
+    if paquete is None:
+        return None
+    factor = 1.0 - (_f(descuento_pct) / 100.0)
+    if factor <= 0:
+        return paquete
+    return round(paquete / factor, 4)
+
+
 def prorratear(precios, total):
     """
     Reparte el precio del paquete entre las pruebas que lo componen.

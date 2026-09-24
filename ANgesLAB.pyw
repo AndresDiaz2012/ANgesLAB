@@ -7430,7 +7430,12 @@ class MainApplication:
             perfil = gestor.obtener_perfil(perfil_id)
             if not perfil:
                 continue
-            paquete = tarifas_mod.precio_paquete(perfil, tipo)
+            # Lo que deben sumar las lineas para que, tras el descuento
+            # que se aplica al final, el total sea el paquete pactado. Ver
+            # tarifas.objetivo_paquete: sin esto el descuento entraria dos
+            # veces y el perfil 20 saldria en 120.000 en vez de 150.000.
+            paquete = tarifas_mod.objetivo_paquete(
+                perfil, tipo, tarifas_mod.descuento_para(tipo))
             if paquete is None:
                 continue
 
