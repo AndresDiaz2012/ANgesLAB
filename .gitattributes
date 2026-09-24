@@ -1,0 +1,31 @@
+# Fin de linea, fijado a proposito.
+#
+# Sin esto, git convierte los saltos de linea al sacar los archivos en
+# Windows: el repositorio guarda LF y la copia de trabajo queda con CRLF.
+# El programa funciona igual -a Python le da lo mismo- pero comparar la
+# instalacion de la clinica contra un clon del repositorio devolvia 17
+# archivos "distintos" que en realidad eran identicos. Con una sola rama y
+# el codigo corriendo en produccion, esa comprobacion tiene que poder
+# hacerse y dar una respuesta limpia.
+#
+# LF para todo el codigo, en cualquier maquina. Asi el mismo commit produce
+# los mismos bytes en el PC de la clinica y en el de quien revisa.
+
+* text=auto eol=lf
+
+# Estos SI necesitan CRLF: los ejecuta Windows y con LF pueden fallar.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.iss text eol=crlf
+
+# Binarios: que no los toque nadie.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.pdf binary
+*.accdb binary
+*.xlsx binary
+*.ttf binary
+*.otf binary
