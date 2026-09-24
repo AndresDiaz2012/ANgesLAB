@@ -2003,7 +2003,7 @@ class VentanaConfiguracionCompleta:
         try:
             x = generar_baremo_excel(ruta_x, filas, config_lab=cfg,
                                      tasa_cop=tasa_cop or 3100.0,
-                                     usuario=usuario)
+                                     tasa_bs=_bs, usuario=usuario)
             p = generar_baremo_pdf(ruta_p, incluidas, config_lab=cfg,
                                    usuario=usuario, moneda='COP',
                                    tasa_cop=tasa_cop)

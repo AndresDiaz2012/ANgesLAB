@@ -98,7 +98,7 @@ def clasificar(fila):
 
 
 def generar_baremo_excel(ruta, filas, config_lab=None, tasa_cop=3100.0,
-                         usuario=''):
+                         tasa_bs=None, usuario=''):
     """
     Escribe el libro en ruta y la devuelve, o None si no se pudo.
 
@@ -106,6 +106,10 @@ def generar_baremo_excel(ruta, filas, config_lab=None, tasa_cop=3100.0,
         filas: lo que devuelven listar_perfiles() + listar_baremo().
         tasa_cop: pesos por dolar. Va en la celda D5 y de ella cuelgan las
             formulas de la columna en dolares.
+        tasa_bs: bolivares por dolar, la del BCV. Va en la celda D6 y de
+            ella cuelga la columna en bolivares. Sin ella, esa columna
+            no se escribe: inventar una conversion seria peor que no
+            darla.
     """
     try:
         from openpyxl import Workbook
@@ -117,6 +121,7 @@ def generar_baremo_excel(ruta, filas, config_lab=None, tasa_cop=3100.0,
 
     cfg = config_lab or {}
     tasa = float(tasa_cop or 3100.0)
+    bcv = float(tasa_bs) if tasa_bs else None
 
     incluidas, excluidas = [], []
     for f in filas:
@@ -152,8 +157,18 @@ def generar_baremo_excel(ruta, filas, config_lab=None, tasa_cop=3100.0,
     ws['E5'] = "COP por 1 USD. Editelo cuando cambie la tasa."
     ws['E5'].font = Font(size=8, color=GRIS)
 
+    if bcv:
+        ws['B6'] = "Tasa BCV (Bs por USD)"
+        ws['B6'].font = Font(size=10, bold=True)
+        ws['D6'] = bcv
+        ws['D6'].font = Font(size=11, bold=True, color=CIAN)
+        ws['D6'].number_format = '#,##0.00'
+        ws['E6'] = "Bs por 1 USD. De ella cuelga la columna en bolivares."
+        ws['E6'].font = Font(size=8, color=GRIS)
+
     CABECERAS = ["Codigo", "Prueba", "Area", "Tipo",
-                 "Precio COP", "Precio USD", "Precio Convenio (COP)", "Nota"]
+                 "Precio COP", "Precio USD", "Precio Convenio (COP)",
+                 "Precio Bs", "Nota"]
     FILA_CAB = 8
     for i, texto in enumerate(CABECERAS):
         c = ws.cell(row=FILA_CAB, column=2 + i, value=texto)
@@ -186,25 +201,32 @@ def generar_baremo_excel(ruta, filas, config_lab=None, tasa_cop=3100.0,
         celda = ws.cell(row=r, column=8)
         if cop > 0 and abs(convenio_cop - segun_regla) > 1:
             celda.value = convenio_cop
-            ws.cell(row=r, column=9, value='Precio acordado, no es el %d%%'
+            ws.cell(row=r, column=10, value='Precio acordado, no es el %d%%'
                     % int(COMISION_CLINICA * 100)).font = Font(
                         size=8, italic=True, color='B45309')
         else:
             celda.value = '=ROUNDUP(F%d*%s,0)' % (r, 1 - COMISION_CLINICA)
         celda.number_format = '#,##0'
 
-        for col in range(2, 10):
+        # Bolivares: cuelga de la tasa del BCV igual que el dolar de la
+        # suya, asi que al cambiar D6 se recalculan las 300 filas solas.
+        if bcv:
+            ws.cell(row=r, column=9,
+                    value='=ROUNDUP(F%d/$D$5*$D$6,0)' % r
+                    ).number_format = '#,##0'
+
+        for col in range(2, 11):
             ws.cell(row=r, column=col).border = borde
         if f.get('es_perfil'):
-            for col in range(2, 9):
+            for col in range(2, 10):
                 ws.cell(row=r, column=col).font = Font(bold=True,
                                                        color='7C3AED')
         r += 1
 
-    for col, an in zip(range(2, 10), (12, 46, 18, 9, 14, 13, 20, 26)):
+    for col, an in zip(range(2, 11), (12, 46, 18, 9, 14, 12, 20, 14, 26)):
         ws.column_dimensions[get_column_letter(col)].width = an
     ws.freeze_panes = ws.cell(row=FILA_CAB + 1, column=1)
-    ws.auto_filter.ref = "B%d:I%d" % (FILA_CAB, r - 1)
+    ws.auto_filter.ref = "B%d:J%d" % (FILA_CAB, r - 1)
     ws.page_setup.orientation = 'landscape'
     ws.page_setup.fitToWidth = 1
     ws.sheet_properties.pageSetUpPr.fitToPage = True
@@ -249,10 +271,11 @@ def generar_baremo_excel(ruta, filas, config_lab=None, tasa_cop=3100.0,
     wn['B2'].font = Font(size=13, bold=True, color=AZUL)
     NOTAS = [
         ("MONEDAS",
-         "Se manejan dolar (USD) y peso colombiano (COP). El precio en pesos "
-         "(columna F) es el valor maestro y se edita a mano fila por fila. El "
-         "de dolares (columna G) es una formula que lo recalcula dividiendo "
-         "entre la tasa de la celda D5."),
+         "El precio en PESOS (columna F) es el valor maestro: se edita a mano "
+         "fila por fila y de el cuelga todo lo demas. El dolar (columna G) "
+         "sale de dividir entre la tasa de D5, y el bolivar (columna I) de "
+         "multiplicar ese dolar por la tasa del BCV de D6. Las tres cifras "
+         "se redondean hacia arriba."),
         ("TASA VARIABLE",
          "La celda D5 de la hoja \"Base de trabajo\" es la tasa del dia. "
          "Cambiela cuando el dolar se mueva y la columna \"Precio USD\" de "

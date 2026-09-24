@@ -93,7 +93,7 @@ class TestElLibroDiceLoQueSeCobra(unittest.TestCase):
                        nombre='Perfil 20', es_perfil=True)
         ws = self._generar([pactado])
         self.assertEqual(ws.cell(row=9, column=8).value, 150000)
-        self.assertTrue(ws.cell(row=9, column=9).value,
+        self.assertTrue(ws.cell(row=9, column=10).value,
                         "un precio fuera de la regla tiene que llevar nota")
 
     def test_la_formula_del_dolar_cuelga_de_la_tasa(self):
@@ -110,10 +110,27 @@ class TestElLibroDiceLoQueSeCobra(unittest.TestCase):
         ws = self._generar([fila(clinica_cop=25000.0)])
         self.assertEqual(ws.cell(row=9, column=6).value, 25000)
 
-    def test_el_ambulatorio_no_aparece_en_ninguna_celda(self):
+    def test_el_ambulatorio_ya_no_es_un_precio_aparte(self):
+        # Hay UN precio: el que paga el paciente, venga de donde venga.
         ws = self._generar([fila(clinica_cop=25000.0)])
-        valores = [ws.cell(row=9, column=c).value for c in range(2, 10)]
+        valores = [ws.cell(row=9, column=c).value for c in range(2, 11)]
         self.assertNotIn(20000, valores)
+
+    def test_el_bolivar_cuelga_de_la_tasa_del_bcv(self):
+        # Sin apuntar a D6, cambiar la tasa del BCV no recalcularia nada
+        ruta = os.path.join(tempfile.mkdtemp(), 'bs.xlsx')
+        generar_baremo_excel(ruta, [fila()], tasa_cop=TASA, tasa_bs=849.564)
+        from openpyxl import load_workbook
+        wb = load_workbook(ruta, data_only=False)
+        ws = wb[[n for n in wb.sheetnames if n.startswith('Base')][0]]
+        self.assertEqual(ws['D6'].value, 849.564)
+        self.assertIn('$D$6', str(ws.cell(row=9, column=9).value))
+
+    def test_sin_tasa_del_bcv_no_se_inventa_el_bolivar(self):
+        # Una conversion inventada en un baremo que se firma es peor que
+        # una columna vacia
+        ws = self._generar([fila()])
+        self.assertIsNone(ws.cell(row=9, column=9).value)
 
 
 class TestLasTresHojas(unittest.TestCase):
