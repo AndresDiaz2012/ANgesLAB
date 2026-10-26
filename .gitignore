@@ -76,3 +76,7 @@ unins000.msg
 
 # Claude settings
 .claude/
+
+# Registro que el receptor escribe al imprimir
+receptor/receptor.log
+receptor/receptor_config.json
