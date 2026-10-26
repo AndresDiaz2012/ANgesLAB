@@ -11509,15 +11509,25 @@ Forma de Pago: {self.combo_forma_pago.get()}
             solicitud_id = detalle['SolicitudID']
 
             # Obtener todos los parámetros de la prueba con sus valores actuales
+            # Dos consultas en vez de un LEFT JOIN: ver el comentario de
+            # _ejecutar_calculos_cross_test. Jet no admite el JOIN que haria
+            # falta, asi que el cruce se hace aqui.
             parametros = db.query(f"""
-                SELECT pp.ParametroID, par.NombreParametro,
-                       rp.Valor, rp.ResultadoParamID
+                SELECT pp.ParametroID, par.NombreParametro
                 FROM ParametrosPrueba pp
                 INNER JOIN Parametros par ON pp.ParametroID = par.ParametroID
-                LEFT JOIN ResultadosParametros rp ON rp.DetalleID = {detalle_id}
-                    AND rp.ParametroID = pp.ParametroID
                 WHERE pp.PruebaID = {prueba_id}
-            """)
+            """) or []
+            _guardados = {{
+                r['ParametroID']: r for r in (db.query(
+                    "SELECT ParametroID, Valor, ResultadoParamID "
+                    "FROM ResultadosParametros "
+                    f"WHERE DetalleID = {detalle_id}") or [])
+            }}
+            for _p in parametros:
+                _g = _guardados.get(_p['ParametroID'])
+                _p['Valor'] = _g['Valor'] if _g else None
+                _p['ResultadoParamID'] = _g['ResultadoParamID'] if _g else None
 
             if not parametros:
                 return 0
@@ -11717,16 +11727,37 @@ Forma de Pago: {self.combo_forma_pago.get()}
             calculador = obtener_calculador()
 
             # 1. Recopilar TODOS los parámetros con valores de TODAS las pruebas
+            # El motor de Access rechaza un LEFT JOIN cuyo ON toca dos
+            # tablas de un nivel anidado: "La expresion JOIN no se admite",
+            # por muchos parentesis que se le pongan. No es sintaxis, es el
+            # motor. Asi que se piden las dos cosas por separado -solo con
+            # INNER JOIN, que si admite- y se cruzan aqui.
+            #
+            # Esto llevaba roto desde siempre: el HOMA-IR y cualquier
+            # calculo que necesite valores de dos pruebas distintas nunca
+            # llegaron a ejecutarse, y el error moria en el log.
             todos_params = db.query(f"""
                 SELECT d.DetalleID, d.PruebaID, par.NombreParametro,
-                       par.ParametroID, rp.Valor, rp.ResultadoParamID
+                       par.ParametroID
                 FROM (DetalleSolicitudes d
                 INNER JOIN ParametrosPrueba pp ON d.PruebaID = pp.PruebaID)
                 INNER JOIN Parametros par ON pp.ParametroID = par.ParametroID
-                LEFT JOIN ResultadosParametros rp
-                    ON rp.DetalleID = d.DetalleID AND rp.ParametroID = pp.ParametroID
                 WHERE d.SolicitudID = {solicitud_id}
-            """)
+            """) or []
+
+            _valores = db.query(f"""
+                SELECT rp.DetalleID, rp.ParametroID, rp.Valor,
+                       rp.ResultadoParamID
+                FROM ResultadosParametros rp
+                INNER JOIN DetalleSolicitudes d ON rp.DetalleID = d.DetalleID
+                WHERE d.SolicitudID = {solicitud_id}
+            """) or []
+            _por_clave = {{(v['DetalleID'], v['ParametroID']): v
+                          for v in _valores}}
+            for _p in todos_params:
+                _g = _por_clave.get((_p['DetalleID'], _p['ParametroID']))
+                _p['Valor'] = _g['Valor'] if _g else None
+                _p['ResultadoParamID'] = _g['ResultadoParamID'] if _g else None
 
             if not todos_params:
                 return 0

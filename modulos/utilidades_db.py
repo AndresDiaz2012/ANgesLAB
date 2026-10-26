@@ -271,8 +271,8 @@ class UtilidadesDB:
         # Obtener parametros que pertenecen a esta area
         parametros_area = self.db.query(f"""
             SELECT DISTINCT param.ParametroID
-            FROM Parametros param
-            INNER JOIN ParametrosPrueba pp ON param.ParametroID = pp.ParametroID
+            FROM (Parametros param
+            INNER JOIN ParametrosPrueba pp ON param.ParametroID = pp.ParametroID)
             INNER JOIN Pruebas p ON pp.PruebaID = p.PruebaID
             WHERE p.AreaID = {area_id}
         """)
