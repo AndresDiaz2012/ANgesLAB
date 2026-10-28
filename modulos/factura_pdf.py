@@ -6,17 +6,18 @@ FACTURA FISCAL EN PDF (SENIAT) - ANgesLAB
 Genera el PDF de facturas, notas de credito y notas de debito con los datos
 que exige la normativa venezolana.
 
-Requisitos cubiertos (Providencia SNAT/2011/0071, art. 30, y concordantes):
+Requisitos cubiertos (Providencia SNAT/2026/00093, art. 8, que derogo a la
+SNAT/2011/0071 sobre la que estaba escrito esto):
 
   a) Denominacion del documento: FACTURA / NOTA DE CREDITO / NOTA DE DEBITO
   b) Numeracion consecutiva y unica
   c) Numero de Control ("00-NNNNNNNN")
   d) Datos del emisor: nombre o razon social, domicilio fiscal y RIF
-  e) Fecha (y hora) de emision
+  e) Fecha en ocho digitos (DDMMAAAA) y hora con segundos (art. 8.5)
   f) Datos del adquiriente: nombre o razon social y RIF/C.I.
   g) Descripcion de los servicios, cantidad, precio unitario y valor total
-  h) Especificacion de los renglones exentos o exonerados
-  i) Base imponible, alicuota aplicable y monto del IVA por separado
+  h) Renglones exentos o exonerados marcados con (E) (art. 8.7)
+  i) Base imponible e IVA POR CADA ALICUOTA (art. 8.9 y 8.10)
   j) Valor total de la operacion incluido el impuesto
   k) Condicion de la operacion (contado / credito)
   l) Datos del proveedor autorizado o imprenta autorizada y su providencia
@@ -28,6 +29,12 @@ Ademas:
   - Equivalencia en Bs. y tasa de cambio del dia cuando la factura es en
     divisas (art. 25 Ley de IVA / Providencia SNAT/2024/000102)
   - Monto total expresado en letras
+  - Leyenda de emision conforme a la providencia (art. 19)
+  - Leyenda de contribuyente formal del IVA cuando aplique (art. 8, p.u.)
+
+Los formatos y las leyendas viven en modulos/providencia_00093.py, con el
+articulo que los exige al lado: el dia que cambie la norma se toca un sitio
+y no seis.
 
 Copyright 2024-2026 ANgesLAB Solutions
 ================================================================================
@@ -38,6 +45,11 @@ import logging
 import tempfile
 from datetime import datetime
 from decimal import Decimal
+
+try:
+    from modulos import providencia_00093 as prov
+except Exception:  # pragma: no cover
+    import providencia_00093 as prov
 
 try:
     from modulos.logging_config import obtener_logger
@@ -90,9 +102,19 @@ def _f(valor):
 
 
 def _fecha(valor, con_hora=False):
-    if hasattr(valor, 'strftime'):
-        return valor.strftime('%d/%m/%Y %I:%M %p' if con_hora else '%d/%m/%Y')
-    return str(valor or '')[:10]
+    """
+    La fecha como la exige el articulo 8.5: ocho digitos, y la hora con
+    segundos cuando se pide. Ver modulos/providencia_00093.py.
+
+    Sin hora se sigue mostrando con barras, que es lo legible cuando se cita
+    una factura dentro de otro documento; el formato de ocho digitos es
+    requisito de la fecha de EMISION, no de cada mencion.
+    """
+    if not hasattr(valor, 'strftime'):
+        return str(valor or '')[:10]
+    if con_hora:
+        return prov.fecha_hora_fiscal(valor)
+    return valor.strftime('%d/%m/%Y')
 
 
 class GeneradorFacturaPDF:
@@ -256,8 +278,9 @@ class GeneradorFacturaPDF:
             cantidad = int(_f(d.get('Cantidad')) or 1)
             precio = _f(d.get('PrecioUnitario'))
             total = _f(d.get('SubTotal')) or precio * cantidad
-            # G = gravado, E = exento/exonerado (requisito h)
-            gravamen = 'E' if (exonerada or d.get('Exonerada')) else 'G'
+            # La providencia pide (E) en lo exento, exonerado o no gravado;
+            # lo gravado no lleva marca (art. 8.7)
+            gravamen = prov.marca_gravamen(exonerada or d.get('Exonerada'))
             datos.append([
                 Paragraph(str(d.get('CodigoPrueba') or ''), s_c),
                 Paragraph(str(d.get('Descripcion') or ''), s_l),
@@ -282,7 +305,7 @@ class GeneradorFacturaPDF:
         ]))
         return tabla
 
-    def _bloque_totales(self, fac, simbolo):
+    def _bloque_totales(self, fac, simbolo, detalles=None):
         """Base imponible, alícuota, IVA, IGTF y total (requisitos i-j)."""
         s_l = self._estilo('tl', fontSize=8, alignment=TA_RIGHT)
         s_v = self._estilo('tv', fontSize=8, alignment=TA_RIGHT)
@@ -309,10 +332,27 @@ class GeneradorFacturaPDF:
         if descuento:
             filas.append((f"Descuento ({_f(fac.get('PorcentajeDescuento')):.2f}%):",
                           -descuento, False))
-        if exento:
-            filas.append(("Monto exento / exonerado:", exento, False))
-        filas.append(("Base imponible:", base, False))
-        filas.append((f"IVA {tasa_iva:.2f}%:", iva, False))
+
+        # El articulo 8.9 y 8.10 piden la base imponible de CADA alicuota con
+        # su porcentaje y el IVA de cada una por separado. Mientras todo se
+        # facture al 16% el desglose tiene un solo renglon y se ve igual que
+        # antes; con una linea exenta y otra gravada en el mismo documento,
+        # antes el total salia bien pero el desglose no se podia reconstruir.
+        grupos = prov.desglose_por_alicuota(detalles or [], tasa_iva)
+        if grupos:
+            for g in grupos:
+                filas.append((prov.etiqueta_alicuota(g) + ':',
+                              float(g['base']), False))
+                if not g['exento'] and g['iva']:
+                    filas.append(("IVA %s%%:" % prov._fmt_pct(g['tasa']),
+                                  float(g['iva']), False))
+        else:
+            # Sin lineas que agrupar -una factura vieja, o un resumen- se
+            # cae a los totales de la cabecera, que es lo que habia antes
+            if exento:
+                filas.append(("Monto exento / exonerado:", exento, False))
+            filas.append(("Base imponible:", base, False))
+            filas.append((f"IVA {tasa_iva:.2f}%:", iva, False))
         if igtf:
             # MontoTotal no incluye el IGTF: se suma aparte para el total a pagar
             filas.append((f"IGTF {tasa_igtf:.2f}%:", igtf, False))
@@ -343,6 +383,35 @@ class GeneradorFacturaPDF:
             ('RIGHTPADDING', (0, 0), (-1, -1), 0),
         ]))
         return contenedor, total
+
+    def _bloque_leyendas(self, cfg):
+        """
+        Las frases que la providencia obliga a imprimir.
+
+        Son dos: la del articulo 19, que dice que el documento se emite
+        conforme a la providencia, y la del paragrafo unico del articulo 8,
+        solo para contribuyentes formales del IVA.
+
+        El literal del articulo 19 sale de la configuracion del laboratorio.
+        La redaccion exacta que exige la norma no consta en las fuentes
+        consultadas, y poner aqui una formula legal inventada seria peor que
+        dejarla donde el contador pueda corregirla.
+        """
+        s = self._estilo('leyenda', fontSize=7, alignment=TA_CENTER,
+                         textColor=colors.HexColor('#475569'))
+        lineas = []
+        if prov.es_contribuyente_formal(cfg):
+            s_f = self._estilo('leyendaf', fontSize=8, alignment=TA_CENTER,
+                               fontName='Helvetica-Bold')
+            lineas.append(Paragraph(prov.LEYENDA_CONTRIBUYENTE_FORMAL, s_f))
+        lineas.append(Paragraph(prov.leyenda_emision(cfg), s))
+
+        tabla = Table([[l] for l in lineas], colWidths=[self.ANCHO_UTIL])
+        tabla.setStyle(TableStyle([
+            ('TOPPADDING', (0, 0), (-1, -1), 1),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
+        ]))
+        return tabla
 
     def _bloque_conversion(self, fac, total, simbolo):
         """Equivalencia en bolívares y tasa del día (facturas en divisas)."""
@@ -440,8 +509,13 @@ class GeneradorFacturaPDF:
         story.append(self._tabla_detalle(detalles, simbolo, exonerada))
         story.append(Spacer(1, 6))
 
-        totales, total = self._bloque_totales(fac, simbolo)
+        totales, total = self._bloque_totales(fac, simbolo, detalles)
         story.append(totales)
+
+        leyendas = self._bloque_leyendas(cfg)
+        if leyendas:
+            story.append(Spacer(1, 6))
+            story.append(leyendas)
 
         conversion = self._bloque_conversion(fac, total, simbolo)
         if conversion:

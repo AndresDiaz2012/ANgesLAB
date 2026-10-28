@@ -2319,6 +2319,24 @@ class MainApplication:
                 CXC_TIENE_PROCEDENCIA = False
                 _log.warning("No se pudo crear CuentasPorCobrar.TipoProcedencia: %s", e)
 
+        # DetalleFacturas.TasaIVA y ConfiguracionLaboratorio.LeyendaProvidencia:
+        # los pide la Providencia SNAT/2026/00093. La primera, para poder
+        # desglosar la base imponible y el IVA por alicuota (art. 8.9 y
+        # 8.10), que con una sola tasa por factura no se podia reconstruir.
+        # La segunda guarda el literal del art. 19 que fije el contador.
+        for tabla, columna, tipo in (
+                ('DetalleFacturas', 'TasaIVA', 'CURRENCY'),
+                ('ConfiguracionLaboratorio', 'LeyendaProvidencia', 'TEXT(255)')):
+            try:
+                db.query_one("SELECT TOP 1 [%s] FROM [%s]" % (columna, tabla))
+            except Exception:
+                try:
+                    db.execute("ALTER TABLE [%s] ADD COLUMN [%s] %s"
+                               % (tabla, columna, tipo))
+                    _log.info("Columna %s.%s creada", tabla, columna)
+                except Exception as e:
+                    _log.warning("No se pudo crear %s.%s: %s", tabla, columna, e)
+
         # Bioanalistas.TituloProfesional: lo que va bajo el nombre en el pie
         # del informe. Es CRITICA: las consultas del pie ya la piden, y sin
         # ella la lectura falla y el informe sale sin ninguna firma.

@@ -1106,58 +1106,108 @@ def formatear_monto(monto, simbolo='Bs.'):
 
 def monto_en_letras(monto, moneda='VES'):
     """
-    Convierte un monto a letras (para facturas).
+    El importe escrito con letras, para el renglon "Son:" de la factura.
+
+    Hasta cientos de millones, que es mas de lo que cabe en una factura de
+    laboratorio. Antes solo sabia contar hasta 999 y por encima lanzaba
+    IndexError, que factura_pdf recogia en silencio: la linea no ha salido
+    nunca en una factura de verdad.
 
     Args:
         monto: cantidad a expresar en palabras
-        moneda: 'VES'/'Bs' (bolívares), 'USD' (dólares) o 'COP' (pesos)
+        moneda: 'VES'/'Bs' (bolivares), 'USD' (dolares) o 'COP' (pesos)
     """
-    # Implementacion basica
-    unidades = ['', 'un', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve']
-    decenas = ['', 'diez', 'veinte', 'treinta', 'cuarenta', 'cincuenta', 'sesenta', 'setenta', 'ochenta', 'noventa']
-    especiales = ['diez', 'once', 'doce', 'trece', 'catorce', 'quince']
+    UNIDADES = ['', 'uno', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete',
+                'ocho', 'nueve']
+    ESPECIALES = ['diez', 'once', 'doce', 'trece', 'catorce', 'quince']
+    DECENAS = ['', 'diez', 'veinte', 'treinta', 'cuarenta', 'cincuenta',
+               'sesenta', 'setenta', 'ochenta', 'noventa']
+    CENTENAS = ['', 'ciento', 'doscientos', 'trescientos', 'cuatrocientos',
+                'quinientos', 'seiscientos', 'setecientos', 'ochocientos',
+                'novecientos']
 
-    parte_entera = int(monto)
-    centavos = int(round((monto - parte_entera) * 100))
-
-    # Conversion basica (hasta 999)
-    def convertir_centenas(n):
+    def hasta_999(n, apocope=False):
+        """
+        El numero en letras. Con apocope, 'un' en vez de 'uno': se usa
+        delante de 'mil' y de 'millon', donde se dice "veintiun mil".
+        """
         if n == 0:
-            return 'cero'
+            return ''
         if n < 10:
-            return unidades[n]
+            u = UNIDADES[n]
+            return 'un' if (apocope and n == 1) else u
         if n < 16:
-            return especiales[n - 10]
+            return ESPECIALES[n - 10]
         if n < 20:
-            return f'dieci{unidades[n - 10]}'
+            return 'dieci' + hasta_999(n - 10, apocope)
+        if n < 30:
+            resto = n - 20
+            if resto == 0:
+                return 'veinte'
+            return 'veinti' + hasta_999(resto, apocope)
         if n < 100:
             d, u = divmod(n, 10)
             if u == 0:
-                return decenas[d]
-            if d == 2:
-                return f'veinti{unidades[u]}'
-            return f'{decenas[d]} y {unidades[u]}'
+                return DECENAS[d]
+            return '%s y %s' % (DECENAS[d], hasta_999(u, apocope))
+        if n == 100:
+            return 'cien'
         c, resto = divmod(n, 100)
-        if c == 1:
-            if resto == 0:
-                return 'cien'
-            return f'ciento {convertir_centenas(resto)}'
-        centenas_txt = ['', 'ciento', 'doscientos', 'trescientos', 'cuatrocientos',
-                       'quinientos', 'seiscientos', 'setecientos', 'ochocientos', 'novecientos']
         if resto == 0:
-            return centenas_txt[c]
-        return f'{centenas_txt[c]} {convertir_centenas(resto)}'
+            return CENTENAS[c]
+        return '%s %s' % (CENTENAS[c], hasta_999(resto, apocope))
 
-    resultado = convertir_centenas(parte_entera)
+    def en_letras(n):
+        if n == 0:
+            return 'cero'
+        partes = []
+
+        millones, resto = divmod(n, 1000000)
+        if millones:
+            if millones == 1:
+                partes.append('un millon')
+            else:
+                partes.append('%s millones' % hasta_999(millones, apocope=True))
+
+        miles, unidades = divmod(resto, 1000)
+        if miles:
+            # "mil" y no "un mil"; a partir de dos, "dos mil"
+            if miles == 1:
+                partes.append('mil')
+            else:
+                partes.append('%s mil' % hasta_999(miles, apocope=True))
+
+        if unidades:
+            partes.append(hasta_999(unidades))
+
+        return ' '.join(partes)
+
+    try:
+        monto = float(monto or 0)
+    except (TypeError, ValueError):
+        monto = 0.0
+    negativo = monto < 0
+    monto = abs(monto)
+
+    parte_entera = int(monto)
+    centavos = int(round((monto - parte_entera) * 100))
+    # El redondeo puede empujar los centavos a 100
+    if centavos >= 100:
+        parte_entera += 1
+        centavos -= 100
+
+    resultado = en_letras(parte_entera)
     if centavos > 0:
-        resultado += f' con {centavos:02d}/100'
+        resultado += ' con %02d/100' % centavos
+    if negativo:
+        resultado = 'menos ' + resultado
 
     nombres_moneda = {
         'VES': 'BOLIVARES', 'BS': 'BOLIVARES', 'BS.': 'BOLIVARES',
         'USD': 'DOLARES', 'COP': 'PESOS COLOMBIANOS', 'EUR': 'EUROS',
     }
     unidad = nombres_moneda.get(str(moneda or 'VES').upper(), 'BOLIVARES')
-    return f'{resultado.upper()} {unidad}'
+    return '%s %s' % (resultado.upper(), unidad)
 
 
 # ============================================================================
