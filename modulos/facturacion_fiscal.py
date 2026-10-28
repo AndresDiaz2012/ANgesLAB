@@ -41,6 +41,33 @@ except Exception:  # pragma: no cover - respaldo si falta el modulo
 # CONFIGURACION FISCAL
 # ============================================================================
 
+def _tasa_configurada(config):
+    """
+    La tasa de IVA del laboratorio, respetando el cero.
+
+    Un cero NO es "sin configurar": es un laboratorio cuyos servicios estan
+    exentos, que es el caso normal de un laboratorio clinico. El codigo
+    anterior encadenaba con 'or' y, como en Python el cero es falso, un cero
+    configurado terminaba facturando al 16%.
+
+    Sin ninguna de las dos claves se cae al 16%, que es la alicuota general
+    y lo que habia antes.
+    """
+    if not config:
+        return Decimal('16')
+    for clave in ('TasaIVALaboratorio', 'IVAPorDefecto'):
+        if clave not in config:
+            continue
+        valor = config.get(clave)
+        if valor is None:
+            continue
+        try:
+            return Decimal(str(valor))
+        except Exception:
+            continue
+    return Decimal('16')
+
+
 class ConfiguracionFiscal:
     """Configuracion fiscal del sistema"""
 
@@ -50,8 +77,23 @@ class ConfiguracionFiscal:
     TASA_IVA_SUNTUARIA = Decimal('31.00')     # 31% Productos suntuarios
     TASA_IVA_EXENTO = Decimal('0.00')         # 0% Exento
 
-    # Servicios de laboratorio (segun normativa pueden estar exentos o con tasa reducida)
-    TASA_IVA_LABORATORIO = Decimal('16.00')   # Servicios de laboratorio
+    # Servicios de laboratorio clinico.
+    #
+    # Estan EXENTOS. La Sala Constitucional del TSJ, en sentencia 1505 del
+    # 5/6/2003, declaro exentos del IVA los servicios medico-asistenciales,
+    # odontologicos, de cirugia y hospitalizacion prestados por entes
+    # privados, y la jurisprudencia contencioso-tributaria posterior lo ha
+    # aplicado a los laboratorios clinicos para las actividades propias del
+    # laboratorio.
+    #
+    # Ojo: la exencion cubre el SERVICIO, no todo lo que venda el negocio.
+    # Un bien mueble -reactivos, materiales- sigue gravado, y ahi aplica la
+    # alicuota general.
+    #
+    # Esta constante se deja en cero para que, si alguien la usa como valor
+    # inicial, no empiece cobrando un impuesto que el servicio no causa. La
+    # tasa real de cada instalacion sale de ConfiguracionLaboratorio.
+    TASA_IVA_LABORATORIO = Decimal('0.00')    # Exento (TSJ 1505/2003)
 
     # IGTF (Impuesto a Grandes Transacciones Financieras)
     # Aplica a pagos en divisas, criptomonedas y transferencias internacionales
@@ -106,7 +148,7 @@ class ConfiguracionFiscal:
             'telefono': (config.get('Telefono1') or config.get('Telefono') or '') if config else '',
             'whatsapp': (config.get('WhatsApp') or '') if config else '',
             'email': (config.get('Email') or '') if config else '',
-            'tasa_iva': Decimal(str(config.get('TasaIVALaboratorio') or config.get('IVAPorDefecto') or 16)) if config else Decimal('16'),
+            'tasa_iva': _tasa_configurada(config),
             # Campos IGTF / Fiscal
             'igtf_activo': bool(config.get('IGTFActivo', True)) if config else True,
             'tasa_igtf': Decimal(str(config.get('TasaIGTF') or 3)) if config else Decimal('3'),
@@ -338,7 +380,14 @@ class FacturacionFiscal:
         base_imponible = subtotal - monto_descuento
 
         # Calcular IVA
-        if es_exonerada:
+        #
+        # Con la tasa en cero el importe va a EXENTO, no a "base imponible
+        # gravada al 0%". No es lo mismo: una operacion exenta esta fuera
+        # del impuesto y la factura la marca con (E), mientras que una base
+        # gravada al 0% declara una operacion que si causa impuesto. Los
+        # servicios de un laboratorio clinico privado estan exentos, asi que
+        # es el caso corriente y no una rareza.
+        if es_exonerada or not self.config['tasa_iva']:
             monto_iva = Decimal('0.00')
             monto_exento = base_imponible
             base_imponible_iva = Decimal('0.00')
