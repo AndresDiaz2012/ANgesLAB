@@ -167,11 +167,40 @@ class FacturacionFiscal:
 
     def generar_numero_control(self):
         """
-        Genera numero de control fiscal
-        Segun normativa: 00-NNNNNNNN
-        """
-        anio = datetime.now().year
+        El siguiente numero de control, sacado del rango que asigno la
+        imprenta digital (Providencia SNAT/2026/00093, art. 9).
 
+        Antes se deducia del mayor numero que hubiera en la tabla de
+        facturas. Con la norma derogada bastaba; con esta no, porque el
+        rango lo fija un tercero: si la imprenta asigno del 1 al 1.000 y el
+        programa sigue contando hasta el 1.001, ese documento esta fuera del
+        rango autorizado y nadie se entera.
+
+        Devuelve None cuando no queda rango. Quien llama tiene que avisar y
+        NO emitir: poner un numero que nadie autorizo es peor que no
+        facturar hasta que lleguen los nuevos.
+
+        Mientras no haya ningun rango cargado se conserva el comportamiento
+        anterior, para que una instalacion que todavia no ha pedido rangos
+        -o que factura con maquina fiscal- siga funcionando igual.
+        """
+        try:
+            from modulos import rangos_control
+        except Exception:
+            rangos_control = None
+
+        if rangos_control is not None:
+            try:
+                if rangos_control.listar_rangos(self.db, solo_activos=True):
+                    datos = rangos_control.tomar_numero(self.db)
+                    # Con rangos cargados pero agotados se devuelve None a
+                    # proposito: hay que pedir mas, no seguir contando
+                    return datos['numero'] if datos else None
+            except Exception as e:
+                _log.warning("No se pudo tomar el numero del rango: %s", e)
+
+        # Sin rangos: como antes
+        anio = datetime.now().year
         result = self.db.query_one(f"""
             SELECT MAX(NumeroControl) as Ultimo
             FROM Facturas

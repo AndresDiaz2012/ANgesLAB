@@ -51,6 +51,9 @@ try:
 except Exception:  # pragma: no cover
     import providencia_00093 as prov
 
+# Alias para usarlo dentro de funciones donde 'prov' es una variable local
+prov_mod = prov
+
 try:
     from modulos.logging_config import obtener_logger
     _log = obtener_logger('angeslab.factura_pdf')
@@ -439,8 +442,18 @@ class GeneradorFacturaPDF:
             f"(N° de control {afectada.get('NumeroControl') or '—'}) "
             f"emitida el {_fecha(afectada.get('FechaEmision'))}.", s)
 
-    def _bloque_pie(self, cfg):
-        """Datos del proveedor/imprenta autorizada (requisito l)."""
+    def _bloque_pie(self, cfg, fac=None):
+        """
+        Datos de la imprenta digital y el rango de numeros de control.
+
+        El articulo 9 pide, en la factura digital, el rango del que sale su
+        numero de control y la fecha en que se asigno, ademas de la razon
+        social, el RIF y la providencia de autorizacion de la imprenta.
+
+        Los datos del rango se leen del rango al que pertenece ESTE numero,
+        no del vigente: una factura se reimprime meses despues y tiene que
+        volver a salir con el rango que llevaba.
+        """
         s = self._estilo('pie', fontSize=6.5, leading=8.5,
                          textColor=colors.HexColor('#444444'))
         nombre = cfg.get('ImprentaNombre')
@@ -448,8 +461,28 @@ class GeneradorFacturaPDF:
         prov = cfg.get('ImprentaProvidencia')
         fecha_prov = cfg.get('ImprentaFechaProvidencia')
 
+        # El rango y la imprenta que constan en el propio numero de control
+        datos_rango = None
+        if fac is not None:
+            try:
+                from modulos import rangos_control
+                datos_rango = rangos_control.datos_del_numero(
+                    self.db, fac.get('NumeroControl'))
+            except Exception:
+                datos_rango = None
+        if datos_rango:
+            nombre = datos_rango.get('imprenta_nombre') or nombre
+            rif = datos_rango.get('imprenta_rif') or rif
+            prov = datos_rango.get('imprenta_providencia') or prov
+
         if nombre or rif or prov:
-            partes = ['Documento elaborado por medios propios.']
+            # Con imprenta digital el documento ya no se elabora "por medios
+            # propios": lo emite un tercero autorizado, y decir lo contrario
+            # seria declarar un medio de emision que no es el que se usa.
+            origen = ('Emitido a traves de imprenta digital autorizada.'
+                      if datos_rango else
+                      'Documento elaborado por medios propios.')
+            partes = [origen]
             if nombre:
                 partes.append(f"Proveedor autorizado: {nombre}")
             if rif:
@@ -459,6 +492,13 @@ class GeneradorFacturaPDF:
                 if fecha_prov:
                     texto += f" de fecha {_fecha(fecha_prov)}"
                 partes.append(texto)
+            if datos_rango:
+                from modulos import rangos_control as _rc
+                partes.append(_rc.texto_rango(datos_rango))
+                f_asig = datos_rango.get('fecha_asignacion')
+                if f_asig is not None and hasattr(f_asig, 'strftime'):
+                    partes.append('Asignado el %s'
+                                  % prov_mod.fecha_fiscal(f_asig))
             texto_pie = ' · '.join(partes)
         else:
             # Sin datos configurados se advierte, en vez de omitir el requisito
@@ -561,7 +601,7 @@ class GeneradorFacturaPDF:
         story.append(Spacer(1, 14))
         story.append(HRFlowable(width='100%', thickness=0.5, color=_COLOR_LINEA))
         story.append(Spacer(1, 4))
-        story.append(self._bloque_pie(cfg))
+        story.append(self._bloque_pie(cfg, fac))
 
         doc = SimpleDocTemplate(
             ruta_salida, pagesize=letter,
