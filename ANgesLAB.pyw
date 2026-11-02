@@ -18719,14 +18719,117 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
 
         # Unidad de medida
         tk.Label(frame, text="Unidad de Medida:", font=('Segoe UI', 10), bg='white', anchor='w').pack(fill='x', pady=(10, 2))
-        # Cargar unidades disponibles de la BD
-        _unidades_db = db.query("SELECT UnidadID, Simbolo FROM Unidades ORDER BY Simbolo")
-        _unidades_lista = ['(Ninguna)'] + [u['Simbolo'] for u in (_unidades_db or [])]
-        _unidades_map = {u['Simbolo']: u['UnidadID'] for u in (_unidades_db or [])}
-        _unidades_map_inv = {u['UnidadID']: u['Simbolo'] for u in (_unidades_db or [])}
-        entries['unidad'] = ttk.Combobox(frame, font=('Segoe UI', 10), values=_unidades_lista, state='readonly')
+        fila_unidad = tk.Frame(frame, bg='white')
+        fila_unidad.pack(fill='x')
+
+        # Las unidades disponibles, leidas de la BD. Se mutan en el sitio (no
+        # se reasignan) para que el resto de la ventana siga viendo las mismas
+        # estructuras despues de dar de alta una unidad nueva.
+        _unidades_db = []
+        _unidades_lista = []
+        _unidades_map = {}
+        _unidades_map_inv = {}
+
+        def _recargar_unidades(seleccionar=None):
+            filas = db.query("SELECT UnidadID, Simbolo FROM Unidades ORDER BY Simbolo") or []
+            _unidades_db[:] = filas
+            _unidades_lista[:] = ['(Ninguna)'] + [u['Simbolo'] for u in filas]
+            _unidades_map.clear()
+            _unidades_map.update({u['Simbolo']: u['UnidadID'] for u in filas})
+            _unidades_map_inv.clear()
+            _unidades_map_inv.update({u['UnidadID']: u['Simbolo'] for u in filas})
+            combo = entries.get('unidad')
+            if combo is not None:
+                actual = combo.get()
+                combo['values'] = _unidades_lista
+                if seleccionar and seleccionar in _unidades_lista:
+                    combo.set(seleccionar)
+                elif actual not in _unidades_lista:
+                    combo.set('(Ninguna)')
+
+        _recargar_unidades()
+        entries['unidad'] = ttk.Combobox(fila_unidad, font=('Segoe UI', 10),
+                                         values=_unidades_lista, state='readonly')
         entries['unidad'].set('(Ninguna)')
-        entries['unidad'].pack(fill='x', ipady=5)
+        entries['unidad'].pack(side='left', fill='x', expand=True, ipady=5)
+
+        def _nueva_unidad():
+            """
+            Da de alta una unidad y la deja seleccionada.
+
+            El desplegable es de solo lectura y se llena de la tabla Unidades,
+            asi que hasta ahora una unidad que no estuviera en la lista -la
+            RU/mL de un inmunoensayo nuevo, una U Todd de una ASLO- habia que
+            insertarla en la base a mano, y el parametro se quedaba sin unidad
+            mientras.
+            """
+            from modulos import unidades as mod_unidades
+
+            d = tk.Toplevel(win)
+            d.title("Nueva unidad de medida")
+            d.geometry("430x300")
+            d.configure(bg='white')
+            d.transient(win)
+            d.grab_set()
+
+            cont = tk.Frame(d, bg='white')
+            cont.pack(fill='both', expand=True, padx=20, pady=20)
+
+            tk.Label(cont, text="Nueva unidad de medida", font=('Segoe UI', 12, 'bold'),
+                     bg='white').pack(anchor='w', pady=(0, 12))
+
+            tk.Label(cont, text="Símbolo (como saldrá en el informe):",
+                     font=('Segoe UI', 10), bg='white', anchor='w').pack(fill='x')
+            e_simbolo = tk.Entry(cont, font=('Segoe UI', 11))
+            e_simbolo.pack(fill='x', ipady=4)
+            tk.Label(cont, text="Ejemplos:  RU/mL · mg/dL · U/L · 10^3/µL",
+                     font=('Segoe UI', 8), bg='white', fg='gray').pack(anchor='w')
+
+            tk.Label(cont, text="Nombre (opcional):", font=('Segoe UI', 10),
+                     bg='white', anchor='w').pack(fill='x', pady=(10, 0))
+            e_nombre = tk.Entry(cont, font=('Segoe UI', 10))
+            e_nombre.pack(fill='x', ipady=4)
+
+            tk.Label(cont, text="Tipo:", font=('Segoe UI', 10), bg='white',
+                     anchor='w').pack(fill='x', pady=(10, 0))
+            c_tipo = ttk.Combobox(cont, font=('Segoe UI', 10),
+                                  values=list(mod_unidades.TIPOS), state='readonly')
+            c_tipo.set(mod_unidades.TIPO_DEFECTO)
+            c_tipo.pack(fill='x', ipady=4)
+
+            def _guardar_unidad():
+                ok, msg, unidad = mod_unidades.crear(
+                    db, e_simbolo.get(), e_nombre.get(), c_tipo.get())
+                if not ok:
+                    # Si ya existia se selecciona la que habia, en vez de
+                    # crear una gemela: dos entradas iguales en la lista es
+                    # como se acaba imprimiendo "mg/dL" en unos informes y
+                    # "mg/dl" en otros.
+                    if unidad:
+                        _recargar_unidades(unidad.get('Simbolo'))
+                        messagebox.showinfo("Unidad", msg, parent=d)
+                        d.destroy()
+                    else:
+                        messagebox.showwarning("Unidad", msg, parent=d)
+                    return
+                _recargar_unidades(unidad.get('Simbolo') if unidad else None)
+                d.destroy()
+
+            botones = tk.Frame(cont, bg='white')
+            botones.pack(fill='x', pady=(18, 0))
+            tk.Button(botones, text="Guardar", font=('Segoe UI', 10, 'bold'),
+                      bg='#2e7d32', fg='white', relief='flat', cursor='hand2',
+                      command=_guardar_unidad).pack(side='right', padx=(8, 0), ipadx=14, ipady=4)
+            tk.Button(botones, text="Cancelar", font=('Segoe UI', 10),
+                      bg='#e0e0e0', relief='flat', cursor='hand2',
+                      command=d.destroy).pack(side='right', ipadx=14, ipady=4)
+
+            e_simbolo.focus_set()
+            e_simbolo.bind('<Return>', lambda _e: _guardar_unidad())
+
+        tk.Button(fila_unidad, text="+ Nueva", font=('Segoe UI', 9, 'bold'),
+                  bg='#1565c0', fg='white', relief='flat', cursor='hand2',
+                  command=_nueva_unidad).pack(side='left', padx=(6, 0), ipadx=8, ipady=3)
 
         # Opciones para tipo TEXTO
         tk.Label(frame, text="Opciones (para tipo TEXTO, separar con comas):",
