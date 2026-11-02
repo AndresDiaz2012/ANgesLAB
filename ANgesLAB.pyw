@@ -2128,6 +2128,10 @@ class MainApplication:
             'mg/dL',
             'seg',
             '%',
+            # Unidades relativas por mililitro: las usan los inmunoensayos
+            # (ELISA y similares), donde el resultado no sale en una unidad
+            # internacional sino referido al calibrador del kit.
+            'RU/mL',
         ]
         try:
             for simbolo in unidades_requeridas:
