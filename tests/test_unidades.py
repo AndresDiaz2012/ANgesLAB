@@ -224,6 +224,19 @@ class TestBuscarYListar(unittest.TestCase):
 class TestUnaBaseQueFalla(unittest.TestCase):
     """Si la base da error se informa; no se inventa que se guardo."""
 
+    def setUp(self):
+        # Estas pruebas provocan errores a proposito, y el logger del modulo
+        # escribe en el log de errores de la instalacion. Sin silenciarlo,
+        # cada ejecucion deja en el log del laboratorio lineas que parecen
+        # incidencias reales ("No se pudo crear la unidad...").
+        import logging
+        self._logger = logging.getLogger('angeslab.unidades')
+        self._antes = self._logger.disabled
+        self._logger.disabled = True
+
+    def tearDown(self):
+        self._logger.disabled = self._antes
+
     def test_un_error_al_insertar_se_devuelve(self):
         class DBRota(DBFalsa):
             def execute(self, sql):
