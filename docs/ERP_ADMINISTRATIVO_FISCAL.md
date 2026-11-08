@@ -285,7 +285,7 @@ Todo reporte sale en pantalla, PDF y Excel, filtrable por fechas y sede. Los fis
 
 ## 10. Modelo de datos
 
-Se crean 15 tablas y se amplían 5, sobre la base Access actual. Todos los cambios se aplican con migraciones idempotentes (como ya hacen `asegurar_tabla` y `asegurar_esquema`), para que una instalación existente se actualice sin perder datos.
+Se crean 12 tablas y se amplían 8, sobre la base Access actual. Todos los cambios se aplican con migraciones idempotentes (como ya hacen `asegurar_tabla` y `asegurar_esquema`), para que una instalación existente se actualice sin perder datos.
 
 | Tabla | Estado | Campos principales |
 | --- | --- | --- |
@@ -293,15 +293,16 @@ Se crean 15 tablas y se amplían 5, sobre la base Access actual. Todos los cambi
 | `ClientePacientes` | Nueva (2.7.0) | Cliente, paciente, parentesco o vínculo, por defecto |
 | `Proveedores` | Ampliada (2.7.0) | Tipo de persona, tipo de contribuyente, % retención IVA, concepto ISLR, días de crédito |
 | `Pruebas` (servicios) | Ampliada (2.7.0) | Régimen de IVA, alícuota |
-| `RecetaServicio` | Nueva | Servicio, producto, cantidad por prueba |
+| `RecetaServicio` | Nueva (2.8.0) | Prueba, producto, cantidad por prueba, fecha desde la que se descuenta |
+| `LotesProducto` | Nueva (2.8.0) | Producto, lote, vencimiento, cantidad inicial y actual, costo, compra de origen |
 | `Insumos` / `Productos` | Ampliar | Tipo, unidad de compra y consumo, factor, régimen de IVA, costo promedio |
-| `OrdenesCompra` y `DetalleOrdenCompra` | Nuevas | Proveedor, estado, moneda, líneas con cantidad pedida y recibida |
-| `Recepciones` y `DetalleRecepcion` | Nuevas | Orden, fecha, líneas con lote y vencimiento |
-| `FacturasProveedor` y `DetalleFacturaProveedor` | Nuevas | Número, control, fecha, base e IVA por alícuota, total, recepción asociada |
+| `OrdenesCompra` y `DetalleOrdenCompra` | Nuevas (2.8.0) | Proveedor, estado, moneda, líneas con cantidad pedida y recibida |
+| `Compras` y `DetalleCompras` (ya venían en la base del instalador) | Ampliadas (2.8.0) | Factura del proveedor con la recepción: número, control, fecha, exento, base, IVA, total, moneda y tasa, orden de origen; líneas con lote, vencimiento y costo en USD |
+| `Pagos` (ya venía en la base del instalador) | Ampliada (2.8.0) | Historial de abonos a cuentas por pagar |
 | `RetencionesIVA` | Nueva | Factura de proveedor, comprobante, período, %, monto, fecha de enteramiento |
 | `RetencionesISLR` | Ampliar | Concepto, tipo de persona, sustraendo, comprobante, pago asociado |
 | `RetencionesRecibidas` | Nueva | Factura propia, cliente, tipo (IVA o ISLR), comprobante, monto |
-| `CuentasPorPagar` | Ampliar | Factura de proveedor, vencimiento, neto, historial de abonos |
+| `CuentasPorPagar` | Ampliada (2.8.0) | Proveedor y compra de origen; el historial de abonos está en `Pagos` |
 | `DocumentosFiscales` | Nueva (reemplaza la factura actual) | Tipo, número, control, cliente, documento afectado, estado, emisor, identificador de envío, respuesta del emisor, totales en VES y divisa, tasa |
 | `EmisoresFiscales` | Nueva | Sede, tipo (imprenta digital, máquina fiscal, contingencia), parámetros de conexión, activo |
 | `CierresZ` | Nueva | Máquina, fecha, número de cierre, totales leídos, diferencia con el sistema |
@@ -336,7 +337,7 @@ Cinco fases de unas seis semanas cada una, en el orden en que dependen entre sí
 | Fase | Fechas | Contenido | Estado |
 | --- | --- | --- | --- |
 | 1 · Maestros | nov–dic 2026 | Clientes separados del paciente, proveedores fiscales, servicios con régimen de IVA, RIF validado, PRD corregido | Entregada en 2.7.0 |
-| 2 · Compras e inventario | dic 2026–ene 2027 | Órdenes, recepciones, facturas de proveedor, costo promedio, consumo por receta, cuentas por pagar | Pendiente |
+| 2 · Compras e inventario | dic 2026–ene 2027 | Órdenes, recepciones, facturas de proveedor, costo promedio, consumo por receta, cuentas por pagar | Entregada en 2.8.0 |
 | 3 · Retenciones | ene–feb 2027 | ISLR con sustraendo, comprobantes y archivo XML; retenciones de IVA e ISLR recibidas de clientes | Pendiente |
 | 4 · Emisión fiscal | feb–mar 2027 | Documentos fiscales con ciclo de vida, adaptador de máquina fiscal, de imprenta digital (HKA) y contingencia | Pendiente |
 | 5 · Reportes y piloto | mar–abr 2027 | Libros, resumen de IVA, reportes de gestión, cierre de período y piloto en el laboratorio | Pendiente |
@@ -345,7 +346,7 @@ Cinco fases de unas seis semanas cada una, en el orden en que dependen entre sí
 Cada fase se entrega como una versión etiquetada en `main`, con sus pruebas, y solo pasa a la siguiente si cumple su criterio:
 
 1. **Maestros:** se puede facturar a un cliente distinto del paciente, y no se guarda ningún RIF inválido. Entregada en la versión 2.7.0 (08/11/2026): maestros de clientes y proveedores con sus pantallas, RIF con dígito verificador y régimen de IVA por prueba. Falta que la factura use el cliente: eso entra con la emisión (fase 4).
-2. **Compras e inventario:** una compra registrada aparece en inventario, libro de compras y cuentas por pagar con los mismos montos.
+2. **Compras e inventario:** una compra registrada aparece en inventario, libro de compras y cuentas por pagar con los mismos montos. Entregada en la versión 2.8.0 (08/11/2026): órdenes con aprobación por otro usuario, factura de proveedor que mueve inventario por lote (FEFO, costo promedio), libro de compras y cuenta por pagar a la vez; recetas por prueba con descuento automático; pagos con historial y antigüedad de saldos. La recepción y la factura se registran en un solo paso, que es como llega la mercancía al laboratorio. También se corrigió que la pantalla de Proveedores no funcionaba con la base del instalador (sin columna RIF) y que el libro de compras suponía IVA al 16 % en todo monto.
 3. **Retenciones:** los comprobantes y archivos de un mes de prueba coinciden con el cálculo manual del contador.
 4. **Emisión fiscal:** se emiten factura, nota de crédito y nota de débito por cada emisor configurado, y una caída simulada pasa a contingencia sin duplicar documentos.
 5. **Reportes y piloto:** un mes completo del laboratorio cuadra entre libros, caja, bancos y cierres Z.

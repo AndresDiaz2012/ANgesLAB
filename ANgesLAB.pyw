@@ -1670,6 +1670,7 @@ class MainApplication:
                     ("🧾", "Corte de Adeudado", self.show_corte_adeudado),
                     ("👥", "Clientes", self.show_clientes),
                     ("🏭", "Proveedores", self.show_proveedores),
+                    ("🛒", "Compras", self.show_compras),
                     ("📋", "Cuentas por Pagar", self.show_cuentas_pagar),
                     ("💸", "Gastos", self.show_gastos),
                     ("🩺", "Comisiones Médicos", self.show_comisiones_medico),
@@ -19903,6 +19904,21 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
     def show_proveedores(self):
         """Proveedores con sus datos fiscales"""
         self._abrir_maestro('show_proveedores')
+
+    def show_compras(self):
+        """Compras, recepcion, recetas de consumo y cuentas por pagar"""
+        if not self.ventana_admin:
+            messagebox.showerror("Error", "Módulo administrativo no disponible.")
+            return
+        if not self.ventana_admin._puede_registrar_movimientos():
+            messagebox.showwarning("Acceso Denegado",
+                                   "No tiene permisos para esta seccion.")
+            return
+        try:
+            from modulos.ventana_compras import show_compras
+            show_compras(self.ventana_admin.db, self, self.user.get('NombreUsuario', ''))
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo abrir Compras: {e}")
 
     def show_gastos(self):
         """Control de Gastos"""
