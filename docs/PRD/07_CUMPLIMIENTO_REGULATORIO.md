@@ -33,9 +33,9 @@
 | Productos de lujo | 31%    | No aplica a laboratorio clinico                      |
 
 Cada prueba lleva `Pruebas.RegimenIVA` ('Exento', 'Gravado' o vacio) y
-`Pruebas.AlicuotaIVA`. Vacio = la tasa configurada del laboratorio, de modo
-que una instalacion sin marcar nada factura igual que antes
-(`maestros_fiscales.py`). Una factura puede mezclar lineas exentas y
+`Pruebas.AlicuotaIVA`. Vacio = EXENTA: una prueba solo lleva IVA si se
+marca 'Gravado' (`maestros_fiscales.py`). No depende de `IVAPorDefecto`,
+que en la base de la clinica vale 16 y habria gravado todas las pruebas. Una factura puede mezclar lineas exentas y
 gravadas: `calcular_totales_factura` agrupa por alicuota.
 
 ### 7.2.2 Retenciones de IVA

@@ -28,9 +28,14 @@ EL REGIMEN DE IVA ES DE CADA SERVICIO
 El servicio del laboratorio esta exento (TSJ, sentencia 1505/2003), pero un
 frasco recolector que se vende esta gravado al 16%. Con una sola tasa por
 laboratorio no se podia facturar las dos cosas juntas. Cada prueba lleva
-ahora RegimenIVA: 'Exento', 'Gravado' o vacio. Vacio significa "lo que diga
-la configuracion del laboratorio", de modo que una instalacion que no toque
-nada factura exactamente igual que antes.
+ahora RegimenIVA: 'Exento', 'Gravado' o vacio, y vacio es EXENTO.
+
+Vacio fue al principio "lo que diga la configuracion del laboratorio". Al
+mirar la base de la clinica resulto que IVAPorDefecto vale 16: la primera
+factura fiscal habria cobrado IVA a todas las pruebas. Una prueba es un
+servicio medico-asistencial y no causa IVA salvo que alguien lo decida
+expresamente marcandola 'Gravado'; la tasa del laboratorio queda para lo
+que no es una prueba (un producto que se vende).
 
 Copyright 2024-2026 ANgesLAB Solutions
 ================================================================================
@@ -511,15 +516,14 @@ def validar_datos_fiscales_proveedor(datos):
 # ══════════════════════════════════════════════════════════════════════════
 def tasa_iva_de_prueba(fila):
     """
-    La tasa de IVA de una prueba, o None si la decide la configuracion.
+    La tasa de IVA de una prueba.
 
-    'Exento' -> 0; 'Gravado' -> su AlicuotaIVA o la general (16%); vacio o
-    desconocido -> None, y la factura usa la tasa del laboratorio como
-    siempre. Asi una base que no tiene la columna, o una prueba que nadie ha
-    marcado, factura igual que antes.
+    'Gravado' -> su AlicuotaIVA o la general (16%). Cualquier otra cosa
+    -'Exento', vacio, desconocido, o una base sin la columna- -> 0: el
+    servicio del laboratorio esta exento salvo decision expresa.
     """
     if not fila:
-        return None
+        return Decimal('0')
     regimen = str(fila.get('RegimenIVA') or '').strip().capitalize()
     if regimen == 'Exento':
         return Decimal('0')
@@ -530,30 +534,28 @@ def tasa_iva_de_prueba(fila):
         except Exception:
             valor = ALICUOTA_GENERAL
         return valor if valor > 0 else ALICUOTA_GENERAL
-    return None
+    return Decimal('0')
 
 
 def tasas_iva_de_pruebas(db, prueba_ids):
     """
-    {PruebaID: tasa} para las pruebas con regimen marcado. Las que no lo
-    tienen no aparecen. Sin la columna en la base devuelve {}.
+    {PruebaID: tasa} para TODAS las pruebas pedidas: las gravadas con su
+    alicuota, el resto en 0 (exentas), haya o no columna en la base.
     """
     ids = sorted({int(i) for i in prueba_ids if i not in (None, '')})
+    exentas = {i: Decimal('0') for i in ids}
     if not ids or not _tiene_columna(db, 'Pruebas', 'RegimenIVA'):
-        return {}
+        return exentas
     try:
         filas = db.query(
             "SELECT PruebaID, RegimenIVA, AlicuotaIVA FROM [Pruebas] WHERE PruebaID IN (%s)"
             % ', '.join(str(i) for i in ids)) or []
     except Exception as e:
         _log.warning("No se pudo leer el regimen de IVA: %s", e)
-        return {}
-    salida = {}
+        return exentas
     for f in filas:
-        tasa = tasa_iva_de_prueba(f)
-        if tasa is not None:
-            salida[int(f['PruebaID'])] = tasa
-    return salida
+        exentas[int(f['PruebaID'])] = tasa_iva_de_prueba(f)
+    return exentas
 
 
 def marcar_regimen_prueba(db, prueba_id, regimen, alicuota=None):

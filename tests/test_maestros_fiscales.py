@@ -264,17 +264,27 @@ class TestRegimenIvaDeLaPrueba(unittest.TestCase):
         self.assertEqual(mf.tasa_iva_de_prueba({'RegimenIVA': 'Gravado'}), Decimal('16'))
         self.assertEqual(mf.tasa_iva_de_prueba({'RegimenIVA': 'gravado', 'AlicuotaIVA': 8}),
                          Decimal('8'))
-        self.assertIsNone(mf.tasa_iva_de_prueba({'RegimenIVA': None}))
-        self.assertIsNone(mf.tasa_iva_de_prueba({}))
+        # Sin marcar es exenta: un servicio medico no causa IVA salvo decision
+        self.assertEqual(mf.tasa_iva_de_prueba({'RegimenIVA': None}), Decimal('0'))
+        self.assertEqual(mf.tasa_iva_de_prueba({}), Decimal('0'))
 
-    def test_sin_columna_no_hay_tasas_y_se_factura_como_antes(self):
+    def test_sin_columna_todas_exentas(self):
         db = base_con_tablas_viejas()
-        self.assertEqual(mf.tasas_iva_de_pruebas(db, [1, 2]), {})
+        self.assertEqual(mf.tasas_iva_de_pruebas(db, [1, 2]), {1: 0, 2: 0})
 
-    def test_solo_aparecen_las_marcadas(self):
+    def test_solo_la_marcada_gravada_lleva_iva(self):
         db = base_con_tablas_viejas()
         mf.marcar_regimen_prueba(db, 2, 'Gravado')
-        self.assertEqual(mf.tasas_iva_de_pruebas(db, [1, 2]), {2: Decimal('16')})
+        self.assertEqual(mf.tasas_iva_de_pruebas(db, [1, 2]), {1: 0, 2: Decimal('16')})
+
+    def test_con_iva_por_defecto_16_la_prueba_sigue_exenta(self):
+        # Es la configuracion real de la clinica (IVAPorDefecto = 16)
+        ff = FacturacionFiscal(DBConfig({'IVAPorDefecto': 16}))
+        db = base_con_tablas_viejas()
+        tasas = mf.tasas_iva_de_pruebas(db, [1])
+        t = ff.calcular_totales_factura([{'precio': 100, 'cantidad': 1,
+                                          'tasa_iva': float(tasas[1])}])
+        self.assertEqual((t['monto_iva'], t['monto_exento']), (0.0, 100.0))
 
     def test_regimen_desconocido_se_rechaza(self):
         db = base_con_tablas_viejas()

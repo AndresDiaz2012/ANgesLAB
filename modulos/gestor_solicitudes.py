@@ -866,13 +866,14 @@ class GestorSolicitudes:
 
             # Preparar detalles para facturación
             #
-            # Cada linea lleva la tasa de IVA de su prueba si esta marcada
-            # (exenta o gravada); si no, la factura usa la del laboratorio.
+            # Cada linea lleva la tasa de IVA de su prueba: exenta salvo que
+            # este marcada 'Gravado' (maestros_fiscales). No se deja en manos
+            # de IVAPorDefecto, que en la clinica vale 16.
             try:
                 from modulos.maestros_fiscales import tasas_iva_de_pruebas
                 tasas = tasas_iva_de_pruebas(self.db, [p['PruebaID'] for p in pruebas])
             except Exception:
-                tasas = {}
+                tasas = {p['PruebaID']: 0 for p in pruebas}
             detalles = []
             for p in pruebas:
                 linea = {
