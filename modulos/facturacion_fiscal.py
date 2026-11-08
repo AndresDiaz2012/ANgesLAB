@@ -1126,87 +1126,31 @@ class FacturacionFiscal:
 
     def generar_libro_compras(self, fecha_desde, fecha_hasta):
         """
-        Genera el libro de compras en formato SENIAT.
+        Libro de compras en formato SENIAT.
 
-        Args:
-            fecha_desde: Fecha inicio del período
-            fecha_hasta: Fecha fin del período
-
-        Returns:
-            dict con registros, totales y período
+        Lo arma compras.libro_compras desde las facturas de proveedor
+        registradas. La version anterior leia CuentasPorPagar, donde no hay
+        IVA, y suponia que todo monto traia IVA al 16%: una compra exenta
+        salia con credito fiscal. Se mantienen las claves de antes para quien
+        las lea.
         """
-        sql = (
-            f"SELECT cp.CuentaPagarID, cp.NumeroDocumento, cp.FechaEmision, "
-            f"cp.FechaVencimiento, cp.MontoOriginal, cp.MontoPagado, cp.Estado, "
-            f"p.RazonSocial, p.RIF, p.TipoContribuyente, "
-            f"cp.Descripcion, cp.Categoria "
-            f"FROM [CuentasPorPagar] AS cp "
-            f"LEFT JOIN [Proveedores] AS p ON cp.ProveedorID = p.ProveedorID "
-            f"WHERE cp.FechaEmision >= #{fecha_desde.strftime('%m/%d/%Y')}# "
-            f"AND cp.FechaEmision <= #{fecha_hasta.strftime('%m/%d/%Y')} 23:59:59# "
-            f"ORDER BY cp.FechaEmision ASC"
-        )
-        compras = self.db.query(sql) or []
-
-        # Calcular desglose IVA para cada compra
+        from modulos.compras import libro_compras
+        libro = libro_compras(self.db, fecha_desde, fecha_hasta)
         registros = []
-        totales = {
-            'total_compras': Decimal('0'),
-            'base_imponible': Decimal('0'),
-            'iva_soportado': Decimal('0'),
-            'total_exento': Decimal('0'),
-            'total_retenciones_iva': Decimal('0'),
-            'total_retenciones_islr': Decimal('0'),
-            'num_registros': 0,
-        }
-
-        tasa_iva = ConfiguracionFiscal.TASA_IVA_GENERAL
-
-        for compra in compras:
-            monto = Decimal(str(compra.get('MontoOriginal', 0)))
-            # Calcular base e IVA (asumiendo que el monto incluye IVA)
-            base = (monto / (1 + tasa_iva / 100)).quantize(
-                Decimal('0.01'), rounding=ROUND_HALF_UP
-            )
-            iva = monto - base
-
-            registro = {
-                'numero_doc': compra.get('NumeroDocumento', ''),
-                'fecha': compra.get('FechaEmision'),
-                'razon_social': compra.get('RazonSocial', compra.get('Descripcion', '')),
-                'rif': compra.get('RIF', ''),
-                'tipo_contribuyente': compra.get('TipoContribuyente', 'Ordinario'),
-                'monto_total': float(monto),
-                'base_imponible': float(base),
-                'iva_soportado': float(iva),
-                'tasa_iva': float(tasa_iva),
-                'monto_exento': 0,
-            }
-            registros.append(registro)
-
-            totales['total_compras'] += monto
-            totales['base_imponible'] += base
-            totales['iva_soportado'] += iva
-            totales['num_registros'] += 1
-
-        # Buscar retenciones del período
-        ret_iva_sql = (
-            f"SELECT SUM(MontoRetencion) AS TotalRetIVA "
-            f"FROM [RetencionesISLR] "
-            f"WHERE FechaDocumento >= #{fecha_desde.strftime('%m/%d/%Y')}# "
-            f"AND FechaDocumento <= #{fecha_hasta.strftime('%m/%d/%Y')} 23:59:59#"
-        )
-        try:
-            ret_result = self.db.query_one(ret_iva_sql) or {}
-            totales['total_retenciones_islr'] = Decimal(str(ret_result.get('TotalRetIVA', 0) or 0))
-        except Exception as _exc:
-            _log.warning("generar_libro_compras: %s", _exc)
-
+        for r in libro['registros']:
+            registros.append(dict(r, numero_doc=r['numero_factura'],
+                                  monto_total=r['total'], iva_soportado=r['iva'],
+                                  tasa_iva=r['alicuota'], monto_exento=r['exento'],
+                                  tipo_contribuyente=''))
+        t = libro['totales']
         return {
-            'periodo_desde': fecha_desde,
-            'periodo_hasta': fecha_hasta,
+            'periodo_desde': libro['periodo_desde'],
+            'periodo_hasta': libro['periodo_hasta'],
             'registros': registros,
-            'totales': {k: float(v) if isinstance(v, Decimal) else v for k, v in totales.items()},
+            'totales': dict(t, total_exento=t['total_exento'],
+                            total_retenciones_iva=t['retencion_iva'],
+                            total_retenciones_islr=0.0,
+                            num_registros=len(registros)),
         }
 
     # -------------------------------------------------------------------------

@@ -4203,6 +4203,16 @@ def crear_ventana_administrativa(db, user):
     except Exception as e:
         logging.getLogger("angeslab.ventana_administrativa").warning("[ADMIN] Advertencia en maestros fiscales: %s", e)
 
+    # Compras e inventario (fase 2): tablas, y el consumo de reactivos de
+    # las pruebas procesadas desde la ultima vez. Las dos cosas son
+    # idempotentes: cada prueba se descuenta una sola vez.
+    try:
+        from modulos.compras import asegurar_esquema as asegurar_compras, GestorRecetas
+        asegurar_compras(db)
+        GestorRecetas(db, (user or {}).get('NombreUsuario', '')).consumir_pendientes()
+    except Exception as e:
+        logging.getLogger("angeslab.ventana_administrativa").warning("[ADMIN] Advertencia en compras: %s", e)
+
     try:
         return VentanaAdministrativa(db, user)
     except Exception as e:

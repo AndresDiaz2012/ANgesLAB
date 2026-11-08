@@ -15,8 +15,6 @@ que lo acepta todo.
 """
 
 import os
-import re
-import sqlite3
 import sys
 import unittest
 from decimal import Decimal
@@ -26,39 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from modulos import maestros_fiscales as mf
 from modulos.facturacion_fiscal import FacturacionFiscal
 from modulos.modulo_administrativo import GestorProveedores
-
-
-class DBAccessEnSqlite:
-    """Lo justo del dialecto de Access para correr el SQL del modulo."""
-
-    def __init__(self):
-        self.cn = sqlite3.connect(':memory:')
-        self.cn.row_factory = sqlite3.Row
-
-    @staticmethod
-    def _traducir(sql):
-        sql = re.sub(r'COUNTER PRIMARY KEY', 'INTEGER PRIMARY KEY AUTOINCREMENT', sql)
-        sql = re.sub(r'AUTOINCREMENT PRIMARY KEY', 'INTEGER PRIMARY KEY AUTOINCREMENT', sql)
-        sql = re.sub(r'TEXT\(\d+\)', 'TEXT', sql)
-        sql = re.sub(r'#(\d\d)/(\d\d)/(\d{4}) ([\d:]+)#', r"'\3-\1-\2 \4'", sql)
-        sql = re.sub(r'\bTrue\b', '1', sql)
-        sql = re.sub(r'\bFalse\b', '0', sql)
-        top = re.search(r'SELECT TOP (\d+) ', sql)
-        if top:
-            sql = sql.replace(top.group(0), 'SELECT ', 1) + ' LIMIT %s' % top.group(1)
-        return sql
-
-    def execute(self, sql):
-        cur = self.cn.execute(self._traducir(sql))
-        self.cn.commit()
-        return cur
-
-    def query(self, sql):
-        return [dict(r) for r in self.cn.execute(self._traducir(sql)).fetchall()]
-
-    def query_one(self, sql):
-        filas = self.query(sql)
-        return filas[0] if filas else None
+from tests.sqlite_access import DBAccessEnSqlite
 
 
 def base_con_tablas_viejas():

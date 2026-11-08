@@ -196,6 +196,7 @@ DDL_CLIENTE_PACIENTES = (
 
 # Columnas que la fase 1 anade a tablas que ya existen
 COLUMNAS_PROVEEDORES = {
+    'TipoContribuyente': 'TEXT(20)',
     'TipoPersona': 'TEXT(4)',
     'PorcentajeRetencionIVA': 'DOUBLE',
     'ConceptoISLR': 'TEXT(50)',
@@ -205,6 +206,33 @@ COLUMNAS_PRUEBAS = {
     'RegimenIVA': 'TEXT(10)',
     'AlicuotaIVA': 'DOUBLE',
 }
+
+
+# Proveedores: nombre canonico -> columnas posibles, en orden de preferencia.
+# La base del instalador y la que crea el modulo administrativo no coinciden
+# (ver GestorProveedores).
+_CANDIDATAS_PROVEEDOR = {
+    'RIF': ('RIF', 'NumeroDocumento'),
+    'Telefono': ('Telefono', 'Telefono1'),
+    'Contacto': ('Contacto', 'PersonaContacto'),
+    'FechaCreacion': ('FechaCreacion', 'FechaRegistro'),
+    'TipoDocumento': ('TipoDocumento',),
+}
+
+
+def columnas_proveedor(db):
+    """
+    {nombre canonico: columna real o None} para la tabla Proveedores de ESTA
+    base. Las columnas que no tienen variantes se devuelven tal cual.
+    """
+    salida = {}
+    for canonico, candidatas in _CANDIDATAS_PROVEEDOR.items():
+        salida[canonico] = next((c for c in candidatas
+                                 if _tiene_columna(db, 'Proveedores', c)), None)
+    for col in ('RazonSocial', 'Direccion', 'Email', 'Observaciones', 'Activo') \
+            + tuple(COLUMNAS_PROVEEDORES):
+        salida[col] = col if _tiene_columna(db, 'Proveedores', col) else None
+    return salida
 
 
 def asegurar_esquema(db):

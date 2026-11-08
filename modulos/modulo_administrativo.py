@@ -402,28 +402,21 @@ class GestorCuentasPorPagar:
             return False, f"Error al crear cuenta: {e}"
 
     def registrar_pago(self, cuenta_id, monto, forma_pago_id, referencia=''):
-        """Registra un pago parcial o total a un proveedor."""
+        """
+        Registra un pago parcial o total a un proveedor.
+
+        El abono lo lleva compras.registrar_pago_cxp, que ademas deja el pago
+        en la tabla Pagos (antes no quedaba historial de cuando ni como se
+        pago) y pone al dia la compra de origen.
+        """
         try:
+            from modulos.compras import registrar_pago_cxp
             cuenta = self.db.query_one(
-                f"SELECT * FROM [CuentasPorPagar] WHERE CuentaPagarID={cuenta_id}"
+                f"SELECT * FROM [CuentasPorPagar] WHERE CuentaPagarID={int(cuenta_id)}"
             )
-            if not cuenta:
-                return False, "Cuenta no encontrada"
-
-            saldo = float(cuenta.get('SaldoPendiente', 0) or 0)
-            monto = float(monto)
-            if monto > saldo:
-                return False, f"El monto ({monto:.2f}) excede el saldo ({saldo:.2f})"
-
-            pagado = float(cuenta.get('MontoPagado', 0) or 0) + monto
-            nuevo_saldo = saldo - monto
-            estado = 'Pagada' if nuevo_saldo <= 0 else 'Parcial'
-
-            self.db.execute(
-                f"UPDATE [CuentasPorPagar] SET MontoPagado={pagado}, "
-                f"SaldoPendiente={nuevo_saldo}, Estado='{estado}' "
-                f"WHERE CuentaPagarID={cuenta_id}"
-            )
+            ok, msg = registrar_pago_cxp(self.db, cuenta_id, monto, forma_pago_id, referencia)
+            if not ok:
+                return False, msg
 
             # Registrar egreso en caja si hay caja abierta
             gestor_caja = GestorCajaChica(self.db)
@@ -432,13 +425,13 @@ class GestorCuentasPorPagar:
                 gestor_caja.registrar_movimiento(caja['CajaID'], {
                     'Tipo': 'Egreso',
                     'Categoria': 'Pago a proveedor',
-                    'Descripcion': f"Pago CxP #{cuenta_id} - {cuenta.get('ProveedorNombre', '')}",
-                    'Monto': monto,
+                    'Descripcion': f"Pago CxP #{cuenta_id} - {(cuenta or {}).get('ProveedorNombre', '')}",
+                    'Monto': float(monto),
                     'FormaPagoID': forma_pago_id,
                     'Referencia': referencia,
                 }, 0)
 
-            return True, f"Pago registrado. Saldo pendiente: {nuevo_saldo:.2f}"
+            return True, msg
         except Exception as e:
             return False, f"Error al registrar pago: {e}"
 
@@ -462,7 +455,7 @@ class GestorCuentasPorPagar:
         """Resumen de cuentas por pagar."""
         try:
             cuentas = self.db.query(
-                "SELECT * FROM [CuentasPorPagar] WHERE Estado <> 'Pagada'"
+                "SELECT * FROM [CuentasPorPagar] WHERE Estado IN ('Pendiente', 'Parcial')"
             )
             total = sum(float(c.get('SaldoPendiente', 0) or 0) for c in cuentas)
             por_vencer = 0
@@ -748,10 +741,62 @@ class ResumenFinanciero:
 # ============================================================================
 
 class GestorProveedores:
-    """Gestión de proveedores del laboratorio (reactivos, insumos, servicios)."""
+    """
+    Gestión de proveedores del laboratorio (reactivos, insumos, servicios).
+
+    DOS ESQUEMAS EN LA CALLE
+
+    La base que trae el instalador tiene Proveedores con NumeroDocumento,
+    Telefono1, PersonaContacto y FechaRegistro. Las instalaciones donde la
+    tabla la creo el modulo administrativo la tienen con RIF, Telefono,
+    Contacto y FechaCreacion. Este gestor escribia siempre los segundos, y
+    contra la base del instalador fallaba en el primer INSERT.
+
+    Ahora mira que columnas hay (maestros_fiscales.columnas_proveedor) y
+    escribe en las que existen. Hacia afuera siempre habla con los mismos
+    nombres -RIF, Telefono, Contacto-, de modo que pantallas y reportes no
+    tienen que saber en que base estan.
+    """
 
     def __init__(self, db):
         self.db = db
+        self._cols = None
+
+    def _columnas(self):
+        if self._cols is None:
+            from modulos.maestros_fiscales import columnas_proveedor
+            self._cols = columnas_proveedor(self.db)
+        return self._cols
+
+    def _normalizar(self, fila):
+        """La fila con los nombres canonicos, venga del esquema que venga."""
+        if not fila:
+            return {}
+        fila = dict(fila)
+        for canonico, real in self._columnas().items():
+            if real and real != canonico and canonico not in fila:
+                fila[canonico] = fila.get(real)
+        return fila
+
+    def _sets(self, valores):
+        """[col]=valor para los campos canonicos que existen en esta base."""
+        cols = self._columnas()
+        sets = {}
+        for canonico, valor in valores.items():
+            real = cols.get(canonico, canonico)
+            if not real:
+                continue
+            if valor is None:
+                sets[real] = 'NULL'
+            elif isinstance(valor, bool):
+                sets[real] = 'True' if valor else 'False'
+            elif isinstance(valor, (int, float)):
+                sets[real] = repr(valor)
+            elif isinstance(valor, datetime):
+                sets[real] = valor.strftime('#%m/%d/%Y %H:%M:%S#')
+            else:
+                sets[real] = "'%s'" % str(valor).replace("'", "''")
+        return sets
 
     def crear_proveedor(self, datos: dict) -> int:
         """
@@ -759,91 +804,75 @@ class GestorProveedores:
 
         Args:
             datos: dict con RazonSocial, RIF, Direccion, Telefono, Email,
-                   Contacto, TipoContribuyente, Observaciones
+                   Contacto, TipoContribuyente, Observaciones y los datos
+                   fiscales de maestros_fiscales (TipoPersona, ConceptoISLR...)
         """
+        from modulos.maestros_fiscales import (validar_datos_fiscales_proveedor,
+                                               asegurar_esquema)
         razon = (datos.get('RazonSocial') or '').strip()
         if not razon:
             raise ValueError("La razón social es obligatoria")
 
         # El RIF es obligatorio y se comprueba entero, digito verificador
         # incluido: al proveedor se le retiene ISLR y el comprobante va a su
-        # RIF. Los datos fiscales nuevos se guardan despues del alta.
-        from modulos.maestros_fiscales import validar_datos_fiscales_proveedor
+        # RIF.
         if not (datos.get('RIF') or '').strip():
             raise ValueError("El RIF del proveedor es obligatorio")
         fiscales = validar_datos_fiscales_proveedor(datos)
         rif = fiscales['RIF']
+        if self.buscar_por_rif(rif):
+            raise ValueError("Ya existe un proveedor con el RIF %s" % rif)
 
-        fecha = datetime.now().strftime('#%m/%d/%Y %H:%M:%S#')
-        sql = (
-            f"INSERT INTO [Proveedores] "
-            f"([RazonSocial], [RIF], [Direccion], [Telefono], [Email], "
-            f"[Contacto], [TipoContribuyente], [Observaciones], [Activo], [FechaCreacion]) "
-            f"VALUES ("
-            f"'{razon.replace(chr(39), chr(39)*2)}', "
-            f"'{rif.replace(chr(39), chr(39)*2)}', "
-            f"'{(datos.get('Direccion') or '').replace(chr(39), chr(39)*2)}', "
-            f"'{(datos.get('Telefono') or '').replace(chr(39), chr(39)*2)}', "
-            f"'{(datos.get('Email') or '').replace(chr(39), chr(39)*2)}', "
-            f"'{(datos.get('Contacto') or '').replace(chr(39), chr(39)*2)}', "
-            f"'{datos.get('TipoContribuyente', 'Ordinario')}', "
-            f"'{(datos.get('Observaciones') or '').replace(chr(39), chr(39)*2)}', "
-            f"True, {fecha})"
-        )
-        self.db.execute(sql)
-
-        row = self.db.query_one(
-            f"SELECT TOP 1 ProveedorID FROM [Proveedores] "
-            f"WHERE RazonSocial='{razon.replace(chr(39), chr(39)*2)}' "
-            f"ORDER BY ProveedorID DESC"
-        )
-        proveedor_id = (row or {}).get('ProveedorID', 0)
-        if proveedor_id:
-            self._guardar_fiscales(proveedor_id, fiscales)
-        return proveedor_id
-
-    def _guardar_fiscales(self, proveedor_id, fiscales):
-        """Los campos de la fase 1 (tipo de persona, retenciones, credito)."""
-        from modulos.maestros_fiscales import asegurar_esquema, COLUMNAS_PROVEEDORES
-        extra = {k: v for k, v in fiscales.items() if k in COLUMNAS_PROVEEDORES}
-        if not extra:
-            return
         asegurar_esquema(self.db)
-        sets = []
-        for campo, valor in extra.items():
-            if isinstance(valor, str):
-                sets.append(f"[{campo}]='{valor.replace(chr(39), chr(39)*2)}'")
-            else:
-                sets.append(f"[{campo}]={valor!r}")
+        self._cols = None
+        valores = {
+            'RazonSocial': razon, 'RIF': rif,
+            'Direccion': (datos.get('Direccion') or '').strip(),
+            'Telefono': (datos.get('Telefono') or '').strip(),
+            'Email': (datos.get('Email') or '').strip(),
+            'Contacto': (datos.get('Contacto') or '').strip(),
+            'TipoContribuyente': fiscales.get('TipoContribuyente', 'Ordinario'),
+            'Observaciones': (datos.get('Observaciones') or '').strip(),
+            'Activo': True, 'FechaCreacion': datetime.now(),
+        }
+        for campo in ('TipoPersona', 'PorcentajeRetencionIVA', 'ConceptoISLR', 'DiasCredito'):
+            if campo in fiscales:
+                valores[campo] = fiscales[campo]
+        if self._columnas().get('TipoDocumento'):
+            valores['TipoDocumento'] = 'RIF'
+        sets = self._sets(valores)
         self.db.execute(
-            f"UPDATE [Proveedores] SET {', '.join(sets)} "
-            f"WHERE ProveedorID={int(proveedor_id)}"
-        )
+            "INSERT INTO [Proveedores] (%s) VALUES (%s)"
+            % (', '.join('[%s]' % c for c in sets), ', '.join(sets.values())))
+        fila = self.buscar_por_rif(rif)
+        return (fila or {}).get('ProveedorID', 0)
 
     def actualizar_proveedor(self, proveedor_id: int, datos: dict):
         """Actualiza datos de un proveedor."""
-        from modulos.maestros_fiscales import validar_datos_fiscales_proveedor
+        from modulos.maestros_fiscales import (validar_datos_fiscales_proveedor,
+                                               asegurar_esquema)
         if 'RIF' in datos and not str(datos.get('RIF') or '').strip():
             raise ValueError("El RIF del proveedor es obligatorio")
         fiscales = validar_datos_fiscales_proveedor(datos)
         if 'RIF' in fiscales:
-            datos = dict(datos, RIF=fiscales['RIF'])
-        self._guardar_fiscales(proveedor_id, fiscales)
-        sets = []
-        for campo in ('RazonSocial', 'RIF', 'Direccion', 'Telefono', 'Email',
-                       'Contacto', 'TipoContribuyente', 'Observaciones'):
-            val = datos.get(campo)
-            if val is not None:
-                sets.append(f"[{campo}]='{str(val).replace(chr(39), chr(39)*2)}'")
-
+            otro = self.buscar_por_rif(fiscales['RIF'])
+            if otro and int(otro['ProveedorID']) != int(proveedor_id):
+                raise ValueError("Ya existe un proveedor con el RIF %s" % fiscales['RIF'])
+        asegurar_esquema(self.db)
+        self._cols = None
+        valores = {}
+        for campo in ('RazonSocial', 'Direccion', 'Telefono', 'Email',
+                      'Contacto', 'Observaciones'):
+            if datos.get(campo) is not None:
+                valores[campo] = str(datos[campo]).strip()
+        valores.update(fiscales)
         if datos.get('Activo') is not None:
-            sets.append(f"[Activo]={datos['Activo']}")
-
+            valores['Activo'] = bool(datos['Activo'])
+        sets = self._sets(valores)
         if sets:
             self.db.execute(
-                f"UPDATE [Proveedores] SET {', '.join(sets)} "
-                f"WHERE ProveedorID={int(proveedor_id)}"
-            )
+                "UPDATE [Proveedores] SET %s WHERE ProveedorID=%d"
+                % (', '.join('[%s]=%s' % kv for kv in sets.items()), int(proveedor_id)))
 
     def desactivar_proveedor(self, proveedor_id: int):
         self.db.execute(
@@ -851,23 +880,31 @@ class GestorProveedores:
         )
 
     def obtener_proveedor(self, proveedor_id: int) -> dict:
-        return self.db.query_one(
+        return self._normalizar(self.db.query_one(
             f"SELECT * FROM [Proveedores] WHERE ProveedorID={int(proveedor_id)}"
-        ) or {}
+        ))
+
+    def buscar_por_rif(self, rif):
+        col = self._columnas().get('RIF') or 'RIF'
+        return self._normalizar(self.db.query_one(
+            "SELECT * FROM [Proveedores] WHERE [%s]='%s'"
+            % (col, str(rif or '').replace("'", "''")))) or None
 
     def listar_proveedores(self, solo_activos=True, busqueda=None) -> list:
         """Lista proveedores con filtros."""
+        col_rif = self._columnas().get('RIF') or 'RIF'
         where = []
         if solo_activos:
             where.append("Activo=True")
         if busqueda:
             term = busqueda.replace("'", "''").replace("%", "").replace("_", "")
-            where.append(f"(RazonSocial LIKE '%{term}%' OR RIF LIKE '%{term}%')")
+            where.append(f"(RazonSocial LIKE '%{term}%' OR [{col_rif}] LIKE '%{term}%')")
 
         where_sql = f"WHERE {' AND '.join(where)}" if where else ""
-        return self.db.query(
+        filas = self.db.query(
             f"SELECT * FROM [Proveedores] {where_sql} ORDER BY RazonSocial"
         ) or []
+        return [self._normalizar(f) for f in filas]
 
 
 # ============================================================================
