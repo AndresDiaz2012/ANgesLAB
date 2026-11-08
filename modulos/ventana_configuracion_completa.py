@@ -492,7 +492,7 @@ class VentanaConfiguracionCompleta:
         igtf_row1 = ttk.Frame(sec_igtf)
         igtf_row1.pack(fill='x', pady=5)
 
-        self.var_igtf_activo = tk.BooleanVar(value=True)
+        self.var_igtf_activo = tk.BooleanVar(value=False)
         ttk.Checkbutton(igtf_row1, text="IGTF Activo",
                         variable=self.var_igtf_activo,
                         style='TCheckbutton').pack(side=tk.LEFT, padx=(0, 30))
@@ -514,7 +514,7 @@ class VentanaConfiguracionCompleta:
         self.combo_tipo_contrib.pack(side=tk.LEFT)
 
         ttk.Label(sec_igtf,
-                 text="Se aplica automaticamente a pagos en Divisa/Zelle (3% sobre base imponible).",
+                 text="Solo lo percibe un contribuyente ESPECIAL (SNAT/2022/000013): si el tipo es Ordinario no se cobra aunque este activo.",
                  foreground='gray', font=('Segoe UI', 9)).pack(anchor='w', pady=(5, 0))
 
         # ============================================
@@ -667,7 +667,9 @@ class VentanaConfiguracionCompleta:
                self._safe_float(config.get('DescuentoMaximo'), 50.0))
 
         igtf_activo = config.get('IGTFActivo')
-        self.var_igtf_activo.set(True if igtf_activo is None
+        # Sin configurar = apagado: solo un contribuyente especial percibe
+        # IGTF (SNAT/2022/000013), y la facturacion lo exige ademas
+        self.var_igtf_activo.set(False if igtf_activo is None
                                  else bool(igtf_activo))
         _poner(self.spin_igtf, self._safe_float(config.get('TasaIGTF'), 3.0))
         self.combo_tipo_contrib.set(

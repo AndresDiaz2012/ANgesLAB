@@ -68,6 +68,35 @@ def _tasa_configurada(config):
     return Decimal('16')
 
 
+def _es_especial(tipo):
+    """True si el tipo de contribuyente configurado es 'Especial'."""
+    return 'especial' in str(tipo or '').strip().lower()
+
+
+def igtf_corresponde(config):
+    """
+    Si este laboratorio tiene que cobrar IGTF. Solo con las DOS condiciones.
+
+    La Providencia SNAT/2022/000013 (G.O. 42.339) designa agentes de
+    percepcion del IGTF a los sujetos pasivos ESPECIALES, y a nadie mas. Un
+    contribuyente ordinario que suma el 3% a un pago en divisas le cobra al
+    paciente un impuesto que no tiene derecho a percibir.
+
+    Antes bastaba con IGTFActivo, y ademas valia verdadero cuando faltaba,
+    de modo que un laboratorio ordinario sin configurar cobraba IGTF en cada
+    pago en Divisa o Zelle. Ahora:
+
+      - ordinario (o sin tipo configurado): nunca, aunque IGTFActivo diga
+        que si; el interruptor no puede crear una obligacion que la ley no da.
+      - especial: solo si IGTFActivo esta encendido expresamente.
+    """
+    if not config:
+        return False
+    if not _es_especial(config.get('TipoContribuyente')):
+        return False
+    return bool(config.get('IGTFActivo') or False)
+
+
 class ConfiguracionFiscal:
     """Configuracion fiscal del sistema"""
 
@@ -150,7 +179,7 @@ class ConfiguracionFiscal:
             'email': (config.get('Email') or '') if config else '',
             'tasa_iva': _tasa_configurada(config),
             # Campos IGTF / Fiscal
-            'igtf_activo': bool(config.get('IGTFActivo', True)) if config else True,
+            'igtf_activo': igtf_corresponde(config),
             'tasa_igtf': Decimal(str(config.get('TasaIGTF') or 3)) if config else Decimal('3'),
             'tipo_contribuyente': (config.get('TipoContribuyente') or 'Ordinario') if config else 'Ordinario',
         }
@@ -299,7 +328,7 @@ class FacturacionFiscal:
         Returns:
             (monto_igtf, total_con_igtf) como floats
         """
-        if not self.config.get('igtf_activo', True):
+        if not self.config.get('igtf_activo', False):
             return 0.0, float(monto_total)
 
         # Auto-detectar si la forma de pago activa IGTF
@@ -772,7 +801,7 @@ class FacturacionFiscal:
         except Exception as _exc:
             _log.warning("registrar_cobro: %s", _exc)
 
-        if aplica_igtf and self.config.get('igtf_activo', True):
+        if aplica_igtf and self.config.get('igtf_activo', False):
             tasa_igtf = self.config.get('tasa_igtf', ConfiguracionFiscal.TASA_IGTF)
             monto_igtf = (monto_cobro * tasa_igtf / Decimal('100')).quantize(
                 Decimal('0.01'), rounding=ROUND_HALF_UP
