@@ -11,9 +11,9 @@
 | Providencia SNAT/2026/00093 (G.O. 43.484, vigente 19/04/2027) | Contenido de la factura y medios de emision | Parcial: contenido (`providencia_00093.py`) y rangos (`rangos_control.py`); falta la emision por The Factory HKA |
 | Providencia SNAT/2026/00084 (G.O. 43.435) | Deroga la homologacion de software de facturacion | No exige nada nuevo |
 | Providencia SNAT/2022/000013       | IGTF: solo lo perciben los especiales | Implementado: el laboratorio es ordinario y no lo cobra |
-| Providencia SNAT/2025/000054       | Agentes de retencion de IVA           | No aplica: el laboratorio es ordinario |
+| Providencia SNAT/2025/000054       | Agentes de retencion de IVA           | No aplica: el laboratorio no es agente de retencion |
 | Ley de IVA vigente                 | Impuesto al valor agregado            | Implementado: exento por servicio, gravado por prueba marcada |
-| Decreto 1.808                      | Retenciones de ISLR                   | Parcial: faltan sustraendos, comprobantes y XML |
+| Decreto 1.808                      | Retenciones de ISLR                   | No aplica: el laboratorio no es agente de retencion; solo recibe las que le hacen sus clientes |
 | Providencia SNAT/2011/0071 y SNAT/2024/000102 | Facturacion (anterior)     | DEROGADAS por la SNAT/2026/00093 |
 | ISO 15189:2022 seccion 8.4         | Gestion de informacion de laboratorio | Parcial      |
 | CLIA 42 CFR 493.1291               | Trazabilidad de resultados            | Parcial      |
@@ -99,6 +99,10 @@ La factura almacena el total con y sin IGTF para transparencia:
 ---
 
 ## 7.4 Retenciones de ISLR (Decreto 1.808)
+
+El laboratorio **no es agente de retencion** (confirmado el 08/11/2026): no
+retiene ISLR a sus proveedores y les paga el total de la factura. La tabla
+siguiente queda como referencia por si lo designaran.
 
 ### 7.4.1 Tasas por tipo de actividad
 

@@ -10,7 +10,7 @@ Fecha: 08/11/2026 · Autor: Andres Diaz
 
 ANgesLAB tendrá un ERP administrativo y fiscal propio de un laboratorio clínico: cada bolívar que entra o sale queda en un documento fiscal válido, en un libro y en un reporte, sin hojas de cálculo aparte. La meta es llegar al **19/04/2027**, fecha en que entra en vigor la Providencia SNAT/2026/00093, con todo funcionando y probado.
 
-**Dentro del alcance:** servicios (pruebas y perfiles), productos (reactivos e insumos), clientes, proveedores, compras, inventario, cuentas por pagar, cuentas por cobrar, caja, facturación electrónica (por imprenta digital o máquina fiscal), retenciones de IVA e ISLR, libros fiscales y reportes de gestión.
+**Dentro del alcance:** servicios (pruebas y perfiles), productos (reactivos e insumos), clientes, proveedores, compras, inventario, cuentas por pagar, cuentas por cobrar, caja, facturación electrónica (por imprenta digital o máquina fiscal), retenciones de IVA e ISLR que le practican sus clientes, libros fiscales y reportes de gestión.
 
 **Fuera del alcance:** contabilidad general completa (plan de cuentas, mayor, balances), nómina y activos fijos. El ERP exporta lo que el contador necesita para llevarlos en su propio sistema.
 
@@ -53,9 +53,9 @@ La norma que manda es la Providencia SNAT/2026/00093, que entra en vigor el 19/0
 | Ley de IVA y su Reglamento | Alícuotas, exenciones, libros de compras y ventas, débitos y créditos fiscales | Servicio del laboratorio exento (TSJ, sentencia 1505 de 2003); productos gravados al 16 %; libros mensuales; resumen para la declaración |
 | [Providencia SNAT/2025/000054](https://www.forvismazars.com/ve/es/insights/forvis-mazars-insights/fmi-0825-providencia-agentes-de-retencion-del-iva) (G.O. 43.171, vigente desde 01/08/2025) | Agentes de retención de IVA; deroga SNAT/2015/0049 | El laboratorio es ordinario: no retiene IVA a sus proveedores. Solo recibe la retención de sus clientes especiales cuando una factura lleva IVA (venta de productos) |
 | Ley del IGTF y [Providencia SNAT/2022/000013](https://www.forvismazars.com/ve/es/insights/forvis-mazars-insights/designacion-de-los-spe) (G.O. 42.339) | 3 % sobre pagos en divisas o cripto recibidos sin intermediación bancaria | Solo los contribuyentes especiales perciben el IGTF. El laboratorio es ordinario y no lo cobra: queda como parámetro apagado, por si cambia su calificación |
-| Decreto 1.808 (Reglamento de retenciones de ISLR) | Retenciones de ISLR por concepto, con porcentaje y sustraendo | Retención al pagar honorarios, servicios, alquileres o fletes; comprobante al proveedor; archivo XML de declaración mensual |
+| Decreto 1.808 (Reglamento de retenciones de ISLR) | Retenciones de ISLR por concepto, con porcentaje y sustraendo | El laboratorio **no es agente de retención**: no retiene ISLR a sus proveedores. Solo recibe la retención de ISLR que le hacen sus clientes agentes, que es anticipo de su propio impuesto |
 
-El laboratorio es **contribuyente ordinario**. Queda abierto para el contador: el texto exacto de la leyenda del artículo 19 (hoy configurable en `LeyendaProvidencia`). Los requisitos de la 00093 se tomaron de resúmenes profesionales: antes de la puesta en marcha hay que contrastarlos con la Gaceta oficial.
+El laboratorio es **contribuyente ordinario y no es agente de retención** de IVA ni de ISLR (confirmado por el dueño el 08/11/2026). Queda abierto para el contador: el texto exacto de la leyenda del artículo 19 (hoy configurable en `LeyendaProvidencia`). Los requisitos de la 00093 se tomaron de resúmenes profesionales: antes de la puesta en marcha hay que contrastarlos con la Gaceta oficial.
 
 ## 4. Maestros
 
@@ -109,8 +109,8 @@ El cliente es quien recibe la factura, que no siempre es el paciente: un pacient
 | --- | --- |
 | RIF, razón social y domicilio fiscal | Obligatorios; RIF validado |
 | Tipo de persona | Natural residente, natural no residente, jurídica domiciliada o no domiciliada; define la tabla del Decreto 1.808 |
-| Tipo de contribuyente | Ordinario o especial; decidiría la retención de IVA si el laboratorio llegara a ser agente |
-| Concepto ISLR por defecto | Por ejemplo, honorarios, servicios, alquiler, fletes; se puede cambiar en cada factura |
+| Tipo de contribuyente | Ordinario o especial; informativo, porque el laboratorio no retiene |
+| Concepto ISLR por defecto | Informativo; solo se usaría si el laboratorio llegara a ser designado agente de retención |
 | Condición de pago | Días de crédito |
 | Cuentas bancarias | Para pagarle |
 | Productos que suministra | Con su código de catálogo |
@@ -125,7 +125,7 @@ Toda compra termina en tres registros a la vez: la entrada al inventario, la lí
 2. **Orden de compra.** Proveedor, productos, cantidades y precio pactado, en USD o VES. Estados: borrador, aprobada, recibida parcial, recibida, anulada. Solo el rol administrativo la aprueba.
 3. **Recepción.** Lo que llegó, por lote y vencimiento. Una recepción parcial deja la orden abierta. La recepción mueve existencias y recalcula el costo promedio.
 4. **Factura del proveedor.** Se registra con su número, número de control, fecha, base, IVA y total, tal como viene. El sistema compara contra la orden y la recepción y avisa si el precio o la cantidad difieren.
-5. **Retenciones.** El sistema calcula la retención de ISLR que corresponda y emite el comprobante (sección 6). No hay retención de IVA: el laboratorio es ordinario.
+5. **Sin retenciones.** El laboratorio no es agente de retención: al proveedor se le paga el total de la factura.
 6. **Cuenta por pagar.** Queda creada por el neto a pagar, con su vencimiento según la condición del proveedor.
 
 Una compra de servicios (alquiler, mantenimiento de equipos, honorarios) salta los pasos 1 a 3: se registra directo la factura del proveedor con su concepto de gasto.
@@ -142,7 +142,7 @@ Una compra de servicios (alquiler, mantenimiento de equipos, honorarios) salta l
 
 ## 6. Cuentas por pagar y retenciones
 
-Cada factura de proveedor crea una cuenta por pagar por el neto: total menos retención de ISLR. Como contribuyente ordinario, el laboratorio no retiene IVA. Las retenciones no son un descuento del proveedor: son una deuda del laboratorio con el SENIAT y se controlan aparte hasta que se enteran.
+Cada factura de proveedor crea una cuenta por pagar por su total: el laboratorio no es agente de retención, así que no retiene IVA ni ISLR a nadie. Las retenciones que sí entran al ERP son las que le practican al laboratorio sus clientes agentes (6.4).
 
 ### 6.1 Cuentas por pagar
 
@@ -152,24 +152,26 @@ Cada factura de proveedor crea una cuenta por pagar por el neto: total menos ret
 - **Programación:** vista de vencimientos de la semana y del mes, para decidir qué pagar.
 - **Antigüedad de saldos:** por vencer, 1–30, 31–60, 61–90 y más de 90 días, por proveedor.
 
-### 6.2 Retención de IVA (apagada: el laboratorio es ordinario)
+### 6.2 Retención de IVA practicada (no aplica)
 
-No aplica hoy. Se programa detrás de un parámetro apagado, y se enciende solo si el SENIAT califica al laboratorio como contribuyente especial. En ese caso funcionaría así:
+No aplica: el laboratorio no es agente de retención. Si el SENIAT llegara a designarlo, funcionaría así:
 
 - **Cálculo:** IVA de la factura × 75 %, o × 100 % si el proveedor no está inscrito en el RIF, no muestra el IVA discriminado o la factura no cumple requisitos.
 - **Comprobante:** numerado por año, mes y secuencia, uno por factura, entregado al proveedor en PDF.
 - **Declaración:** por período quincenal, archivo TXT para el portal del SENIAT y resumen para enterar.
 
-### 6.3 Retención de ISLR (Decreto 1.808)
+### 6.3 Retención de ISLR practicada (no aplica)
+
+No aplica: el laboratorio no es agente de retención de ISLR. Queda descrito por si lo designaran:
 
 - **Cálculo:** base × porcentaje del concepto − sustraendo, según el tipo de persona del proveedor. Hoy `RETENCIONES_ISLR` tiene todos los sustraendos en cero: hay que cargar la tabla completa del decreto, con la unidad de cálculo vigente como parámetro, no como constante.
-- **Cuándo:** al pagar o abonar en cuenta, lo que ocurra primero. Ser ordinario no exime de retener ISLR: el contador debe confirmar que el laboratorio es agente por su forma jurídica (compañía o firma personal).
+- **Cuándo:** al pagar o abonar en cuenta, lo que ocurra primero.
 - **Comprobante:** uno por pago, entregado al proveedor.
 - **Declaración:** archivo XML mensual con el formato del portal del SENIAT.
 
-### 6.4 Retenciones que nos hacen
+### 6.4 Retenciones que le hacen al laboratorio (lo que sí aplica)
 
-Cuando un cliente especial (una aseguradora, una empresa) le paga al laboratorio, le retiene IVA si la factura lo tuvo, e ISLR por el servicio. El sistema registra el comprobante recibido contra la factura y la cuenta por cobrar: el saldo del cliente baja y la retención queda como crédito a descontar en la declaración.
+Cuando un cliente agente de retención (una aseguradora, una empresa) le paga al laboratorio, le retiene ISLR por el servicio y, si la factura llevó IVA (venta de productos), también IVA. El sistema registra el comprobante recibido contra la factura y la cuenta por cobrar: el saldo del cliente baja por el monto retenido y la retención queda acumulada por período, para descontarla en la declaración de IVA (la de IVA) y como anticipo del ISLR del laboratorio (la de ISLR). Un comprobante no se registra dos veces y no puede superar el impuesto de la factura.
 
 ## 7. Facturación electrónica
 
@@ -263,8 +265,9 @@ Todo reporte sale en pantalla, PDF y Excel, filtrable por fechas y sede. Los fis
 | Libro de ventas | Mensual | Una línea por documento: fecha, RIF y nombre del cliente, número, control, documento afectado, total, exento, base e IVA por alícuota, retención recibida |
 | Libro de compras | Mensual | Igual, por factura de proveedor, con el IVA retenido y el número de comprobante |
 | Resumen para la declaración de IVA | Mensual | Débitos, créditos, retenciones soportadas y excedentes, en el orden de la planilla del SENIAT |
-| Retenciones de IVA practicadas | Quincenal | No aplica mientras el laboratorio sea ordinario |
-| Retenciones de ISLR practicadas | Mensual | Detalle y archivo XML para el portal |
+| Retenciones de IVA practicadas | Quincenal | No aplica: el laboratorio no es agente de retención |
+| Retenciones de ISLR practicadas | Mensual | No aplica: el laboratorio no es agente de retención |
+| Retenciones recibidas | Mensual | Comprobantes de IVA e ISLR que le hicieron los clientes, por período, para la declaración |
 | IGTF percibido | Quincenal | No aplica mientras el laboratorio sea ordinario |
 | Cuadre de máquina fiscal | Diario | Cierre Z contra ventas del sistema, con diferencias |
 | Control de números de control | A pedido | Rangos cargados, usados, anulados y disponibles; aviso cuando quede menos del 10 % |
@@ -285,7 +288,7 @@ Todo reporte sale en pantalla, PDF y Excel, filtrable por fechas y sede. Los fis
 
 ## 10. Modelo de datos
 
-Se crean 12 tablas y se amplían 8, sobre la base Access actual. Todos los cambios se aplican con migraciones idempotentes (como ya hacen `asegurar_tabla` y `asegurar_esquema`), para que una instalación existente se actualice sin perder datos.
+Se crean 11 tablas y se amplían 7, sobre la base Access actual. Todos los cambios se aplican con migraciones idempotentes (como ya hacen `asegurar_tabla` y `asegurar_esquema`), para que una instalación existente se actualice sin perder datos.
 
 | Tabla | Estado | Campos principales |
 | --- | --- | --- |
@@ -299,8 +302,6 @@ Se crean 12 tablas y se amplían 8, sobre la base Access actual. Todos los cambi
 | `OrdenesCompra` y `DetalleOrdenCompra` | Nuevas (2.8.0) | Proveedor, estado, moneda, líneas con cantidad pedida y recibida |
 | `Compras` y `DetalleCompras` (ya venían en la base del instalador) | Ampliadas (2.8.0) | Factura del proveedor con la recepción: número, control, fecha, exento, base, IVA, total, moneda y tasa, orden de origen; líneas con lote, vencimiento y costo en USD |
 | `Pagos` (ya venía en la base del instalador) | Ampliada (2.8.0) | Historial de abonos a cuentas por pagar |
-| `RetencionesIVA` | Nueva | Factura de proveedor, comprobante, período, %, monto, fecha de enteramiento |
-| `RetencionesISLR` | Ampliar | Concepto, tipo de persona, sustraendo, comprobante, pago asociado |
 | `RetencionesRecibidas` | Nueva | Factura propia, cliente, tipo (IVA o ISLR), comprobante, monto |
 | `CuentasPorPagar` | Ampliada (2.8.0) | Proveedor y compra de origen; el historial de abonos está en `Pagos` |
 | `DocumentosFiscales` | Nueva (reemplaza la factura actual) | Tipo, número, control, cliente, documento afectado, estado, emisor, identificador de envío, respuesta del emisor, totales en VES y divisa, tasa |
@@ -319,7 +320,7 @@ Nadie puede cerrar sola una operación que mueve dinero: quien la registra no es
 | Recepción / caja | Liquidar solicitudes, facturar al contado, cobrar, abrir y cerrar su caja | Anular documentos, emitir notas, tocar precios |
 | Facturación | Facturar a crédito y en lote, emitir notas de crédito y débito, registrar retenciones recibidas | Aprobar compras, pagar proveedores |
 | Compras / almacén | Crear órdenes, registrar recepciones, ajustar inventario con motivo | Aprobar sus propias órdenes, pagar |
-| Administración | Aprobar órdenes y anulaciones, pagar proveedores, emitir comprobantes de retención, cerrar períodos | Borrar documentos emitidos (nadie puede) |
+| Administración | Aprobar órdenes y anulaciones, pagar proveedores, cerrar períodos | Borrar documentos emitidos (nadie puede) |
 | Contador (solo lectura) | Ver y exportar libros, retenciones y reportes | Modificar nada |
 
 ### Controles
@@ -332,13 +333,13 @@ Nadie puede cerrar sola una operación que mueve dinero: quien la registra no es
 
 ## 12. Plan de implementación
 
-Cinco fases de unas seis semanas cada una, en el orden en que dependen entre sí: sin maestros no hay compras, sin compras no hay retenciones, y la emisión necesita todo lo anterior. La fase 5 deja tres semanas de piloto antes del 19/04/2027.
+Cinco fases de unas seis semanas cada una, en el orden en que dependen entre sí: sin maestros no hay compras ni clientes a quien facturar, y la emisión necesita todo lo anterior. La fase 5 deja tres semanas de piloto antes del 19/04/2027.
 
 | Fase | Fechas | Contenido | Estado |
 | --- | --- | --- | --- |
 | 1 · Maestros | nov–dic 2026 | Clientes separados del paciente, proveedores fiscales, servicios con régimen de IVA, RIF validado, PRD corregido | Entregada en 2.7.0 |
 | 2 · Compras e inventario | dic 2026–ene 2027 | Órdenes, recepciones, facturas de proveedor, costo promedio, consumo por receta, cuentas por pagar | Entregada en 2.8.0 |
-| 3 · Retenciones | ene–feb 2027 | ISLR con sustraendo, comprobantes y archivo XML; retenciones de IVA e ISLR recibidas de clientes | Pendiente |
+| 3 · Retenciones recibidas | ene–feb 2027 | Comprobantes de IVA e ISLR que le hacen los clientes agentes, aplicados a la cuenta por cobrar, y su reporte por período. El laboratorio no practica retenciones | Pendiente |
 | 4 · Emisión fiscal | feb–mar 2027 | Documentos fiscales con ciclo de vida, adaptador de máquina fiscal, de imprenta digital (HKA) y contingencia | Pendiente |
 | 5 · Reportes y piloto | mar–abr 2027 | Libros, resumen de IVA, reportes de gestión, cierre de período y piloto en el laboratorio | Pendiente |
 | **19/04/2027** | | Entra en vigor la SNAT/2026/00093: todo en producción | |
@@ -347,13 +348,12 @@ Cada fase se entrega como una versión etiquetada en `main`, con sus pruebas, y 
 
 1. **Maestros:** se puede facturar a un cliente distinto del paciente, y no se guarda ningún RIF inválido. Entregada en la versión 2.7.0 (08/11/2026): maestros de clientes y proveedores con sus pantallas, RIF con dígito verificador y régimen de IVA por prueba. Falta que la factura use el cliente: eso entra con la emisión (fase 4).
 2. **Compras e inventario:** una compra registrada aparece en inventario, libro de compras y cuentas por pagar con los mismos montos. Entregada en la versión 2.8.0 (08/11/2026): órdenes con aprobación por otro usuario, factura de proveedor que mueve inventario por lote (FEFO, costo promedio), libro de compras y cuenta por pagar a la vez; recetas por prueba con descuento automático; pagos con historial y antigüedad de saldos. La recepción y la factura se registran en un solo paso, que es como llega la mercancía al laboratorio. También se corrigió que la pantalla de Proveedores no funcionaba con la base del instalador (sin columna RIF) y que el libro de compras suponía IVA al 16 % en todo monto.
-3. **Retenciones:** los comprobantes y archivos de un mes de prueba coinciden con el cálculo manual del contador.
+3. **Retenciones recibidas:** los comprobantes de un mes de prueba rebajan las cuentas por cobrar correctas y su total por período coincide con el del contador.
 4. **Emisión fiscal:** se emiten factura, nota de crédito y nota de débito por cada emisor configurado, y una caída simulada pasa a contingencia sin duplicar documentos.
 5. **Reportes y piloto:** un mes completo del laboratorio cuadra entre libros, caja, bancos y cierres Z.
 
 ### Decisiones pendientes
 
-- [ ] Confirmar con el contador que el laboratorio es agente de retención de ISLR según su forma jurídica.
 - [ ] Pedir a The Factory HKA credenciales del ambiente demo, URL de producción, catálogos y tabla de códigos de error.
 - [ ] Elegir el modelo de máquina fiscal que se va a soportar primero.
 - [ ] Obtener del contador el texto de la leyenda del art. 19 y validar los requisitos contra la Gaceta 43.484.

@@ -12,6 +12,11 @@
 - Cada fase del ERP se publica con `VERSION` actualizado y su etiqueta
   `vX.Y.Z`. Si el entorno no deja subir etiquetas, se avisa para subirlas
   desde Windows.
+- Situacion fiscal del laboratorio (la dio el dueño el 08/11/2026): es
+  contribuyente ORDINARIO, NO es agente de retencion (ni de IVA ni de ISLR)
+  y no percibe IGTF. No retiene a sus proveedores; solo recibe las
+  retenciones que le hacen sus clientes agentes. Facturacion digital con
+  The Factory HKA.
 - El diseño del modulo administrativo y fiscal esta en
   `docs/ERP_ADMINISTRATIVO_FISCAL.md`; el codigo que lo implemente lo
   actualiza en el mismo commit.

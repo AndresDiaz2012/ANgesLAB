@@ -275,8 +275,8 @@ def show_proveedores(db, app):
     area = app.setup_scrollable_content()
     main = tk.Frame(area, bg=COLORS['bg'])
     main.pack(fill='both', expand=True, padx=20, pady=10)
-    tk.Label(main, text='El tipo de persona y el concepto deciden la retencion de ISLR '
-             'al pagarle. El laboratorio es ordinario: no retiene IVA.',
+    tk.Label(main, text='El laboratorio no es agente de retencion: a los proveedores se les '
+             'paga el total de la factura. Tipo de persona y concepto ISLR son informativos.',
              font=('Segoe UI', 10), bg=COLORS['bg'], fg=COLORS['text_light']).pack(anchor='w')
 
     columnas = ('ID', 'RIF', 'Razon social', 'Persona', 'Contribuyente',
