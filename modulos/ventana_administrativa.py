@@ -4195,6 +4195,14 @@ def crear_ventana_administrativa(db, user):
     except Exception as e:
         logging.getLogger("angeslab.ventana_administrativa").warning("[ADMIN] Advertencia en migracion fiscal: %s", e)
 
+    # Maestros fiscales (clientes, datos fiscales de proveedores, regimen
+    # de IVA por prueba). Idempotente como la anterior.
+    try:
+        from modulos.maestros_fiscales import asegurar_esquema
+        asegurar_esquema(db)
+    except Exception as e:
+        logging.getLogger("angeslab.ventana_administrativa").warning("[ADMIN] Advertencia en maestros fiscales: %s", e)
+
     try:
         return VentanaAdministrativa(db, user)
     except Exception as e:

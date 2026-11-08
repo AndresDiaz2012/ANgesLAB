@@ -765,7 +765,14 @@ class GestorProveedores:
         if not razon:
             raise ValueError("La razón social es obligatoria")
 
-        rif = (datos.get('RIF') or '').strip()
+        # El RIF es obligatorio y se comprueba entero, digito verificador
+        # incluido: al proveedor se le retiene ISLR y el comprobante va a su
+        # RIF. Los datos fiscales nuevos se guardan despues del alta.
+        from modulos.maestros_fiscales import validar_datos_fiscales_proveedor
+        if not (datos.get('RIF') or '').strip():
+            raise ValueError("El RIF del proveedor es obligatorio")
+        fiscales = validar_datos_fiscales_proveedor(datos)
+        rif = fiscales['RIF']
 
         fecha = datetime.now().strftime('#%m/%d/%Y %H:%M:%S#')
         sql = (
@@ -790,10 +797,36 @@ class GestorProveedores:
             f"WHERE RazonSocial='{razon.replace(chr(39), chr(39)*2)}' "
             f"ORDER BY ProveedorID DESC"
         )
-        return (row or {}).get('ProveedorID', 0)
+        proveedor_id = (row or {}).get('ProveedorID', 0)
+        if proveedor_id:
+            self._guardar_fiscales(proveedor_id, fiscales)
+        return proveedor_id
+
+    def _guardar_fiscales(self, proveedor_id, fiscales):
+        """Los campos de la fase 1 (tipo de persona, retenciones, credito)."""
+        from modulos.maestros_fiscales import asegurar_esquema, COLUMNAS_PROVEEDORES
+        extra = {k: v for k, v in fiscales.items() if k in COLUMNAS_PROVEEDORES}
+        if not extra:
+            return
+        asegurar_esquema(self.db)
+        sets = []
+        for campo, valor in extra.items():
+            if isinstance(valor, str):
+                sets.append(f"[{campo}]='{valor.replace(chr(39), chr(39)*2)}'")
+            else:
+                sets.append(f"[{campo}]={valor!r}")
+        self.db.execute(
+            f"UPDATE [Proveedores] SET {', '.join(sets)} "
+            f"WHERE ProveedorID={int(proveedor_id)}"
+        )
 
     def actualizar_proveedor(self, proveedor_id: int, datos: dict):
         """Actualiza datos de un proveedor."""
+        from modulos.maestros_fiscales import validar_datos_fiscales_proveedor
+        fiscales = validar_datos_fiscales_proveedor(datos)
+        if 'RIF' in fiscales:
+            datos = dict(datos, RIF=fiscales['RIF'])
+        self._guardar_fiscales(proveedor_id, fiscales)
         sets = []
         for campo in ('RazonSocial', 'RIF', 'Direccion', 'Telefono', 'Email',
                        'Contacto', 'TipoContribuyente', 'Observaciones'):

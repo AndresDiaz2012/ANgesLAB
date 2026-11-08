@@ -377,6 +377,16 @@ class FacturacionFiscal:
 
         return float(retencion)
 
+    def _tasa_item(self, item):
+        """La tasa de IVA de una linea: la suya si la trae, si no la del laboratorio."""
+        tasa = item.get('tasa_iva') if item else None
+        if tasa is None or tasa == '':
+            return Decimal(str(self.config['tasa_iva']))
+        try:
+            return Decimal(str(tasa))
+        except Exception:
+            return Decimal(str(self.config['tasa_iva']))
+
     def calcular_totales_factura(self, detalles, descuento_porcentaje=0,
                                  es_exonerada=False, forma_pago_nombre=None):
         """
@@ -390,7 +400,13 @@ class FacturacionFiscal:
 
         Retorna: dict con todos los montos calculados
         """
-        # Calcular subtotal
+        # Subtotal, agrupado por la tasa de IVA de cada linea.
+        #
+        # Cada linea puede traer su 'tasa_iva' (maestros_fiscales: la prueba
+        # exenta, el frasco que se vende gravado al 16%). La que no la trae
+        # usa la del laboratorio, que es lo que se hacia con todas antes: una
+        # factura sin tasas por linea sale identica a como salia.
+        grupos = {}
         subtotal = Decimal('0.00')
         for item in detalles:
             precio = Decimal(str(item.get('precio', 0)))
@@ -399,6 +415,8 @@ class FacturacionFiscal:
 
             monto_item = (precio * cantidad) - desc_item
             subtotal += monto_item
+            tasa_item = Decimal('0') if es_exonerada else self._tasa_item(item)
+            grupos[tasa_item] = grupos.get(tasa_item, Decimal('0.00')) + monto_item
 
         # Aplicar descuento global
         descuento = Decimal(str(descuento_porcentaje))
@@ -416,17 +434,41 @@ class FacturacionFiscal:
         # gravada al 0% declara una operacion que si causa impuesto. Los
         # servicios de un laboratorio clinico privado estan exentos, asi que
         # es el caso corriente y no una rareza.
-        if es_exonerada or not self.config['tasa_iva']:
-            monto_iva = Decimal('0.00')
-            monto_exento = base_imponible
-            base_imponible_iva = Decimal('0.00')
-        else:
-            tasa = self.config['tasa_iva']
-            monto_iva = (base_imponible * tasa / Decimal('100')).quantize(
-                Decimal('0.01'), rounding=ROUND_HALF_UP
-            )
-            monto_exento = Decimal('0.00')
-            base_imponible_iva = base_imponible
+        #
+        # El descuento global se reparte entre los grupos en proporcion a su
+        # importe; el ultimo grupo absorbe el centimo de redondeo para que
+        # exento + bases sumen exactamente la base de la factura.
+        monto_exento = Decimal('0.00')
+        base_imponible_iva = Decimal('0.00')
+        monto_iva = Decimal('0.00')
+        desglose = []
+        restante = base_imponible
+        tasas = sorted(grupos)
+        for i, tasa in enumerate(tasas):
+            bruto = grupos[tasa]
+            if i == len(tasas) - 1:
+                base_grupo = restante
+            elif subtotal:
+                base_grupo = (base_imponible * bruto / subtotal).quantize(
+                    Decimal('0.01'), rounding=ROUND_HALF_UP)
+            else:
+                base_grupo = Decimal('0.00')
+            restante -= base_grupo
+            if not tasa:
+                monto_exento += base_grupo
+                desglose.append({'tasa': 0.0, 'base': float(base_grupo), 'iva': 0.0})
+                continue
+            iva_grupo = (base_grupo * tasa / Decimal('100')).quantize(
+                Decimal('0.01'), rounding=ROUND_HALF_UP)
+            base_imponible_iva += base_grupo
+            monto_iva += iva_grupo
+            desglose.append({'tasa': float(tasa), 'base': float(base_grupo),
+                             'iva': float(iva_grupo)})
+
+        # La tasa que se guarda en la cabecera: la unica gravada si hay una
+        # sola; si no hay ninguna, la configurada (como antes).
+        gravadas = [t for t in tasas if t]
+        tasa_cabecera = gravadas[0] if len(gravadas) == 1 else self.config['tasa_iva']
 
         # Total (sin IGTF)
         total = base_imponible + monto_iva
@@ -442,8 +484,9 @@ class FacturacionFiscal:
             'porcentaje_descuento': float(descuento),
             'base_imponible': float(base_imponible_iva),
             'monto_exento': float(monto_exento),
-            'tasa_iva': float(self.config['tasa_iva']),
+            'tasa_iva': float(tasa_cabecera),
             'monto_iva': float(monto_iva),
+            'desglose_iva': desglose,
             'total': float(total),
             # Campos IGTF
             'monto_igtf': monto_igtf,
@@ -613,7 +656,7 @@ class FacturacionFiscal:
             if es_exonerada:
                 iva_item = 0
             else:
-                iva_item = float((subtotal_item * self.config['tasa_iva'] / 100).quantize(
+                iva_item = float((subtotal_item * self._tasa_item(item) / 100).quantize(
                     Decimal('0.01'), rounding=ROUND_HALF_UP
                 ))
 

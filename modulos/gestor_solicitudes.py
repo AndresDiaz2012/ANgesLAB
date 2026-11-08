@@ -865,15 +865,26 @@ class GestorSolicitudes:
             pruebas = self.obtener_pruebas_solicitud(solicitud_id)
 
             # Preparar detalles para facturación
+            #
+            # Cada linea lleva la tasa de IVA de su prueba si esta marcada
+            # (exenta o gravada); si no, la factura usa la del laboratorio.
+            try:
+                from modulos.maestros_fiscales import tasas_iva_de_pruebas
+                tasas = tasas_iva_de_pruebas(self.db, [p['PruebaID'] for p in pruebas])
+            except Exception:
+                tasas = {}
             detalles = []
             for p in pruebas:
-                detalles.append({
+                linea = {
                     'prueba_id': p['PruebaID'],
                     'descripcion': p.get('NombrePrueba', ''),
                     'precio': float(p.get('PrecioUnitario', 0) or 0),
                     'cantidad': int(p.get('Cantidad', 1) or 1),
                     'descuento': 0
-                })
+                }
+                if p['PruebaID'] in tasas:
+                    linea['tasa_iva'] = float(tasas[p['PruebaID']])
+                detalles.append(linea)
 
             datos = datos_factura or {}
 
