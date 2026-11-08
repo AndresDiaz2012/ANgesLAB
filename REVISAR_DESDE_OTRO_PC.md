@@ -8,6 +8,12 @@ La razon es practica: el software corre en la clinica y tiene que haber un
 unico sitio donde mirar para saber que se esta ejecutando. Con varias ramas
 vivas, "la version del laboratorio" deja de ser una pregunta con respuesta.
 
+Regla: **todo cambio se sube a GitHub** en cuanto esta hecho, y la carpeta
+de la clinica se actualiza con `git pull`. Nada vive solo en una PC.
+
+El diseño del ERP administrativo y fiscal (SENIAT) esta en
+`docs/ERP_ADMINISTRATIVO_FISCAL.md`.
+
 ## Traerse el proyecto
 
 ```
