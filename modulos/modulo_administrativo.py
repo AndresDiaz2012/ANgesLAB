@@ -823,6 +823,8 @@ class GestorProveedores:
     def actualizar_proveedor(self, proveedor_id: int, datos: dict):
         """Actualiza datos de un proveedor."""
         from modulos.maestros_fiscales import validar_datos_fiscales_proveedor
+        if 'RIF' in datos and not str(datos.get('RIF') or '').strip():
+            raise ValueError("El RIF del proveedor es obligatorio")
         fiscales = validar_datos_fiscales_proveedor(datos)
         if 'RIF' in fiscales:
             datos = dict(datos, RIF=fiscales['RIF'])

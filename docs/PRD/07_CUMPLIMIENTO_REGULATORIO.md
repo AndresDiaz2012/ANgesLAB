@@ -1,6 +1,6 @@
 # 07 - Cumplimiento Regulatorio
 
-**PRD ANgesLAB v1.0.0** | Fecha: 2026-04-07
+**PRD ANgesLAB v1.0.0** | Fecha: 2026-04-07 | Revisado: 2026-11-08 (marco SENIAT vigente, laboratorio contribuyente ordinario)
 
 ---
 
@@ -8,11 +8,13 @@
 
 | Normativa                          | Ambito                                | Estado       |
 |------------------------------------|---------------------------------------|--------------|
-| Providencia SNAT/2011/0071         | Facturacion general                   | Implementado |
-| Providencia SNAT/2024/000102       | Facturacion digital                   | Implementado |
-| Providencia SNAT/2022/000013       | IGTF en facturas                      | Implementado |
-| Ley de IVA vigente                 | Impuesto al valor agregado            | Implementado |
-| Decreto 1.808                      | Retenciones de ISLR                   | Implementado |
+| Providencia SNAT/2026/00093 (G.O. 43.484, vigente 19/04/2027) | Contenido de la factura y medios de emision | Parcial: contenido (`providencia_00093.py`) y rangos (`rangos_control.py`); falta la emision por The Factory HKA |
+| Providencia SNAT/2026/00084 (G.O. 43.435) | Deroga la homologacion de software de facturacion | No exige nada nuevo |
+| Providencia SNAT/2022/000013       | IGTF: solo lo perciben los especiales | Implementado: el laboratorio es ordinario y no lo cobra |
+| Providencia SNAT/2025/000054       | Agentes de retencion de IVA           | No aplica: el laboratorio es ordinario |
+| Ley de IVA vigente                 | Impuesto al valor agregado            | Implementado: exento por servicio, gravado por prueba marcada |
+| Decreto 1.808                      | Retenciones de ISLR                   | Parcial: faltan sustraendos, comprobantes y XML |
+| Providencia SNAT/2011/0071 y SNAT/2024/000102 | Facturacion (anterior)     | DEROGADAS por la SNAT/2026/00093 |
 | ISO 15189:2022 seccion 8.4         | Gestion de informacion de laboratorio | Parcial      |
 | CLIA 42 CFR 493.1291               | Trazabilidad de resultados            | Parcial      |
 | NIST SP 800-63B                    | Autenticacion digital                 | Implementado |
@@ -25,17 +27,25 @@
 
 | Tipo              | Tasa   | Aplicacion                              |
 |-------------------|--------|-----------------------------------------|
-| General           | 16%    | Servicios de laboratorio (por defecto)  |
-| Reducida          | 8%     | Configurable para servicios especificos |
-| Productos de lujo | 31%    | No aplica a laboratorio clinico          |
-| Exento            | 0%     | Configurable por prueba                  |
+| Exento            | 0%     | Servicios del laboratorio (TSJ, sentencia 1505/2003) |
+| General           | 16%    | Productos que se venden (frascos, materiales)        |
+| Reducida          | 8%     | Solo si el contador lo indica para un item          |
+| Productos de lujo | 31%    | No aplica a laboratorio clinico                      |
+
+Cada prueba lleva `Pruebas.RegimenIVA` ('Exento', 'Gravado' o vacio) y
+`Pruebas.AlicuotaIVA`. Vacio = la tasa configurada del laboratorio, de modo
+que una instalacion sin marcar nada factura igual que antes
+(`maestros_fiscales.py`). Una factura puede mezclar lineas exentas y
+gravadas: `calcular_totales_factura` agrupa por alicuota.
 
 ### 7.2.2 Retenciones de IVA
 
-| Tipo de contribuyente | Retencion | Base legal                              |
-|-----------------------|-----------|-----------------------------------------|
-| Ordinario             | 75%       | Ley de IVA, Art. 11                     |
-| Especial              | 100%      | Ley de IVA, Agentes de retencion        |
+El laboratorio es **contribuyente ordinario**: no es agente de retencion de
+IVA (Providencia SNAT/2025/000054) y no retiene a sus proveedores. Solo
+RECIBE retenciones de sus clientes especiales cuando una factura lleva IVA.
+Si el SENIAT lo calificara como especial, retendria 75% (o 100% en los
+supuestos de la providencia); `Proveedores.PorcentajeRetencionIVA` ya guarda
+el dato por proveedor.
 
 ### 7.2.3 Implementacion
 
@@ -53,14 +63,18 @@
 | Parametro                    | Valor por defecto | Configurable |
 |------------------------------|-------------------|--------------|
 | Tasa IGTF                    | 3%                | Si           |
-| IGTF activo                  | Si                | Si           |
+| IGTF activo                  | No                | Si           |
 | Formas de pago que aplican   | Divisa, Zelle     | Hardcodeado  |
 
 ### 7.3.2 Logica de aplicacion
 
 ```
-REQ-R-001: El IGTF se aplica automaticamente cuando la forma de pago
-           es 'Divisa' o 'Zelle', conforme a la Providencia SNAT/2022/000013.
+REQ-R-001: El IGTF solo se aplica si el laboratorio es contribuyente
+           ESPECIAL y IGTFActivo esta encendido expresamente
+           (igtf_corresponde). La Providencia SNAT/2022/000013 designa
+           agentes de percepcion solo a los especiales. Cumplidas ambas
+           condiciones, se detecta por la forma de pago 'Divisa' o 'Zelle'.
+           El laboratorio es ordinario: no se cobra.
 
 REQ-R-002: El monto IGTF se calcula sobre el monto total de la factura
            (incluyendo IVA) y se registra en campos separados:

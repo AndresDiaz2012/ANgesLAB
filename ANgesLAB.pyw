@@ -1668,6 +1668,8 @@ class MainApplication:
                     ("💳", "Cuentas por Cobrar", self.show_cuentas_cobrar),
                     ("🏥", "Cartera Asegurados", self.show_cartera_asegurados),
                     ("🧾", "Corte de Adeudado", self.show_corte_adeudado),
+                    ("👥", "Clientes", self.show_clientes),
+                    ("🏭", "Proveedores", self.show_proveedores),
                     ("📋", "Cuentas por Pagar", self.show_cuentas_pagar),
                     ("💸", "Gastos", self.show_gastos),
                     ("🩺", "Comisiones Médicos", self.show_comisiones_medico),
@@ -19878,6 +19880,29 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
                                 "Ejecute: scripts/crear_tablas_administrativo.py")
             return
         self.ventana_admin.show_cuentas_pagar(self)
+
+    def _abrir_maestro(self, nombre):
+        """Clientes o Proveedores: maestros fiscales del modulo administrativo."""
+        if not self.ventana_admin:
+            messagebox.showerror("Error", "Módulo administrativo no disponible.")
+            return
+        if not self.ventana_admin._puede_registrar_movimientos():
+            messagebox.showwarning("Acceso Denegado",
+                                   "No tiene permisos para esta seccion.")
+            return
+        try:
+            from modulos import ventana_maestros
+            getattr(ventana_maestros, nombre)(self.ventana_admin.db, self)
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo abrir la ventana: {e}")
+
+    def show_clientes(self):
+        """Clientes fiscales (quien recibe la factura)"""
+        self._abrir_maestro('show_clientes')
+
+    def show_proveedores(self):
+        """Proveedores con sus datos fiscales"""
+        self._abrir_maestro('show_proveedores')
 
     def show_gastos(self):
         """Control de Gastos"""
