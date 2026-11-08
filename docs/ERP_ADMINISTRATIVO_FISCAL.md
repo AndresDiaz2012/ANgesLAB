@@ -302,7 +302,7 @@ Se crean 11 tablas y se amplían 7, sobre la base Access actual. Todos los cambi
 | `OrdenesCompra` y `DetalleOrdenCompra` | Nuevas (2.8.0) | Proveedor, estado, moneda, líneas con cantidad pedida y recibida |
 | `Compras` y `DetalleCompras` (ya venían en la base del instalador) | Ampliadas (2.8.0) | Factura del proveedor con la recepción: número, control, fecha, exento, base, IVA, total, moneda y tasa, orden de origen; líneas con lote, vencimiento y costo en USD |
 | `Pagos` (ya venía en la base del instalador) | Ampliada (2.8.0) | Historial de abonos a cuentas por pagar |
-| `RetencionesRecibidas` | Nueva | Factura propia, cliente, tipo (IVA o ISLR), comprobante, monto |
+| `RetencionesRecibidas` | Nueva (2.9.0) | Tipo (IVA o ISLR), comprobante, fecha y período, agente, factura y cuenta por cobrar, base, %, retenido en Bs, tasa, aplicado a la cuenta |
 | `CuentasPorPagar` | Ampliada (2.8.0) | Proveedor y compra de origen; el historial de abonos está en `Pagos` |
 | `DocumentosFiscales` | Nueva (reemplaza la factura actual) | Tipo, número, control, cliente, documento afectado, estado, emisor, identificador de envío, respuesta del emisor, totales en VES y divisa, tasa |
 | `EmisoresFiscales` | Nueva | Sede, tipo (imprenta digital, máquina fiscal, contingencia), parámetros de conexión, activo |
@@ -339,7 +339,7 @@ Cinco fases de unas seis semanas cada una, en el orden en que dependen entre sí
 | --- | --- | --- | --- |
 | 1 · Maestros | nov–dic 2026 | Clientes separados del paciente, proveedores fiscales, servicios con régimen de IVA, RIF validado, PRD corregido | Entregada en 2.7.0 |
 | 2 · Compras e inventario | dic 2026–ene 2027 | Órdenes, recepciones, facturas de proveedor, costo promedio, consumo por receta, cuentas por pagar | Entregada en 2.8.0 |
-| 3 · Retenciones recibidas | ene–feb 2027 | Comprobantes de IVA e ISLR que le hacen los clientes agentes, aplicados a la cuenta por cobrar, y su reporte por período. El laboratorio no practica retenciones | Pendiente |
+| 3 · Retenciones recibidas | ene–feb 2027 | Comprobantes de IVA e ISLR que le hacen los clientes agentes, aplicados a la cuenta por cobrar, y su reporte por período. El laboratorio no practica retenciones | Entregada en 2.9.0 |
 | 4 · Emisión fiscal | feb–mar 2027 | Documentos fiscales con ciclo de vida, adaptador de máquina fiscal, de imprenta digital (HKA) y contingencia | Pendiente |
 | 5 · Reportes y piloto | mar–abr 2027 | Libros, resumen de IVA, reportes de gestión, cierre de período y piloto en el laboratorio | Pendiente |
 | **19/04/2027** | | Entra en vigor la SNAT/2026/00093: todo en producción | |
@@ -348,7 +348,7 @@ Cada fase se entrega como una versión etiquetada en `main`, con sus pruebas, y 
 
 1. **Maestros:** se puede facturar a un cliente distinto del paciente, y no se guarda ningún RIF inválido. Entregada en la versión 2.7.0 (08/11/2026): maestros de clientes y proveedores con sus pantallas, RIF con dígito verificador y régimen de IVA por prueba. Falta que la factura use el cliente: eso entra con la emisión (fase 4).
 2. **Compras e inventario:** una compra registrada aparece en inventario, libro de compras y cuentas por pagar con los mismos montos. Entregada en la versión 2.8.0 (08/11/2026): órdenes con aprobación por otro usuario, factura de proveedor que mueve inventario por lote (FEFO, costo promedio), libro de compras y cuenta por pagar a la vez; recetas por prueba con descuento automático; pagos con historial y antigüedad de saldos. La recepción y la factura se registran en un solo paso, que es como llega la mercancía al laboratorio. También se corrigió que la pantalla de Proveedores no funcionaba con la base del instalador (sin columna RIF) y que el libro de compras suponía IVA al 16 % en todo monto.
-3. **Retenciones recibidas:** los comprobantes de un mes de prueba rebajan las cuentas por cobrar correctas y su total por período coincide con el del contador.
+3. **Retenciones recibidas:** los comprobantes de un mes de prueba rebajan las cuentas por cobrar correctas y su total por período coincide con el del contador. Entregada en la versión 2.9.0 (08/11/2026): pantalla Retenciones recibidas, aplicación a la cuenta por cobrar como abono sin caja, control de comprobante repetido y de tope (IVA de la factura, base de ISLR), anulación con rastro y total del mes exportable a Excel.
 4. **Emisión fiscal:** se emiten factura, nota de crédito y nota de débito por cada emisor configurado, y una caída simulada pasa a contingencia sin duplicar documentos.
 5. **Reportes y piloto:** un mes completo del laboratorio cuadra entre libros, caja, bancos y cierres Z.
 

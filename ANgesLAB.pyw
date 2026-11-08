@@ -1671,6 +1671,7 @@ class MainApplication:
                     ("👥", "Clientes", self.show_clientes),
                     ("🏭", "Proveedores", self.show_proveedores),
                     ("🛒", "Compras", self.show_compras),
+                    ("🧾", "Retenciones recibidas", self.show_retenciones),
                     ("📋", "Cuentas por Pagar", self.show_cuentas_pagar),
                     ("💸", "Gastos", self.show_gastos),
                     ("🩺", "Comisiones Médicos", self.show_comisiones_medico),
@@ -19904,6 +19905,22 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
     def show_proveedores(self):
         """Proveedores con sus datos fiscales"""
         self._abrir_maestro('show_proveedores')
+
+    def show_retenciones(self):
+        """Comprobantes de retencion que le hacen los clientes agentes"""
+        if not self.ventana_admin:
+            messagebox.showerror("Error", "Módulo administrativo no disponible.")
+            return
+        if not self.ventana_admin._puede_registrar_movimientos():
+            messagebox.showwarning("Acceso Denegado",
+                                   "No tiene permisos para esta seccion.")
+            return
+        try:
+            from modulos.ventana_retenciones import show_retenciones
+            show_retenciones(self.ventana_admin.db, self, self.user.get('NombreUsuario', ''),
+                             self.user.get('UsuarioID', 0))
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo abrir Retenciones: {e}")
 
     def show_compras(self):
         """Compras, recepcion, recetas de consumo y cuentas por pagar"""
