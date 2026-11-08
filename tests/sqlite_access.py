@@ -14,6 +14,8 @@ class DBAccessEnSqlite:
     def __init__(self):
         self.cn = sqlite3.connect(':memory:')
         self.cn.row_factory = sqlite3.Row
+        # Funciones de Access que usa el SQL de los modulos
+        self.cn.create_function('YEAR', 1, lambda v: int(str(v)[:4]) if v else None)
 
     @staticmethod
     def _traducir(sql):
@@ -40,3 +42,10 @@ class DBAccessEnSqlite:
     def query_one(self, sql):
         filas = self.query(sql)
         return filas[0] if filas else None
+
+    def insert(self, tabla, datos):
+        """Como Database.insert de ANgesLAB.pyw: arma el INSERT con los valores."""
+        from modulos.compras import _sql
+        cols = ', '.join('[%s]' % k for k in datos)
+        vals = ', '.join(_sql(v) for v in datos.values())
+        self.execute('INSERT INTO [%s] (%s) VALUES (%s)' % (tabla, cols, vals))

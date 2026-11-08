@@ -150,6 +150,20 @@ class GeneradorFacturaPDF:
             f"WHERE f.FacturaID={int(factura_id)}")
         if not fac:
             raise ValueError(f"Factura no encontrada: {factura_id}")
+        # Si la factura va a nombre de un cliente (maestros_fiscales), el
+        # receptor es el cliente y no el paciente
+        if fac.get('ClienteID'):
+            try:
+                cli = self.db.query_one(
+                    f"SELECT * FROM [Clientes] WHERE ClienteID={int(fac['ClienteID'])}")
+            except Exception:
+                cli = None
+            if cli:
+                fac.update({'Nombres': cli.get('RazonSocial') or '', 'Apellidos': '',
+                            'NumeroDocumento': cli.get('Documento') or '',
+                            'DireccionCompleta': cli.get('DomicilioFiscal') or '',
+                            'Telefono1': cli.get('Telefono') or '',
+                            'Email': cli.get('Email') or ''})
         return fac
 
     def _obtener_detalles(self, factura_id):
@@ -209,7 +223,9 @@ class GeneradorFacturaPDF:
             Paragraph(DENOMINACION.get(tipo_doc, 'FACTURA'), s_den),
             Spacer(1, 3),
             Paragraph(f"N° {fac.get('NumeroFactura') or '—'}", s_num),
-            Paragraph(f"N° de Control: {fac.get('NumeroControl') or '—'}", s_num),
+            # Sin numero de control (HKA aun no la emitio) el papel no es una
+            # factura: que se lea en el mismo sitio donde iria el numero
+            Paragraph(f"N° de Control: {fac.get('NumeroControl') or 'PENDIENTE DE EMISION - SIN VALOR FISCAL'}", s_num),
             Spacer(1, 2),
             Paragraph(f"Fecha de emisión:<br/>{_fecha(fac.get('FechaEmision'), True)}",
                       self._estilo('fe', fontSize=7.5, alignment=TA_CENTER, leading=10)),

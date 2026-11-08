@@ -892,7 +892,19 @@ class GestorSolicitudes:
             # Usar módulo de facturación fiscal si está disponible
             if facturacion_fiscal:
                 try:
+                    # A quien se factura: el cliente indicado o, si no, el
+                    # cliente por defecto del paciente (maestros_fiscales)
+                    cliente_id = datos.get('cliente_id')
+                    if not cliente_id:
+                        try:
+                            from modulos.maestros_fiscales import GestorClientes
+                            defecto = GestorClientes(self.db).cliente_por_defecto(
+                                solicitud.get('PacienteID'))
+                            cliente_id = (defecto or {}).get('ClienteID')
+                        except Exception:
+                            cliente_id = None
                     datos_fact = {
+                        'cliente_id': cliente_id,
                         'paciente_id': solicitud.get('PacienteID'),
                         'solicitud_id': solicitud_id,
                         'descuento_porcentaje': float(solicitud.get('PorcentajeDescuento', 0) or 0),

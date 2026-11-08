@@ -529,7 +529,17 @@ class FacturacionFiscal:
         else:
             numero_factura = self.generar_numero_factura()
 
-        numero_control = self.generar_numero_control()
+        # Con imprenta digital (HKA) el numero de control lo asigna ella al
+        # emitir (emision.py): aqui no se toma ninguno, y menos del rango de
+        # contingencia, que es para cuando HKA no responde.
+        try:
+            from modulos import emision as _emision
+            _emision.asegurar_esquema(self.db)
+            digital = _emision.usa_emisor_digital(self.db)
+        except Exception as _exc:
+            _log.warning("crear_factura: emisor: %s", _exc)
+            _emision, digital = None, False
+        numero_control = None if digital else self.generar_numero_control()
 
         # Calcular totales con IGTF
         descuento = datos_factura.get('descuento_porcentaje', 0)
@@ -591,6 +601,9 @@ class FacturacionFiscal:
             'FechaEmision': datetime.now(),
             'PacienteID': datos_factura['paciente_id'],
             'ResponsablePagoID': datos_factura.get('responsable_id'),
+            # Quien recibe la factura (maestros_fiscales.Clientes); sin
+            # cliente, el receptor es el paciente como siempre
+            'ClienteID': datos_factura.get('cliente_id'),
             'SolicitudID': datos_factura.get('solicitud_id'),
             'TipoFactura': datos_factura.get('tipo', 'Contado'),
             'CondicionPago': datos_factura.get('condicion_pago', 'Contado'),
@@ -637,6 +650,15 @@ class FacturacionFiscal:
             'UsuarioEmite': usuario_id,
             'FechaRegistro': datetime.now()
         }
+
+        if _emision is None:
+            # Sin las columnas nuevas no se puede guardar el cliente
+            factura_data.pop('ClienteID', None)
+        else:
+            # Con HKA nace pendiente de emitir; sin el, el numero de control
+            # ya esta puesto y la factura queda emitida como siempre
+            factura_data['EstadoEmision'] = _emision.PENDIENTE if digital else _emision.EMITIDA
+            factura_data['Emisor'] = _emision.TIPO_HKA if digital else _emision.TIPO_LOCAL
 
         self.db.insert('Facturas', factura_data)
 

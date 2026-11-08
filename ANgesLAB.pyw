@@ -1672,6 +1672,7 @@ class MainApplication:
                     ("🏭", "Proveedores", self.show_proveedores),
                     ("🛒", "Compras", self.show_compras),
                     ("🧾", "Retenciones recibidas", self.show_retenciones),
+                    ("🖨️", "Facturacion electronica", self.show_emision),
                     ("📋", "Cuentas por Pagar", self.show_cuentas_pagar),
                     ("💸", "Gastos", self.show_gastos),
                     ("🩺", "Comisiones Médicos", self.show_comisiones_medico),
@@ -19905,6 +19906,21 @@ Total de Antimicrobianos: {db.count('Antimicrobianos'):,}
     def show_proveedores(self):
         """Proveedores con sus datos fiscales"""
         self._abrir_maestro('show_proveedores')
+
+    def show_emision(self):
+        """Emisor (HKA) y bandeja de facturas por emitir"""
+        if not self.ventana_admin:
+            messagebox.showerror("Error", "Módulo administrativo no disponible.")
+            return
+        if not self.ventana_admin._puede_registrar_movimientos():
+            messagebox.showwarning("Acceso Denegado",
+                                   "No tiene permisos para esta seccion.")
+            return
+        try:
+            from modulos.ventana_emision import show_emision
+            show_emision(self.ventana_admin.db, self, self.user.get('UsuarioID', 0))
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo abrir Facturacion electronica: {e}")
 
     def show_retenciones(self):
         """Comprobantes de retencion que le hacen los clientes agentes"""
