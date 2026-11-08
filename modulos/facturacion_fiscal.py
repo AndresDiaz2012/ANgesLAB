@@ -521,6 +521,13 @@ class FacturacionFiscal:
         tipo_doc = datos_factura.get('tipo_documento', 'Factura')
         moneda = datos_factura.get('moneda_factura', 'USD')
 
+        # Un mes declarado no recibe documentos nuevos (periodos.py)
+        try:
+            from modulos import periodos
+            periodos.verificar_abierto(self.db, datetime.now(), 'una factura')
+        except ImportError:
+            pass
+
         # Generar numeros segun tipo de documento
         if tipo_doc == ConfiguracionFiscal.TIPO_NOTA_CREDITO:
             numero_factura = self.generar_numero_nota_credito()
@@ -930,83 +937,25 @@ class FacturacionFiscal:
 
     def generar_libro_ventas(self, fecha_desde, fecha_hasta):
         """
-        Genera el libro de ventas para el periodo indicado.
-        Formato SENIAT con columnas de IGTF y multi-moneda.
+        Libro de ventas del periodo. Lo arma reportes.libro_ventas.
 
-        Retorna: lista de registros del libro de ventas
+        La version anterior salia en la moneda de cada factura (casi siempre
+        dolares, cuando el libro va en bolivares) y, por un INNER JOIN con
+        Pacientes, dejaba fuera las facturas a nombre de un cliente. Se
+        mantienen las claves de antes para quien las lea.
         """
-        facturas = self.db.query(f"""
-            SELECT
-                f.NumeroFactura,
-                f.NumeroControl,
-                f.FechaEmision,
-                p.NumeroDocumento as RIFCliente,
-                p.Nombres + ' ' + p.Apellidos as NombreCliente,
-                f.TipoFactura,
-                f.TipoDocumento,
-                f.BaseImponible,
-                f.TasaIVA,
-                f.MontoIVA,
-                f.MontoExento,
-                f.MontoTotal,
-                f.MontoIGTF,
-                f.TasaIGTF,
-                f.AplicaIGTF,
-                f.MonedaFactura,
-                f.TasaCambioDia,
-                f.MontoTotalBs,
-                f.MontoTotalUSD,
-                f.FacturaAfectadaID,
-                f.Anulada
-            FROM Facturas f
-            INNER JOIN Pacientes p ON f.PacienteID = p.PacienteID
-            WHERE f.FechaEmision BETWEEN #{fecha_desde.strftime('%m/%d/%Y')}#
-                AND #{fecha_hasta.strftime('%m/%d/%Y')} 23:59:59#
-            ORDER BY f.FechaEmision, f.NumeroFactura
-        """)
-
-        libro = []
-        for f in facturas:
-            tipo_doc = f.get('TipoDocumento', 'Factura')
-
-            # Tipo de operacion segun documento
-            if f.get('Anulada'):
-                tipo_op = 'ANULADA'
-            elif tipo_doc == 'NC':
-                tipo_op = 'NOTA DE CREDITO'
-            elif tipo_doc == 'ND':
-                tipo_op = 'NOTA DE DEBITO'
-            else:
-                tipo_op = 'VENTA'
-
-            registro = {
-                'fecha': f['FechaEmision'],
-                'numero_factura': f['NumeroFactura'],
-                'numero_control': f['NumeroControl'],
-                'rif_cliente': f['RIFCliente'] or 'SIN RIF',
-                'nombre_cliente': f['NombreCliente'],
-                'tipo_operacion': tipo_op,
-                'tipo_documento': tipo_doc,
-                'base_imponible': f['BaseImponible'] or 0,
-                'alicuota': f['TasaIVA'] or 0,
-                'impuesto': f['MontoIVA'] or 0,
-                'exento': f['MontoExento'] or 0,
-                'total': f['MontoTotal'] if not f['Anulada'] else 0,
-                # Campos IGTF
-                'igtf': f.get('MontoIGTF') or 0,
-                'tasa_igtf': f.get('TasaIGTF') or 0,
-                'aplica_igtf': bool(f.get('AplicaIGTF')),
-                # Multi-moneda
-                'moneda': f.get('MonedaFactura', 'USD'),
-                'tasa_cambio': f.get('TasaCambioDia') or 0,
-                'total_bs': f.get('MontoTotalBs') or 0,
-                'total_usd': f.get('MontoTotalUSD') or 0,
-                # Referencia NC/ND
-                'factura_afectada': f.get('FacturaAfectadaID'),
-            }
-            libro.append(registro)
-
-        return libro
+        from modulos.reportes import libro_ventas
+        libro = libro_ventas(self.db, fecha_desde, fecha_hasta)
+        return [{
+            'fecha': r['fecha'], 'numero_factura': r['numero_factura'],
+            'numero_control': r['numero_control'], 'rif_cliente': r['rif'] or 'SIN RIF',
+            'nombre_cliente': r['razon_social'], 'tipo_operacion': r['tipo'],
+            'base_imponible': float(r['base_imponible']), 'alicuota': float(r['alicuota']),
+            'impuesto': float(r['iva']), 'exento': float(r['exento']),
+            'total': float(r['total']), 'iva_retenido': float(r['iva_retenido']),
+            'moneda': r['moneda_original'], 'tasa_cambio': float(r['tasa']),
+            'factura_afectada': r['factura_afectada'],
+        } for r in libro['registros']]
 
     def resumen_fiscal_periodo(self, fecha_desde, fecha_hasta):
         """

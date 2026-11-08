@@ -288,7 +288,7 @@ Todo reporte sale en pantalla, PDF y Excel, filtrable por fechas y sede. Los fis
 
 ## 10. Modelo de datos
 
-Se crean 11 tablas y se amplían 7, sobre la base Access actual. Todos los cambios se aplican con migraciones idempotentes (como ya hacen `asegurar_tabla` y `asegurar_esquema`), para que una instalación existente se actualice sin perder datos.
+Se crean 9 tablas y se amplían 8, sobre la base Access actual. Todos los cambios se aplican con migraciones idempotentes (como ya hacen `asegurar_tabla` y `asegurar_esquema`), para que una instalación existente se actualice sin perder datos.
 
 | Tabla | Estado | Campos principales |
 | --- | --- | --- |
@@ -306,8 +306,7 @@ Se crean 11 tablas y se amplían 7, sobre la base Access actual. Todos los cambi
 | `CuentasPorPagar` | Ampliada (2.8.0) | Proveedor y compra de origen; el historial de abonos está en `Pagos` |
 | `Facturas` (ya existía) | Ampliada (2.10.0) | Cliente, estado de emisión, emisor, identificador de envío, serie y fecha de asignación del número de control, mensaje y respuesta del emisor, intentos. Se amplió la tabla existente en vez de crear `DocumentosFiscales`: ya tenía todo lo demás |
 | `EmisoresFiscales` | Nueva (2.10.0) | Tipo (HKA), ambiente, URL, usuario, clave cifrada, serie, sucursal, activo |
-| `CierresZ` | Nueva | Máquina, fecha, número de cierre, totales leídos, diferencia con el sistema |
-| `PeriodosFiscales` | Nueva | Mes, estado (abierto o cerrado), quién y cuándo lo cerró |
+| `PeriodosFiscales` | Nueva (2.11.0) | Mes, estado (abierto o cerrado), quién y cuándo lo cerró, reapertura con motivo |
 
 Las tablas de solicitudes, caja, cuentas por cobrar, tasas de cambio, rangos de control y auditoría se mantienen como están y se enlazan por clave a las nuevas.
 
@@ -341,7 +340,7 @@ Cinco fases de unas seis semanas cada una, en el orden en que dependen entre sí
 | 2 · Compras e inventario | dic 2026–ene 2027 | Órdenes, recepciones, facturas de proveedor, costo promedio, consumo por receta, cuentas por pagar | Entregada en 2.8.0 |
 | 3 · Retenciones recibidas | ene–feb 2027 | Comprobantes de IVA e ISLR que le hacen los clientes agentes, aplicados a la cuenta por cobrar, y su reporte por período. El laboratorio no practica retenciones | Entregada en 2.9.0 |
 | 4 · Emisión fiscal | feb–mar 2027 | Documentos fiscales con ciclo de vida, adaptador de máquina fiscal, de imprenta digital (HKA) y contingencia | Parcial en 2.10.0: falta probar contra el ambiente real de HKA |
-| 5 · Reportes y piloto | mar–abr 2027 | Libros, resumen de IVA, reportes de gestión, cierre de período y piloto en el laboratorio | Pendiente |
+| 5 · Reportes y piloto | mar–abr 2027 | Libros, resumen de IVA, reportes de gestión, cierre de período y piloto en el laboratorio | Reportes y cierre en 2.11.0; falta el piloto |
 | **19/04/2027** | | Entra en vigor la SNAT/2026/00093: todo en producción | |
 
 Cada fase se entrega como una versión etiquetada en `main`, con sus pruebas, y solo pasa a la siguiente si cumple su criterio:
@@ -350,7 +349,7 @@ Cada fase se entrega como una versión etiquetada en `main`, con sus pruebas, y 
 2. **Compras e inventario:** una compra registrada aparece en inventario, libro de compras y cuentas por pagar con los mismos montos. Entregada en la versión 2.8.0 (08/11/2026): órdenes con aprobación por otro usuario, factura de proveedor que mueve inventario por lote (FEFO, costo promedio), libro de compras y cuenta por pagar a la vez; recetas por prueba con descuento automático; pagos con historial y antigüedad de saldos. La recepción y la factura se registran en un solo paso, que es como llega la mercancía al laboratorio. También se corrigió que la pantalla de Proveedores no funcionaba con la base del instalador (sin columna RIF) y que el libro de compras suponía IVA al 16 % en todo monto.
 3. **Retenciones recibidas:** los comprobantes de un mes de prueba rebajan las cuentas por cobrar correctas y su total por período coincide con el del contador. Entregada en la versión 2.9.0 (08/11/2026): pantalla Retenciones recibidas, aplicación a la cuenta por cobrar como abono sin caja, control de comprobante repetido y de tope (IVA de la factura, base de ISLR), anulación con rastro y total del mes exportable a Excel.
 4. **Emisión fiscal:** se emiten factura, nota de crédito y nota de débito por cada emisor configurado, y una caída simulada pasa a contingencia sin duplicar documentos. Parcial en la versión 2.10.0 (08/11/2026): la factura va a nombre del cliente; ciclo pendiente → emitida, rechazada o contingencia, con identificador de envío fijo para no duplicar; conector HKA (autenticación con token de 12 h, emisión, anulación, descarga) escrito según su wiki y probado contra un HKA simulado; contingencia con talonario; credenciales cifradas; pantalla Facturación electrónica con prueba de conexión. Falta: credenciales y catálogos de HKA para probar contra su ambiente real, y la máquina fiscal (no se usará: el laboratorio contrató HKA).
-5. **Reportes y piloto:** un mes completo del laboratorio cuadra entre libros, caja, bancos y cierres Z.
+5. **Reportes y piloto:** un mes completo del laboratorio cuadra entre libros, caja y bancos. Reportes y cierre entregados en la versión 2.11.0 (08/11/2026): libro de ventas en bolívares con el receptor real (cliente o paciente), notas de crédito restando, anuladas en cero e IVA retenido; resumen de IVA del mes con excedente y retenciones que pasan al mes siguiente; ventas por área y por procedencia, costo por prueba según receta y estado de resultados, desde las solicitudes (que es donde hoy están los ingresos); cierre de período que bloquea compras, retenciones y facturas con fecha de un mes cerrado, y reapertura con motivo. Todo exportable a Excel. Falta el piloto con un mes real. No hay cierres Z: el laboratorio emite por HKA, no por máquina fiscal.
 
 ### Decisiones pendientes
 

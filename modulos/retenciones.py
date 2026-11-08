@@ -89,6 +89,13 @@ class GestorRetenciones:
         self.usuario_id = int(usuario_id or 0)
         asegurar_esquema(db)
 
+    def _periodo_abierto(self, fecha, que):
+        from modulos import periodos
+        try:
+            periodos.verificar_abierto(self.db, fecha, que)
+        except periodos.PeriodoCerrado as e:
+            raise ErrorRetencion(str(e))
+
     # ── lectura de lo que se retiene ───────────────────────────────────
     def _factura(self, factura_id):
         fila = self.db.query_one("SELECT * FROM [Facturas] WHERE FacturaID=%d" % int(factura_id))
@@ -147,6 +154,7 @@ class GestorRetenciones:
         fecha = _fecha(datos.get('fecha')) or date.today()
         if fecha > date.today():
             raise ErrorRetencion('La fecha del comprobante no puede ser futura.')
+        self._periodo_abierto(fecha, 'una retencion')
         rif = normalizar_rif(datos.get('agente_rif'))
         if not rif or not rif_valido(rif):
             raise ErrorRetencion('El RIF del agente de retencion no es valido: %s'
@@ -276,6 +284,7 @@ class GestorRetenciones:
             raise ErrorRetencion('La retencion no existe.')
         if r.get('Anulada'):
             raise ErrorRetencion('La retencion ya esta anulada.')
+        self._periodo_abierto(_fecha(r.get('FechaComprobante')), 'la anulacion de una retencion')
         aplicado = _q(r.get('MontoAplicado'))
         if r.get('CuentaCobrarID') and aplicado > 0:
             cuenta = self._cuenta(r['CuentaCobrarID'])

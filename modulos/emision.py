@@ -595,6 +595,12 @@ class GestorEmision:
         fac = self._factura(factura_id)
         if fac.get('Anulada'):
             raise ErrorDatos('La factura ya esta anulada.')
+        from modulos import periodos
+        try:
+            periodos.verificar_abierto(self.db, _fecha(fac.get('FechaEmision')),
+                                       'la anulacion de una factura')
+        except periodos.PeriodoCerrado as e:
+            raise ErrorDatos(str(e))
         if fac.get('EstadoEmision') == EMITIDA and fac.get('Emisor') == TIPO_HKA:
             self.emisor.anular(documento_fiscal(self.db, factura_id), motivo)
         _update(self.db, 'Facturas', {'Anulada': True, 'MotivoAnulacion': str(motivo)[:255],

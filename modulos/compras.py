@@ -343,6 +343,15 @@ def salida_inventario(db, producto_id, cantidad, referencia, motivo, usuario=Non
     return salidas
 
 
+def _periodo_abierto(db, fecha, que):
+    """ErrorCompra si el mes esta cerrado (periodos.py): un mes declarado no se toca."""
+    from modulos import periodos
+    try:
+        periodos.verificar_abierto(db, fecha, que)
+    except periodos.PeriodoCerrado as e:
+        raise ErrorCompra(str(e))
+
+
 # ══════════════════════════════════════════════════════════════════════════
 #  Ordenes de compra
 # ══════════════════════════════════════════════════════════════════════════
@@ -538,6 +547,7 @@ class GestorCompras:
         fecha = _fecha(factura.get('fecha')) or date.today()
         if fecha > date.today():
             raise ErrorCompra('La fecha de la factura no puede ser futura.')
+        _periodo_abierto(self.db, fecha, 'una compra')
         moneda = factura.get('moneda') or 'USD'
         if moneda not in MONEDAS:
             raise ErrorCompra('Moneda no valida: %s' % moneda)
@@ -692,6 +702,8 @@ class GestorCompras:
         compra = self.obtener_compra(compra_id)
         if compra.get('Anulada'):
             raise ErrorCompra('La compra ya esta anulada.')
+        _periodo_abierto(self.db, _fecha(compra.get('FechaFacturaProveedor')),
+                         'la anulacion de una compra')
         if _d(compra.get('MontoPagado')) > 0:
             raise ErrorCompra('Ya hay pagos a esta compra: no se puede anular.')
         cxp_id = compra.get('CuentaPagarID')
@@ -960,15 +972,16 @@ def libro_compras(db, desde, hasta):
     """
     asegurar_esquema(db)
     from modulos.maestros_fiscales import columnas_proveedor
-    col_rif = columnas_proveedor(db).get('RIF') or 'RIF'
+    col_rif = columnas_proveedor(db).get('RIF')
+    rif_sql = 'p.[%s]' % col_rif if col_rif else 'NULL'
     desde, hasta = _fecha(desde), _fecha(hasta)
     compras = db.query(
-        "SELECT c.*, p.RazonSocial, p.[%s] AS ProveedorRIF FROM [Compras] AS c "
+        "SELECT c.*, p.RazonSocial, %s AS ProveedorRIF FROM [Compras] AS c "
         "LEFT JOIN [Proveedores] AS p ON c.ProveedorID = p.ProveedorID "
         "WHERE (c.Anulada IS NULL OR c.Anulada=False) "
         "AND c.FechaFacturaProveedor >= %s AND c.FechaFacturaProveedor < %s "
         "ORDER BY c.FechaFacturaProveedor, c.CompraID"
-        % (col_rif, _sql(desde), _sql(hasta + timedelta(days=1)))) or []
+        % (rif_sql, _sql(desde), _sql(hasta + timedelta(days=1)))) or []
     registros = []
     tot = {k: Decimal('0') for k in ('total_compras', 'total_exento', 'base_imponible',
                                      'iva_soportado', 'retencion_iva')}
