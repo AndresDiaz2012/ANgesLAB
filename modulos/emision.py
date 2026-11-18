@@ -304,6 +304,19 @@ def _f2(valor):
     return '%.2f' % _q(valor)
 
 
+def _cantidad(valor):
+    """
+    La cantidad en digitos, nunca en notacion cientifica.
+
+    Decimal('10').normalize() devuelve '1E+1'. Una linea de diez frascos
+    salia asi en el JSON de HKA, que no lo entiende: el documento se habria
+    rechazado (o peor, leido como otra cantidad). Las pruebas van de a una,
+    asi que el fallo solo asomaba al vender productos.
+    """
+    texto = ('%.4f' % valor).rstrip('0').rstrip('.')
+    return texto or '0'
+
+
 def numero_hka(numero):
     """HKA pide el numero de documento solo con digitos: FAC-2027-000012 -> 2027000012."""
     digitos = ''.join(c for c in str(numero) if c.isdigit())
@@ -363,7 +376,7 @@ def json_hka(doc, serie='', sucursal=''):
         'detallesItems': [{
             'numeroLinea': str(l['n']), 'codigoPLU': l['codigo'],
             'indicadorBienoServicio': cat['servicio'] if l['servicio'] else cat['bien'],
-            'descripcion': l['descripcion'], 'cantidad': str(l['cantidad'].normalize()),
+            'descripcion': l['descripcion'], 'cantidad': _cantidad(l['cantidad']),
             'precioUnitario': _f2(l['precio']), 'precioItem': _f2(l['importe']),
             'codigoImpuesto': cat['codigo_impuesto'].get(l['tasa_iva'], 'G'),
             'tasaIVA': _f2(l['tasa_iva']), 'valorIVA': _f2(l['iva']),

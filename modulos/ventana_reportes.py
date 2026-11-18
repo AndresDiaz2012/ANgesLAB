@@ -112,8 +112,17 @@ def show_reportes(db, app, usuario=''):
         t = l['totales']
         pie = [('', '', '', 'TOTALES', '', '', '', '', t['total'], t['exento'], t['base'], '',
                 t['iva'], t['retenido'])]
-        return filas, pie, 'Bs: total %s  exento %s  base %s  IVA %s  IVA retenido %s' % (
+        texto = 'Bs: total %s  exento %s  base %s  IVA %s  IVA retenido %s' % (
             _fmt(t['total']), _fmt(t['exento']), _fmt(t['base']), _fmt(t['iva']), _fmt(t['retenido']))
+        if l.get('avisos'):
+            # El libro va en bolivares: si un documento en divisas no tiene
+            # tasa, su importe no esta convertido y el total no cuadra
+            texto += ('\nATENCION: %d documento(s) en divisas sin tasa de cambio (%s%s). '
+                      'Su importe NO esta en bolivares: cargue la tasa del dia en '
+                      'Configuracion y vuelva a emitirlos.'
+                      % (len(l['avisos']), ', '.join(l['avisos'][:6]),
+                         '...' if len(l['avisos']) > 6 else ''))
+        return filas, pie, texto
     Reporte(nb, 'Libro de ventas', ('N', 'Fecha', 'RIF/CI', 'Razon social', 'Tipo', 'Documento',
                                     'Control', 'Afecta a', 'Total Bs', 'Exento', 'Base', 'Alic. %',
                                     'IVA', 'IVA retenido'),

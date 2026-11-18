@@ -332,5 +332,46 @@ class TestCrearFacturaConHKA(unittest.TestCase):
         self.assertEqual(db.query_one("SELECT ClienteID FROM Facturas WHERE FacturaID=%d" % fid)['ClienteID'], cid)
 
 
+class TestCantidadQueSeLeManda(unittest.TestCase):
+    """
+    La cantidad va en digitos, nunca en notacion cientifica.
+
+    Decimal('10').normalize() devuelve '1E+1': una linea de diez frascos se
+    le mandaba asi a HKA. Como las pruebas de laboratorio van de a una, el
+    fallo solo asomaba al vender productos.
+    """
+
+    @staticmethod
+    def _con_cantidad(cantidad):
+        db = base()
+        db.execute("INSERT INTO Facturas (NumeroFactura, FechaEmision, PacienteID, CondicionPago, "
+                   "MontoIVA, MontoTotal, MonedaFactura, TasaCambioDia, TipoDocumento, Anulada) "
+                   "VALUES ('FAC-2027-000099', '2027-04-20 10:15:30', 5, 'Contado', 16, 116, "
+                   "'VES', 1, 'Factura', 0)")
+        fid = db.query_one("SELECT MAX(FacturaID) AS I FROM Facturas")['I']
+        db.execute("INSERT INTO DetalleFacturas (FacturaID, PruebaID, Descripcion, Cantidad, "
+                   "SubTotal, MontoIVA, Total, Exonerada) VALUES (%d, NULL, 'Frascos', %s, 100, "
+                   "16, 116, 0)" % (fid, cantidad))
+        doc = em.documento_fiscal(db, fid)
+        return em.json_hka(doc)['documentoElectronico']['detallesItems'][0]['cantidad']
+
+    def test_diez_frascos_van_como_diez(self):
+        self.assertEqual(self._con_cantidad(10), '10')
+
+    def test_cien_frascos_van_como_cien(self):
+        self.assertEqual(self._con_cantidad(100), '100')
+
+    def test_uno_sigue_siendo_uno(self):
+        self.assertEqual(self._con_cantidad(1), '1')
+
+    def test_nunca_lleva_una_e(self):
+        for cantidad in (1, 2, 10, 20, 100, 1000, 2500):
+            self.assertNotIn('E', self._con_cantidad(cantidad))
+
+    def test_la_fraccion_se_conserva(self):
+        self.assertEqual(em._cantidad(Decimal('2.5')), '2.5')
+        self.assertEqual(em._cantidad(Decimal('0.25')), '0.25')
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -521,3 +521,28 @@ def parsear_monto(texto, defecto=None):
 def crear_gestor_tasas(db):
     """Crea una instancia de GestorTasasCambio."""
     return GestorTasasCambio(db)
+
+
+def tasa_guardada(db, moneda='USD'):
+    """
+    La ultima tasa guardada de esa moneda, o None si no hay ninguna.
+
+    `get_tasa_actual` devuelve 1.0 cuando no encuentra nada: sirve para
+    mostrar algo en pantalla, pero no para un documento fiscal. Una factura
+    en dolares con tasa 1 dice que un dolar vale un bolivar, y el libro de
+    ventas -que va en bolivares- sale con el importe en dolares. Quien tenga
+    que decidir si puede seguir sin tasa necesita el None.
+    """
+    try:
+        moneda_esc = str(moneda).replace("'", "''")
+        fila = db.query_one("SELECT TOP 1 Tasa FROM TasasCambio WHERE Moneda='%s' "
+                            "ORDER BY Fecha DESC" % moneda_esc)
+    except Exception as e:
+        logging.getLogger("angeslab.tasas_cambio").warning(
+            "[TASAS] No se pudo leer la tasa guardada de %s: %s", moneda, e)
+        return None
+    try:
+        tasa = float((fila or {}).get('Tasa') or 0)
+    except (TypeError, ValueError):
+        return None
+    return tasa if tasa > 0 else None

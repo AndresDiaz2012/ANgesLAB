@@ -94,6 +94,10 @@ def libro_ventas(db, desde, hasta):
     que figuran con importes en cero. Una nota de credito resta. Una
     factura que HKA aun no emitio no esta en el libro: todavia no existe
     fiscalmente.
+
+    'avisos' trae los documentos en divisas que no tienen tasa de cambio:
+    sus importes NO estan en bolivares y el libro no cuadra hasta que se
+    cargue la tasa y se vuelvan a emitir.
     """
     desde, hasta, d_sql, h_sql = _rango(desde, hasta)
     facturas = db.query(
@@ -110,12 +114,21 @@ def libro_ventas(db, desde, hasta):
             afectadas[int(a['FacturaID'])] = a.get('NumeroFactura')
 
     registros = []
+    avisos = []
     tot = {k: Decimal('0') for k in ('total', 'exento', 'base', 'iva', 'retenido')}
     for i, f in enumerate(facturas, 1):
         moneda = str(f.get('MonedaFactura') or 'USD').upper()
         tasa = _d(f.get('TasaCambioDia'))
-        en_bs = moneda in ('VES', 'BS', 'BS.') or tasa <= 0
-        a_bs = (lambda m: _q(m)) if en_bs else (lambda m, t=tasa: _q(_d(m) * t))
+        en_bs = moneda in ('VES', 'BS', 'BS.')
+        # Un documento en divisas sin tasa no se puede llevar a bolivares.
+        # Antes se tomaba por bolivares y el libro salia corto en la
+        # proporcion de la tasa -un dolar contado como un bolivar- sin que
+        # nadie se enterara. Ahora va con su importe tal cual y se avisa.
+        sin_tasa = not en_bs and tasa <= 0
+        a_bs = (lambda m: _q(m)) if (en_bs or sin_tasa) \
+            else (lambda m, t=tasa: _q(_d(m) * t))
+        if sin_tasa:
+            avisos.append(str(f.get('NumeroFactura') or f.get('FacturaID')))
         signo = Decimal('-1') if f.get('TipoDocumento') == 'NC' else Decimal('1')
         anulada = bool(f.get('Anulada'))
         k = Decimal('0') if anulada else signo
@@ -131,7 +144,7 @@ def libro_ventas(db, desde, hasta):
             'iva': a_bs(f.get('MontoIVA')) * k,
             'iva_retenido': Decimal('0') if anulada else retenido.get(int(f['FacturaID']), Decimal('0')),
             'contingencia': f.get('Emisor') == 'Contingencia',
-            'moneda_original': moneda, 'tasa': tasa,
+            'moneda_original': moneda, 'tasa': tasa, 'sin_tasa': sin_tasa,
         }
         registros.append(fila)
         tot['total'] += fila['total']
@@ -139,7 +152,8 @@ def libro_ventas(db, desde, hasta):
         tot['base'] += fila['base_imponible']
         tot['iva'] += fila['iva']
         tot['retenido'] += fila['iva_retenido']
-    return {'desde': desde, 'hasta': hasta, 'registros': registros, 'totales': tot}
+    return {'desde': desde, 'hasta': hasta, 'registros': registros, 'totales': tot,
+            'avisos': avisos}
 
 
 # ══════════════════════════════════════════════════════════════════════════

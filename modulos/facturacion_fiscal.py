@@ -97,6 +97,48 @@ def igtf_corresponde(config):
     return bool(config.get('IGTFActivo') or False)
 
 
+def tasa_del_documento(db, gestor_tasas=None):
+    """
+    La tasa BCV con la que se emite un documento en divisas, o None.
+
+    El documento fiscal va en bolivares (art. 8 de la SNAT/2026/00093), asi
+    que una factura en dolares necesita la tasa del dia para expresar sus
+    importes. Antes `crear_factura` empezaba con 1.0 y solo la buscaba si
+    quien llamaba le pasaba un gestor de tasas; la pantalla de solicitudes
+    -por donde salen las facturas del laboratorio- no se lo pasa, de modo
+    que toda factura quedaba guardada con tasa 1: el libro de ventas tomaba
+    los dolares por bolivares y el documento que se le manda a la imprenta
+    digital habria llevado importes en dolares rotulados como VES.
+
+    Devuelve None si no hay ninguna tasa guardada, y entonces la factura se
+    guarda sin tasa: no se puede emitir (emision.documento_fiscal lo
+    rechaza) hasta que se cargue, que es lo correcto. Nunca inventa un 1.0.
+    """
+    tasa = None
+    if gestor_tasas is not None:
+        try:
+            tasa = float(gestor_tasas.get_tasa_actual('USD') or 0) or None
+        except Exception as e:
+            _log.warning("tasa_del_documento: gestor de tasas: %s", e)
+    if tasa and tasa != 1.0:
+        return tasa
+    # 1.0 es lo que devuelve get_tasa_actual cuando no encuentra nada, asi
+    # que se comprueba contra lo guardado antes de darlo por bueno
+    try:
+        from modulos.tasas_cambio import tasa_guardada
+        guardada = tasa_guardada(db, 'USD')
+    except Exception as e:
+        _log.warning("tasa_del_documento: tasa guardada: %s", e)
+        guardada = None
+    if guardada:
+        return guardada
+    if tasa:
+        return tasa
+    _log.warning("tasa_del_documento: no hay tasa BCV guardada; el documento queda sin tasa "
+                 "y no se podra emitir hasta cargarla")
+    return None
+
+
 class ConfiguracionFiscal:
     """Configuracion fiscal del sistema"""
 
@@ -556,18 +598,14 @@ class FacturacionFiscal:
             detalles, descuento, es_exonerada, forma_pago
         )
 
-        # Obtener tasa de cambio para montos duales
-        tasa_cambio = 1.0
-        if gestor_tasas:
-            try:
-                tasa_cambio = gestor_tasas.get_tasa_actual('USD')
-            except Exception:
-                tasa_cambio = 1.0
+        # La tasa BCV del dia, de quien la tenga: el documento va en
+        # bolivares, y sin tasa no hay con que convertirlo (tasa_del_documento)
+        tasa_cambio = tasa_del_documento(self.db, gestor_tasas)
 
         # Calcular montos duales (USD y Bs)
         total_factura = totales['total_con_igtf'] if totales['aplica_igtf'] else totales['total']
         total_dec = Decimal(str(total_factura))
-        tasa_dec = Decimal(str(tasa_cambio))
+        tasa_dec = Decimal(str(tasa_cambio or 0))
 
         if moneda == 'USD':
             monto_total_usd = float(total_dec)

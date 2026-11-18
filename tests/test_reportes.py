@@ -229,5 +229,43 @@ class TestGestion(unittest.TestCase):
                          (Decimal('17.00'), Decimal('6.00'), Decimal('11.00')))
 
 
+class TestFacturaSinTasa(unittest.TestCase):
+    """
+    Una factura en divisas sin tasa no se puede llevar a bolivares.
+
+    Se tomaba por bolivares: 100 dolares entraban al libro como 100 Bs en
+    vez de 4.000, y el libro salia corto en la proporcion de la tasa sin que
+    nadie se enterara. Ahora el documento va con su importe tal cual y el
+    libro avisa de cual es.
+    """
+
+    def setUp(self):
+        self.db = base_facturas()
+
+    def test_el_libro_avisa_y_la_senala(self):
+        factura(self.db, HOY, 100, control='00-1', tasa=40)
+        factura(self.db, HOY, 100, control='00-2', tasa=0)
+        libro = rp.libro_ventas(self.db, HOY, HOY)
+        self.assertEqual(libro['avisos'], ['FAC-00-2'])
+        sin_tasa = [r for r in libro['registros'] if r['sin_tasa']]
+        self.assertEqual([r['numero_factura'] for r in sin_tasa], ['FAC-00-2'])
+
+    def test_no_cuenta_un_dolar_como_un_bolivar(self):
+        factura(self.db, HOY, 100, control='00-1', tasa=40)
+        con_tasa = rp.libro_ventas(self.db, HOY, HOY)['totales']['total']
+        self.assertEqual(con_tasa, Decimal('4000.00'))
+
+    def test_sin_avisos_cuando_todas_tienen_tasa(self):
+        factura(self.db, HOY, 100, control='00-1', tasa=40)
+        self.assertEqual(rp.libro_ventas(self.db, HOY, HOY)['avisos'], [])
+
+    def test_una_factura_en_bolivares_no_necesita_tasa(self):
+        fid = factura(self.db, HOY, 100, control='00-3', tasa=0)
+        self.db.execute("UPDATE Facturas SET MonedaFactura='VES' WHERE FacturaID=%d" % fid)
+        libro = rp.libro_ventas(self.db, HOY, HOY)
+        self.assertEqual(libro['avisos'], [])
+        self.assertEqual(libro['totales']['total'], Decimal('100.00'))
+
+
 if __name__ == '__main__':
     unittest.main()
