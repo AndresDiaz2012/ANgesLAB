@@ -139,24 +139,96 @@ class ConfigPortal:
             return False
 
 
-def ip_lan():
-    """Detecta la IP del equipo en la red local (sin enviar trafico real)."""
+def _prioridad_ip(ip):
+    """
+    Cuanto sirve una direccion para que el telefono del paciente, en la sala
+    de espera, llegue a esta PC. Mayor es mejor; 0 es que no sirve.
+
+    La red de una clinica es 192.168.x.x casi siempre, y 172.16-31.x.x o
+    10.x.x.x en instalaciones mas grandes. Un tunel de VPN suele repartir
+    direcciones 10.x, asi que la LAN de siempre gana. 169.254.x.x es lo que
+    se asigna una tarjeta que no encontro DHCP -un cable suelto- y no lleva
+    a ninguna parte.
+    """
+    partes = str(ip or '').split('.')
+    if len(partes) != 4 or not all(p.isdigit() and len(p) <= 3 for p in partes):
+        return 0
+    o = [int(p) for p in partes]
+    if any(n > 255 for n in o):
+        return 0
+    if o[0] == 127 or (o[0], o[1]) == (169, 254):
+        return 0
+    if (o[0], o[1]) == (192, 168):
+        return 4
+    if o[0] == 172 and 16 <= o[1] <= 31:
+        return 3
+    if o[0] == 10:
+        return 2
+    return 1   # una IP publica: raro en una clinica, pero alcanzable
+
+
+def _ips_del_equipo():
+    """Las IPv4 de esta PC, por los dos caminos que ofrece el sistema."""
+    ips = []
+    lectores = (
+        lambda: [i[4][0] for i in socket.getaddrinfo(socket.gethostname(),
+                                                     None, socket.AF_INET)],
+        lambda: socket.gethostbyname_ex(socket.gethostname())[2],
+    )
+    for leer in lectores:
+        try:
+            for ip in leer():
+                if ip not in ips:
+                    ips.append(ip)
+        except Exception:
+            continue
+    return ips
+
+
+def _ip_de_la_ruta():
+    """La IP de la interfaz por donde sale la ruta por defecto, o None."""
     s = None
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(('8.8.8.8', 80))
+        s.connect(('8.8.8.8', 80))   # no envia trafico: solo elige la ruta
         return s.getsockname()[0]
     except Exception:
-        try:
-            return socket.gethostbyname(socket.gethostname())
-        except Exception:
-            return '127.0.0.1'
+        return None
     finally:
         if s:
             try:
                 s.close()
             except Exception:
                 pass
+
+
+def ip_lan():
+    """
+    La IP de esta PC en la red local: la que el telefono del paciente tiene
+    que poder alcanzar cuando escanea el QR del recibo.
+
+    No vale la direccion del tunel de una VPN. Con Proton VPN encendida la
+    ruta por defecto sale por el tunel, y averiguar la IP abriendo un socket
+    hacia 8.8.8.8 -como se hacia aqui- devolvia la del tunel (10.2.0.2): el
+    QR del recibo llevaba esa direccion y el telefono no llegaba a ninguna
+    parte, aunque el portal estuviera encendido y el firewall permitiera a
+    Python. Es lo que se vio en la clinica el 20/11/2026.
+
+    Se elige por prioridad entre las direcciones del equipo (_prioridad_ip)
+    y, a igualdad, la de la ruta por defecto. Si la red de la clinica fuera
+    10.x y la VPN tambien, el prefijo no alcanza para distinguirlas: para eso
+    esta 'url_publica' en la configuracion del portal.
+    """
+    ruta = _ip_de_la_ruta()
+    candidatas = _ips_del_equipo()
+    if ruta and ruta not in candidatas:
+        candidatas.append(ruta)
+    utiles = [ip for ip in candidatas if _prioridad_ip(ip)]
+    if not utiles:
+        return ruta or '127.0.0.1'
+    tope = max(_prioridad_ip(ip) for ip in utiles)
+    empatadas = [ip for ip in utiles if _prioridad_ip(ip) == tope]
+    return ruta if ruta in empatadas else empatadas[0]
 
 
 # ══════════════════════════════════════════════════════════════════════════
