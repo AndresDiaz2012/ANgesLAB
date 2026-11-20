@@ -153,6 +153,53 @@ class GeneradorPDF:
         return solicitud
 
     # ------------------------------------------------------------------
+    # Resultados capturados de una prueba
+    # ------------------------------------------------------------------
+    def resultados_de_detalle(self, detalle_id, prueba_id=None):
+        """
+        Los parametros con valor de una prueba, en el orden del informe.
+
+        Los valores estan en ResultadosParametros.Valor -uno solo, numerico o
+        de texto- y la unidad sale de Parametros.UnidadID, que es la misma
+        cadena que usa el informe impreso (Parametros -> Unidades.Simbolo).
+
+        Esta consulta pedia r.ValorNumerico, r.ValorTexto y r.UnidadID, que
+        no existen en la base: Access la rechazaba entera, el 'except' de mas
+        arriba se tragaba el error y el PDF salia con el nombre de cada prueba
+        y ninguna cifra debajo. Era el PDF que el paciente abria desde el QR.
+        """
+        if prueba_id is None:
+            # Sin la prueba no hay secuencia: se ordena por nombre
+            sql = f"""
+                SELECT r.Valor, r.ValorReferencia, r.FueraDeRango,
+                       param.NombreParametro, param.Seccion, u.Simbolo
+                FROM ((ResultadosParametros r
+                LEFT JOIN Parametros param ON r.ParametroID = param.ParametroID)
+                LEFT JOIN Unidades u ON param.UnidadID = u.UnidadID)
+                WHERE r.DetalleID = {int(detalle_id)}
+                ORDER BY param.NombreParametro
+            """
+        else:
+            # ParametrosPrueba.Secuencia es el orden en que el bioanalista
+            # los ve y en que salen en el informe impreso
+            sql = f"""
+                SELECT r.Valor, r.ValorReferencia, r.FueraDeRango,
+                       param.NombreParametro, param.Seccion, u.Simbolo,
+                       pp.Secuencia
+                FROM (((ResultadosParametros r
+                LEFT JOIN Parametros param ON r.ParametroID = param.ParametroID)
+                LEFT JOIN Unidades u ON param.UnidadID = u.UnidadID)
+                LEFT JOIN ParametrosPrueba pp ON (pp.ParametroID = r.ParametroID
+                    AND pp.PruebaID = {int(prueba_id)}))
+                WHERE r.DetalleID = {int(detalle_id)}
+                ORDER BY pp.Secuencia, param.NombreParametro
+            """
+        filas = self.db.query(sql) or []
+        # Un parametro sin capturar no se imprime: en el informe impreso
+        # tampoco aparece, y una fila en blanco se lee como un resultado
+        return [f for f in filas if str(f.get('Valor') or '').strip()]
+
+    # ------------------------------------------------------------------
     # Construir elementos del reporte (metodo compartido)
     # ------------------------------------------------------------------
     def _construir_elementos(self, solicitud_id, solicitud):
@@ -228,9 +275,11 @@ class GeneradorPDF:
         # ============================================================
         # Pruebas y resultados
         # ============================================================
+        hay_resultados = False
+        fuera_de_rango = False
         try:
             pruebas = self.db.query(f"""
-                SELECT d.DetalleID, pr.NombrePrueba, a.NombreArea
+                SELECT d.DetalleID, d.PruebaID, pr.NombrePrueba, a.NombreArea
                 FROM (DetalleSolicitudes d
                 LEFT JOIN Pruebas pr ON d.PruebaID = pr.PruebaID)
                 LEFT JOIN Areas a ON pr.AreaID = a.AreaID
@@ -255,16 +304,20 @@ class GeneradorPDF:
 
                     # --- Resultados de esta prueba ---
                     try:
-                        resultados = self.db.query(f"""
-                            SELECT r.ValorNumerico, r.ValorTexto, r.ValorReferencia,
-                                   param.NombreParametro, u.Simbolo
-                            FROM (ResultadosParametros r
-                            LEFT JOIN Parametros param ON r.ParametroID = param.ParametroID)
-                            LEFT JOIN Unidades u ON r.UnidadID = u.UnidadID
-                            WHERE r.DetalleID = {prueba['DetalleID']}
-                        """)
+                        resultados = self.resultados_de_detalle(
+                            prueba['DetalleID'], prueba.get('PruebaID'))
 
+                        if not resultados:
+                            # Un informe con el nombre de la prueba y ninguna
+                            # cifra no es un resultado: que se vea, en vez de
+                            # pasar por un informe vacio
+                            elementos.append(Paragraph(
+                                "Sin resultados capturados para esta prueba.",
+                                ParagraphStyle('SinRes', fontSize=8,
+                                               textColor=colors.HexColor(
+                                                   self.COLOR_TEXTO_CLARO))))
                         if resultados:
+                            hay_resultados = True
                             # Columnas: Parametro | Resultado | Unidad | Referencia
                             c1 = aw * 0.36   # Parametro
                             c2 = aw * 0.18   # Resultado
@@ -292,10 +345,16 @@ class GeneradorPDF:
                                                         textColor=colors.HexColor(self.COLOR_TEXTO))
 
                             for r in resultados:
-                                valor = r.get('ValorNumerico') or r.get('ValorTexto') or '---'
+                                valor = str(r.get('Valor') or '').strip()
+                                # Lo que esta fuera del rango se marca, como en
+                                # el informe impreso: un valor alto sin senalar
+                                # se lee como normal
+                                if r.get('FueraDeRango'):
+                                    valor = f"{valor} *"
+                                    fuera_de_rango = True
                                 datos_res.append([
                                     Paragraph(str(r.get('NombreParametro') or ''), s_td),
-                                    Paragraph(str(valor), s_td_bold),
+                                    Paragraph(valor, s_td_bold),
                                     Paragraph(str(r.get('Simbolo') or ''), s_td),
                                     Paragraph(str(r.get('ValorReferencia') or ''), s_td),
                                 ])
@@ -335,16 +394,37 @@ class GeneradorPDF:
 
                             tabla_res.setStyle(TableStyle(estilo_res))
                             elementos.append(tabla_res)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        # Este 'except' callado es el que escondio durante
+                        # meses que la consulta de resultados estaba mal: el
+                        # PDF salia sin cifras y nadie veia el error
+                        _log_envio.error(
+                            "Resultados del detalle %s no cargados: %s",
+                            prueba.get('DetalleID'), e, exc_info=True)
+                        elementos.append(Paragraph(
+                            "No se pudieron cargar los resultados de esta prueba.",
+                            ParagraphStyle('ErrRes', fontSize=8,
+                                           textColor=colors.HexColor('#b00020'))))
 
                     # Espaciado entre secciones de prueba
                     elementos.append(Spacer(1, 4 * mm))
+
+                if fuera_de_rango:
+                    elementos.append(Paragraph(
+                        "* Fuera del valor de referencia.",
+                        ParagraphStyle('NotaRango', fontSize=7.5,
+                                       textColor=colors.HexColor(self.COLOR_TEXTO_CLARO))))
+                if not hay_resultados:
+                    _log_envio.warning(
+                        "Solicitud %s: informe sin ningun resultado capturado",
+                        solicitud_id)
             else:
                 elementos.append(Paragraph(
                     "No hay pruebas registradas para esta solicitud.",
                     ParagraphStyle('NoPruebas', fontSize=8)))
-        except Exception:
+        except Exception as e:
+            _log_envio.error("No se pudieron cargar las pruebas de la solicitud %s: %s",
+                             solicitud_id, e, exc_info=True)
             elementos.append(Paragraph(
                 "No se pudieron cargar las pruebas.",
                 ParagraphStyle('Error', fontSize=8)))
