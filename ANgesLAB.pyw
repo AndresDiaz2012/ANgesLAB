@@ -13162,6 +13162,13 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
             _pdf_sexo = sol.get('Sexo')  # 'M' o 'F'
             _pdf_fn = sol.get('FechaNacimiento')  # datetime o None
 
+            # Qué dice el informe de cada parámetro -valor, unidad y rango
+            # de referencia- lo decide modulos/informe_resultados.py, el
+            # mismo que usa el informe del portal (QR). Aquí sólo se le da
+            # el formato del papel.
+            from modulos import informe_resultados as _informe
+            _simbolos_unidad = _informe.simbolos_de_unidad(db)
+
             # Gestación: la casilla de la solicitud o, si no se marcó, lo que
             # diga el diagnóstico. Suman en vez de excluirse: dejar de advertir
             # sobre un antibiótico en una gestante es peor que advertir de más,
@@ -13724,24 +13731,22 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                         ))
                     continue   # No usar el render generico para GTT
 
-                # Obtener parámetros de la prueba
-                parametros = db.query(f"""
-                    SELECT pp.ParametroID, pp.Secuencia,
-                           par.NombreParametro, par.UnidadID,
-                           par.Observaciones as ValorRefBase, par.Seccion
-                    FROM ParametrosPrueba pp
-                    INNER JOIN Parametros par ON pp.ParametroID = par.ParametroID
-                    WHERE pp.PruebaID = {prueba_id}
-                    ORDER BY pp.Secuencia
-                """)
+                # Los parámetros de la prueba y lo que el informe dice de
+                # cada uno: una consulta por prueba en vez de dos por
+                # parámetro, y la misma regla que el informe del portal
+                parametros = _informe.parametros_de_prueba(db, prueba_id)
+                _filas_informe = {
+                    f['parametro_id']: f
+                    for f in _informe.parametros_del_informe(
+                        db, detalle_id, prueba_id, sexo=_pdf_sexo,
+                        fecha_nacimiento=_pdf_fn,
+                        gestor_ref=getattr(self, 'gestor_ref', None),
+                        unidades=_simbolos_unidad)}
 
-                # Resolver símbolo de unidad por separado (ADODB no soporta alias en LEFT JOIN)
                 for param in (parametros or []):
                     unidad_sim = ''
                     if param.get('UnidadID'):
-                        u_row = db.query_one(f"SELECT Simbolo FROM Unidades WHERE UnidadID = {param['UnidadID']}")
-                        if u_row:
-                            unidad_sim = u_row.get('Simbolo') or ''
+                        unidad_sim = _simbolos_unidad.get(int(param['UnidadID'])) or ''
                     param['UnidadSimbolo'] = self._formato_superindice(unidad_sim, para_pdf=True)
 
                 if not parametros:
@@ -13770,32 +13775,11 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                     # Clasificar parametros por seccion
                     secciones_micro = {}
                     for param in parametros:
-                        resultado = db.query_one(f"""
-                            SELECT Valor, ValorReferencia FROM ResultadosParametros
-                            WHERE DetalleID = {detalle_id} AND ParametroID = {param['ParametroID']}
-                        """)
-                        valor = resultado.get('Valor') if resultado else ''
-                        if valor is None:
-                            valor = ''
-                        valor_str = str(valor).strip()
-                        if not valor_str:
-                            continue
-
-                        # ValorReferencia: resolución por edad/sexo → ResultadosParametros → Parametros
-                        vref = ''
-                        if VALORES_REF_DISPONIBLE and self.gestor_ref and _pdf_fn:
-                            try:
-                                _ref_esp = self.gestor_ref.resolver_valor_referencia(
-                                    param['ParametroID'], _pdf_sexo, _pdf_fn
-                                )
-                                if _ref_esp:
-                                    vref = _ref_esp
-                            except Exception as _exc:
-                                _log.warning("generar_pdf_resultados: %s", _exc)
-                        if not vref and resultado:
-                            vref = str(resultado.get('ValorReferencia') or '').strip()
-                        if not vref:
-                            vref = str(param.get('ValorRefBase') or '').strip()
+                        _fila = _filas_informe.get(int(param['ParametroID']))
+                        if not _fila:
+                            continue   # sin valor capturado: no se informa
+                        valor_str = _fila['valor']
+                        vref = _fila['referencia']
 
                         seccion = param.get('Seccion') or 'General'
                         if seccion not in secciones_micro:
@@ -13804,7 +13788,8 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                             'nombre': param['NombreParametro'] or '',
                             'valor': valor_str,
                             'valor_ref': self._formato_superindice(vref, para_pdf=True),
-                            'unidad_simbolo': param.get('UnidadSimbolo') or '',
+                            'unidad_simbolo': self._formato_superindice(
+                                _fila['unidad'] or '', para_pdf=True),
                         })
 
                     # Germenes aislados en esta prueba. Con dos aislamientos
@@ -14257,14 +14242,8 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                     _area_elements_pre.append(header_table)
 
                 # Marcar inicio de prueba con cantidad de parámetros con valor
-                _n_params_con_valor = 0
-                for _pp in parametros:
-                    _rv = db.query_one(f"""
-                        SELECT Valor FROM ResultadosParametros
-                        WHERE DetalleID = {detalle_id} AND ParametroID = {_pp['ParametroID']}
-                    """)
-                    if _rv and str(_rv.get('Valor') or '').strip():
-                        _n_params_con_valor += 1
+                _n_params_con_valor = sum(1 for _pp in parametros
+                                          if int(_pp['ParametroID']) in _filas_informe)
                 _area_param_data.append(['__PRUEBA__', nombre_prueba, str(_n_params_con_valor), ''])
 
                 # Datos de parámetros
@@ -14280,19 +14259,11 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                 seccion_actual = self._pdf_seccion_actual
 
                 for param in parametros:
-                    # Obtener resultado + ValorReferencia real almacenado
-                    resultado = db.query_one(f"""
-                        SELECT Valor, ValorReferencia FROM ResultadosParametros
-                        WHERE DetalleID = {detalle_id} AND ParametroID = {param['ParametroID']}
-                    """)
-                    valor = resultado.get('Valor') if resultado else ''
-                    if valor is None:
-                        valor = ''
-
-                    # IMPORTANTE: Solo incluir parámetros que tengan valor asignado
-                    valor_str = str(valor).strip()
-                    if not valor_str:
-                        continue  # No incluir parámetros sin valor en el reporte
+                    # Lo que el informe dice de este parámetro
+                    resultado = _filas_informe.get(int(param['ParametroID']))
+                    if not resultado:
+                        continue  # sin valor capturado: no se informa
+                    valor_str = resultado['valor']
 
                     # Verificar si hay cambio de sección
                     # Solo agregar header si la sección no fue emitida antes en esta área
@@ -14335,62 +14306,14 @@ Fecha de impresión: {datetime.now().strftime('%d/%m/%Y %H:%M')}
                         self._pdf_secciones_emitidas.add(seccion_upper)
                         _area_param_data.append([seccion_upper, '', '', ''])
 
-                    # Valor referencia: prioridad → resolución por edad/sexo
-                    #                   fallback  → cálculos automáticos (por sexo+edad)
-                    #                   fallback  → ResultadosParametros.ValorReferencia
-                    #                   fallback  → Parametros.Observaciones
-                    valor_ref = ''
-                    # Intentar resolver por edad/sexo (módulo valores_referencia)
-                    if VALORES_REF_DISPONIBLE and self.gestor_ref and _pdf_fn:
-                        try:
-                            _ref_esp = self.gestor_ref.resolver_valor_referencia(
-                                param['ParametroID'], _pdf_sexo, _pdf_fn
-                            )
-                            if _ref_esp:
-                                valor_ref = _ref_esp
-                        except Exception as _exc:
-                            _log.warning("generar_pdf_resultados: %s", _exc)
-                    # Para parámetros calculados: resolver referencia por sexo+edad
-                    if not valor_ref and CALCULOS_AUTOMATICOS_DISPONIBLE:
-                        try:
-                            _calc = obtener_calculador()
-                            _nombre_norm = _calc.normalizar_nombre(param['NombreParametro'] or '')
-                            if _nombre_norm:
-                                _edad_pac = None
-                                if _pdf_fn:
-                                    _hoy = datetime.now()
-                                    _edad_pac = _hoy.year - _pdf_fn.year - ((_hoy.month, _hoy.day) < (_pdf_fn.month, _pdf_fn.day))
-                                _ref_calc = _calc.obtener_referencia_calculo(_nombre_norm, _pdf_sexo, _edad_pac)
-                                if _ref_calc:
-                                    valor_ref = _ref_calc
-                        except Exception as _exc:
-                            _log.warning("generar_pdf_resultados: %s", _exc)
-                    # Fallback a lo guardado en ResultadosParametros
-                    if not valor_ref and resultado:
-                        valor_ref = str(resultado.get('ValorReferencia') or '').strip()
-                    # Fallback a Parametros.Observaciones
-                    if not valor_ref:
-                        valor_ref = str(param.get('ValorRefBase') or '').strip()
-
-                    # Unidad: prioridad → Parametros.UnidadID → Unidades.Simbolo
-                    #         fallback  → extraer del texto de ValorReferencia
-                    unidad_texto = param.get('UnidadSimbolo') or ''
-                    if not unidad_texto and valor_ref:
-                        # Extraer unidad del final del ValorReferencia
-                        # Ej: "( 70 - 110 ) mg/dL" → "mg/dL"
-                        #     "12.0 - 17.0 g/dL"   → "g/dL"
-                        #     "37 - 52 %"           → "%"
-                        import re
-                        _m_unidad = re.search(
-                            r'[\d\)\s]'                       # después de dígito, cierre parén o espacio
-                            r'\s+'                             # espacio(s) separador
-                            r'([a-zA-Zµμ%/\^°×x]'             # inicio de unidad (letra, %, /, etc.)
-                            r'[a-zA-Z0-9µμ%/\^°×³⁶⁹·.\- ]*'  # resto de la unidad
-                            r')$',                             # hasta el final del string
-                            valor_ref
-                        )
-                        if _m_unidad:
-                            unidad_texto = _m_unidad.group(1).strip()
+                    # El rango de referencia y la unidad los resuelve
+                    # informe_resultados con sus cuatro pasos (edad y sexo,
+                    # cálculo automático, lo guardado al capturar, el valor
+                    # base del parámetro) y, si el parámetro no tiene
+                    # unidad, la que venga al final del rango. La misma
+                    # regla que el informe del portal.
+                    valor_ref = resultado['referencia']
+                    unidad_texto = resultado['unidad'] or ''
 
                     nombre_param = '   ' + (param['NombreParametro'] or '')
 

@@ -68,6 +68,7 @@ class GeneradorPDF:
 
     def __init__(self, db):
         self.db = db
+        self._cache_unidades = None
         self._cargar_config()
 
     def _cargar_config(self):
@@ -142,6 +143,7 @@ class GeneradorPDF:
         solicitud = self.db.query_one(f"""
             SELECT s.SolicitudID, s.NumeroSolicitud, s.FechaSolicitud, s.EstadoSolicitud,
                    p.Nombres, p.Apellidos, p.NumeroDocumento, p.Sexo, p.Edad,
+                   p.FechaNacimiento,
                    m.Nombres as MedicoNombres, m.Apellidos as MedicoApellidos
             FROM (Solicitudes s
             LEFT JOIN Pacientes p ON s.PacienteID = p.PacienteID)
@@ -155,49 +157,33 @@ class GeneradorPDF:
     # ------------------------------------------------------------------
     # Resultados capturados de una prueba
     # ------------------------------------------------------------------
-    def resultados_de_detalle(self, detalle_id, prueba_id=None):
+    def resultados_de_detalle(self, detalle_id, prueba_id=None, sexo=None,
+                              fecha_nacimiento=None):
         """
         Los parametros con valor de una prueba, en el orden del informe.
 
-        Los valores estan en ResultadosParametros.Valor -uno solo, numerico o
-        de texto- y la unidad sale de Parametros.UnidadID, que es la misma
-        cadena que usa el informe impreso (Parametros -> Unidades.Simbolo).
-
-        Esta consulta pedia r.ValorNumerico, r.ValorTexto y r.UnidadID, que
-        no existen en la base: Access la rechazaba entera, el 'except' de mas
-        arriba se tragaba el error y el PDF salia con el nombre de cada prueba
-        y ninguna cifra debajo. Era el PDF que el paciente abria desde el QR.
+        La regla -que parametros, en que orden, con que unidad y con que rango
+        de referencia- esta en modulos/informe_resultados.py, que es la misma
+        que usa el informe impreso. Aqui no se repite: con dos copias, el
+        informe que el paciente abre desde el QR y el que se le entrega en el
+        mostrador vuelven a decir cosas distintas.
         """
+        from modulos import informe_resultados
         if prueba_id is None:
-            # Sin la prueba no hay secuencia: se ordena por nombre
-            sql = f"""
-                SELECT r.Valor, r.ValorReferencia, r.FueraDeRango,
-                       param.NombreParametro, param.Seccion, u.Simbolo
-                FROM ((ResultadosParametros r
-                LEFT JOIN Parametros param ON r.ParametroID = param.ParametroID)
-                LEFT JOIN Unidades u ON param.UnidadID = u.UnidadID)
-                WHERE r.DetalleID = {int(detalle_id)}
-                ORDER BY param.NombreParametro
-            """
-        else:
-            # ParametrosPrueba.Secuencia es el orden en que el bioanalista
-            # los ve y en que salen en el informe impreso
-            sql = f"""
-                SELECT r.Valor, r.ValorReferencia, r.FueraDeRango,
-                       param.NombreParametro, param.Seccion, u.Simbolo,
-                       pp.Secuencia
-                FROM (((ResultadosParametros r
-                LEFT JOIN Parametros param ON r.ParametroID = param.ParametroID)
-                LEFT JOIN Unidades u ON param.UnidadID = u.UnidadID)
-                LEFT JOIN ParametrosPrueba pp ON (pp.ParametroID = r.ParametroID
-                    AND pp.PruebaID = {int(prueba_id)}))
-                WHERE r.DetalleID = {int(detalle_id)}
-                ORDER BY pp.Secuencia, param.NombreParametro
-            """
-        filas = self.db.query(sql) or []
-        # Un parametro sin capturar no se imprime: en el informe impreso
-        # tampoco aparece, y una fila en blanco se lee como un resultado
-        return [f for f in filas if str(f.get('Valor') or '').strip()]
+            # Sin la prueba no hay ParametrosPrueba del que sacar el orden
+            _log_envio.warning("Detalle %s sin prueba: no se puede armar el informe",
+                               detalle_id)
+            return []
+        return informe_resultados.parametros_del_informe(
+            self.db, detalle_id, prueba_id, sexo=sexo,
+            fecha_nacimiento=fecha_nacimiento, unidades=self._unidades())
+
+    def _unidades(self):
+        """Los simbolos de unidad, leidos una vez por informe."""
+        if getattr(self, '_cache_unidades', None) is None:
+            from modulos import informe_resultados
+            self._cache_unidades = informe_resultados.simbolos_de_unidad(self.db)
+        return self._cache_unidades
 
     # ------------------------------------------------------------------
     # Construir elementos del reporte (metodo compartido)
@@ -305,7 +291,9 @@ class GeneradorPDF:
                     # --- Resultados de esta prueba ---
                     try:
                         resultados = self.resultados_de_detalle(
-                            prueba['DetalleID'], prueba.get('PruebaID'))
+                            prueba['DetalleID'], prueba.get('PruebaID'),
+                            sexo=solicitud.get('Sexo'),
+                            fecha_nacimiento=solicitud.get('FechaNacimiento'))
 
                         if not resultados:
                             # Un informe con el nombre de la prueba y ninguna
@@ -345,18 +333,18 @@ class GeneradorPDF:
                                                         textColor=colors.HexColor(self.COLOR_TEXTO))
 
                             for r in resultados:
-                                valor = str(r.get('Valor') or '').strip()
+                                valor = r['valor']
                                 # Lo que esta fuera del rango se marca, como en
                                 # el informe impreso: un valor alto sin senalar
                                 # se lee como normal
-                                if r.get('FueraDeRango'):
+                                if r['fuera_de_rango']:
                                     valor = f"{valor} *"
                                     fuera_de_rango = True
                                 datos_res.append([
-                                    Paragraph(str(r.get('NombreParametro') or ''), s_td),
+                                    Paragraph(r['nombre'], s_td),
                                     Paragraph(valor, s_td_bold),
-                                    Paragraph(str(r.get('Simbolo') or ''), s_td),
-                                    Paragraph(str(r.get('ValorReferencia') or ''), s_td),
+                                    Paragraph(r['unidad'] or '', s_td),
+                                    Paragraph(r['referencia'], s_td),
                                 ])
 
                             tabla_res = Table(datos_res, colWidths=col_widths)
